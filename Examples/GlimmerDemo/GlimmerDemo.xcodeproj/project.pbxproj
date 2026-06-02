@@ -1,0 +1,418 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		3EE8CCD12E4862AB006014A9 /* Glimmer in Frameworks */ = {isa = PBXBuildFile; productRef = 3EE8CCD02E4862AB006014A9 /* Glimmer */; };
+/** Added Swift source build files for GlimmerDemo target **/
+		A1F001002E49A00000DEMO01 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F000F02E49A00000DEMO01 /* ContentView.swift */; };
+		A1F001012E49A00000DEMO01 /* EdgeCasesDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F000F12E49A00000DEMO01 /* EdgeCasesDemo.swift */; };
+		A1F001022E49A00000DEMO01 /* GFMDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F000F22E49A00000DEMO01 /* GFMDemo.swift */; };
+		A1F001032E49A00000DEMO01 /* GitHubEmojiDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F000F32E49A00000DEMO01 /* GitHubEmojiDemo.swift */; };
+		A1F001042E49A00000DEMO01 /* GlimmerDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F000F42E49A00000DEMO01 /* GlimmerDemo.swift */; };
+		A1F001052E49A00000DEMO01 /* GlimmerDemoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F000F52E49A00000DEMO01 /* GlimmerDemoApp.swift */; };
+		A1F001062E49A00000DEMO01 /* InlineImageDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F000F62E49A00000DEMO01 /* InlineImageDemo.swift */; };
+		A1F0010D2E49A00000DEMO01 /* TappableImageExample.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F000FD2E49A00000DEMO01 /* TappableImageExample.swift */; };
+		A1F001082E49A00000DEMO01 /* LinterDemoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F000F82E49A00000DEMO01 /* LinterDemoView.swift */; };
+		A1F001092E49A00000DEMO01 /* LivePreviewDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F000F92E49A00000DEMO01 /* LivePreviewDemo.swift */; };
+		A1F0010A2E49A00000DEMO01 /* MainDemos.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F000FA2E49A00000DEMO01 /* MainDemos.swift */; };
+		A1F0010B2E49A00000DEMO01 /* ParallelParsingDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F000FB2E49A00000DEMO01 /* ParallelParsingDemo.swift */; };
+		A1F0010C2E49A00000DEMO01 /* QuickExampleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F000FC2E49A00000DEMO01 /* QuickExampleView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		3EE8CCBB2E48623D006014A9 /* GlimmerDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GlimmerDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/** Added Swift source file references for GlimmerDemo target **/
+		A1F000F02E49A00000DEMO01 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = SOURCE_ROOT; };
+		A1F000F12E49A00000DEMO01 /* EdgeCasesDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeCasesDemo.swift; sourceTree = SOURCE_ROOT; };
+		A1F000F22E49A00000DEMO01 /* GFMDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GFMDemo.swift; sourceTree = SOURCE_ROOT; };
+		A1F000F32E49A00000DEMO01 /* GitHubEmojiDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubEmojiDemo.swift; sourceTree = SOURCE_ROOT; };
+		A1F000F42E49A00000DEMO01 /* GlimmerDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlimmerDemo.swift; sourceTree = SOURCE_ROOT; };
+		A1F000F52E49A00000DEMO01 /* GlimmerDemoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlimmerDemoApp.swift; sourceTree = SOURCE_ROOT; };
+		A1F000F62E49A00000DEMO01 /* InlineImageDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InlineImageDemo.swift; sourceTree = SOURCE_ROOT; };
+		A1F000FD2E49A00000DEMO01 /* TappableImageExample.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TappableImageExample.swift; sourceTree = SOURCE_ROOT; };
+		A1F000F82E49A00000DEMO01 /* LinterDemoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinterDemoView.swift; sourceTree = SOURCE_ROOT; };
+		A1F000F92E49A00000DEMO01 /* LivePreviewDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePreviewDemo.swift; sourceTree = SOURCE_ROOT; };
+		A1F000FA2E49A00000DEMO01 /* MainDemos.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainDemos.swift; sourceTree = SOURCE_ROOT; };
+		A1F000FB2E49A00000DEMO01 /* ParallelParsingDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelParsingDemo.swift; sourceTree = SOURCE_ROOT; };
+		A1F000FC2E49A00000DEMO01 /* QuickExampleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickExampleView.swift; sourceTree = SOURCE_ROOT; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		3EE8CCBD2E48623D006014A9 /* GlimmerDemo */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = GlimmerDemo;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		3EE8CCB82E48623D006014A9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3EE8CCD12E4862AB006014A9 /* Glimmer in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		3EE8CCB22E48623D006014A9 = {
+			isa = PBXGroup;
+			children = (
+				3EE8CCBD2E48623D006014A9 /* GlimmerDemo */,
+				3EE8CCBC2E48623D006014A9 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		3EE8CCBC2E48623D006014A9 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				3EE8CCBB2E48623D006014A9 /* GlimmerDemo.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		3EE8CCBA2E48623D006014A9 /* GlimmerDemo */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3EE8CCC62E48623E006014A9 /* Build configuration list for PBXNativeTarget "GlimmerDemo" */;
+			buildPhases = (
+				3EE8CCB72E48623D006014A9 /* Sources */,
+				3EE8CCB82E48623D006014A9 /* Frameworks */,
+				3EE8CCB92E48623D006014A9 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				3EE8CCBD2E48623D006014A9 /* GlimmerDemo */,
+			);
+			name = GlimmerDemo;
+			packageProductDependencies = (
+				3EE8CCD02E4862AB006014A9 /* Glimmer */,
+			);
+			productName = GlimmerDemo;
+			productReference = 3EE8CCBB2E48623D006014A9 /* GlimmerDemo.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		3EE8CCB32E48623D006014A9 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+					3EE8CCBA2E48623D006014A9 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+				};
+			};
+			buildConfigurationList = 3EE8CCB62E48623D006014A9 /* Build configuration list for PBXProject "GlimmerDemo" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 3EE8CCB22E48623D006014A9;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				3EE8CCCF2E4862AB006014A9 /* XCLocalSwiftPackageReference "../.." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 3EE8CCBC2E48623D006014A9 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				3EE8CCBA2E48623D006014A9 /* GlimmerDemo */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		3EE8CCB92E48623D006014A9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		3EE8CCB72E48623D006014A9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1F001002E49A00000DEMO01 /* ContentView.swift in Sources */,
+				A1F001012E49A00000DEMO01 /* EdgeCasesDemo.swift in Sources */,
+				A1F001022E49A00000DEMO01 /* GFMDemo.swift in Sources */,
+				A1F001032E49A00000DEMO01 /* GitHubEmojiDemo.swift in Sources */,
+				A1F001042E49A00000DEMO01 /* GlimmerDemo.swift in Sources */,
+				A1F001052E49A00000DEMO01 /* GlimmerDemoApp.swift in Sources */,
+				A1F001062E49A00000DEMO01 /* InlineImageDemo.swift in Sources */,
+				A1F0010D2E49A00000DEMO01 /* TappableImageExample.swift in Sources */,
+				A1F001082E49A00000DEMO01 /* LinterDemoView.swift in Sources */,
+				A1F001092E49A00000DEMO01 /* LivePreviewDemo.swift in Sources */,
+				A1F0010A2E49A00000DEMO01 /* MainDemos.swift in Sources */,
+				A1F0010B2E49A00000DEMO01 /* ParallelParsingDemo.swift in Sources */,
+				A1F0010C2E49A00000DEMO01 /* QuickExampleView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		3EE8CCC42E48623E006014A9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = RUV7V2TGVX;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		3EE8CCC52E48623E006014A9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = RUV7V2TGVX;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		3EE8CCC72E48623E006014A9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = RUV7V2TGVX;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dk.wu.GlimmerDemo;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = auto;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+
+			};
+			name = Debug;
+		};
+		3EE8CCC82E48623E006014A9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = RUV7V2TGVX;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dk.wu.GlimmerDemo;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = auto;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		3EE8CCB62E48623D006014A9 /* Build configuration list for PBXProject "GlimmerDemo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3EE8CCC42E48623E006014A9 /* Debug */,
+				3EE8CCC52E48623E006014A9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		3EE8CCC62E48623E006014A9 /* Build configuration list for PBXNativeTarget "GlimmerDemo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3EE8CCC72E48623E006014A9 /* Debug */,
+				3EE8CCC82E48623E006014A9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		3EE8CCCF2E4862AB006014A9 /* XCLocalSwiftPackageReference "../.." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../..;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		3EE8CCD02E4862AB006014A9 /* Glimmer */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Glimmer;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 3EE8CCB32E48623D006014A9 /* Project object */;
+}
