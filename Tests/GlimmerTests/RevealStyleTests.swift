@@ -14,6 +14,7 @@ final class RevealStyleTests: XCTestCase {
         XCTAssertEqual(RevealStyle.shimmer.granularity, .word)
         XCTAssertEqual(RevealStyle.tracking.granularity, .word)
         XCTAssertEqual(RevealStyle.waveGlow.granularity, .word)
+        XCTAssertEqual(RevealStyle.trailFade.granularity, .word)
         XCTAssertEqual(RevealStyle.none.granularity, .word)
     }
 
@@ -28,6 +29,7 @@ final class RevealStyleTests: XCTestCase {
         XCTAssertEqual(RevealStyle.tracking.treatment, .tracking)
         XCTAssertEqual(RevealStyle.diffusion.treatment, .scramble)
         XCTAssertEqual(RevealStyle.waveGlow.treatment, .glow)
+        XCTAssertEqual(RevealStyle.trailFade.treatment, .trailFade)
     }
 
     func testCadencesMatchSpecAppendix() {
@@ -41,11 +43,13 @@ final class RevealStyleTests: XCTestCase {
         XCTAssertEqual(RevealStyle.tracking.nominalUnitIntervalMs, 100...100)
         XCTAssertEqual(RevealStyle.diffusion.nominalUnitIntervalMs, 22...40)
         XCTAssertEqual(RevealStyle.waveGlow.nominalUnitIntervalMs, 105...105)
+        XCTAssertEqual(RevealStyle.trailFade.nominalUnitIntervalMs, 24...36)
     }
 
     func testUnitsPerStep() {
         XCTAssertEqual(RevealStyle.llmTokens.unitsPerStep, 1...4)
-        for style in RevealStyle.allCases where style != .llmTokens {
+        XCTAssertEqual(RevealStyle.trailFade.unitsPerStep, 1...2)
+        for style in RevealStyle.allCases where style != .llmTokens && style != .trailFade {
             XCTAssertEqual(style.unitsPerStep, 1...1, "\(style) should unlock one unit per step")
         }
     }

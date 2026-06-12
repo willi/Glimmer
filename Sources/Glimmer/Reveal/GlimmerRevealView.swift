@@ -69,6 +69,7 @@ public struct GlimmerRevealView: View {
                     animateFrom: driver.animateFrom,
                     treatment: effectiveTreatment,
                     showCaret: showCaret(for: block),
+                    isComplete: driver.isComplete,
                     configuration: configuration,
                     onLinkTap: handleLink
                 )
@@ -166,6 +167,7 @@ struct RevealBlockView: View {
     let animateFrom: Int
     let treatment: RevealTreatment
     let showCaret: Bool
+    let isComplete: Bool
     let configuration: MarkdownConfiguration
     let onLinkTap: (URL) -> Void
 
@@ -203,6 +205,13 @@ struct RevealBlockView: View {
             RevealPrefixTextView(block: block, revealedCount: revealedCount, showCaret: showCaret)
         case .scramble:
             RevealScrambleTextView(block: block, revealedCount: revealedCount)
+        case .trailFade:
+            RevealTrailTextView(
+                block: block,
+                revealedCount: revealedCount,
+                isComplete: isComplete,
+                onLinkTap: onLinkTap
+            )
         default:
             RevealFlowLayout(lineSpacing: 2) {
                 ForEach(visibleWords) { word in
@@ -297,6 +306,63 @@ struct RevealPrefixTextView: View {
     private func caretText(date: Date) -> Text {
         let on = Int(date.timeIntervalSinceReferenceDate * 2).isMultiple(of: 2)
         return Text(prefix) + Text(on ? "▍" : " ")
+    }
+}
+
+/// Trail-fade style (Gemini-like): words stream in fast behind a soft opacity
+/// gradient — the word at the reveal cursor is faintest and brightens as the
+/// cursor sweeps past. Opacity is a pure function of distance from the cursor
+/// (`RevealTrail`), so the whole trail brightens smoothly on every tick and
+/// snaps to full opacity on completion.
+struct RevealTrailTextView: View {
+    let block: RevealBlock
+    let revealedCount: Int
+    let isComplete: Bool
+    let onLinkTap: (URL) -> Void
+
+    var body: some View {
+        RevealFlowLayout(lineSpacing: 2) {
+            ForEach(visibleWords) { word in
+                wordView(word)
+            }
+        }
+        .animation(.easeOut(duration: 0.4), value: revealedCount)
+        .animation(.easeOut(duration: 0.6), value: isComplete)
+    }
+
+    private var visibleWords: [RevealWord] {
+        block.words.filter { word in
+            word.atoms.contains { $0.revealIndex <= revealedCount }
+        }
+    }
+
+    @ViewBuilder private func wordView(_ word: RevealWord) -> some View {
+        if word.isLineBreak {
+            Color.clear
+                .frame(width: 0, height: 0)
+                .revealLineBreak()
+        } else if word.isWhitespace {
+            if case .space(let s) = word.atoms[0].kind {
+                Text(s)
+            }
+        } else if case .text(let s) = word.atoms[0].kind {
+            let opacity = RevealTrail.opacity(
+                revealIndex: word.atoms[0].revealIndex,
+                revealedCount: revealedCount,
+                isComplete: isComplete
+            )
+            if let url = word.atoms[0].url {
+                Text(s)
+                    .opacity(opacity)
+                    .accessibilityHidden(true)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onLinkTap(url) }
+            } else {
+                Text(s)
+                    .opacity(opacity)
+                    .accessibilityHidden(true)
+            }
+        }
     }
 }
 

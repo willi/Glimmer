@@ -91,6 +91,33 @@ final class RevealDriverTests: XCTestCase {
         RevealDriver(configuration: config, store: store ?? RevealProgressStore(), sleep: sleep)
     }
 
+    // MARK: - Trail fade
+
+    func testTrailOpacityNewestWordIsAtFloor() {
+        let newest = RevealTrail.opacity(revealIndex: 10, revealedCount: 10, isComplete: false)
+        XCTAssertEqual(newest, RevealTrail.floor, accuracy: 1e-9)
+    }
+
+    func testTrailOpacityRampsToFullWithDistance() {
+        let halfway = RevealTrail.opacity(revealIndex: 4, revealedCount: 10, isComplete: false)
+        XCTAssertEqual(halfway, RevealTrail.floor + (1 - RevealTrail.floor) * (6 / RevealTrail.length), accuracy: 1e-9)
+        XCTAssertEqual(RevealTrail.opacity(revealIndex: 1, revealedCount: 100, isComplete: false), 1.0)
+    }
+
+    func testTrailOpacityMonotonicAndCapped() {
+        var last = -1.0
+        for distance in 0...20 {
+            let o = RevealTrail.opacity(revealIndex: 50 - distance, revealedCount: 50, isComplete: false)
+            XCTAssertGreaterThanOrEqual(o, last, "opacity must not decrease with distance")
+            XCTAssertLessThanOrEqual(o, 1.0)
+            last = o
+        }
+    }
+
+    func testTrailOpacityFullWhenComplete() {
+        XCTAssertEqual(RevealTrail.opacity(revealIndex: 10, revealedCount: 10, isComplete: true), 1.0)
+    }
+
     func testDrainsToTotalAndCompletes() async {
         let driver = makeDriver(RevealConfiguration(style: .wordFade, isStreaming: false))
         driver.update(totalCountable: 10, isStreaming: false)

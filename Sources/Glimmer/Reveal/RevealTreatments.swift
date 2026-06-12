@@ -59,7 +59,7 @@ struct WaveGlowEffect: ViewModifier, Animatable {
 extension RevealTreatment {
     var entranceAnimation: Animation {
         switch self {
-        case .plain, .caret, .scramble: .linear(duration: 0)
+        case .plain, .caret, .scramble, .trailFade: .linear(duration: 0)
         case .fade: .easeOut(duration: 0.35)
         case .blur: .timingCurve(0.2, 0.7, 0.2, 1, duration: 0.5)
         case .slide: .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.45)
@@ -98,7 +98,9 @@ struct RevealUnitView: View {
     @ViewBuilder private var content: some View {
         let text = Text(attributed)
         switch treatment {
-        case .plain, .caret, .scramble:
+        case .plain, .caret, .scramble, .trailFade:
+            // trailFade never routes here (it has a dedicated cursor-driven
+            // path in RevealTrailTextView); plain text is the safe fallback.
             text
         case .fade:
             text.opacity(p)

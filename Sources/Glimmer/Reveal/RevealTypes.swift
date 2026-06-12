@@ -8,6 +8,9 @@ public enum RevealGranularity: Sendable, Equatable {
 /// The entrance animation applied to each newly revealed unit (spec 4.5).
 public enum RevealTreatment: Sendable, Equatable {
     case plain, caret, fade, blur, slide, dropIn, tracking, glow, shimmer, scramble
+    /// Soft opacity gradient trailing the reveal cursor (Gemini-like): the
+    /// newest words are faintest and brighten as the cursor moves past.
+    case trailFade
 }
 
 // MARK: - RevealStyle
@@ -29,6 +32,7 @@ public enum RevealStyle: String, CaseIterable, Identifiable, Sendable, Equatable
     case tracking
     case diffusion
     case waveGlow
+    case trailFade
 
     public var id: String { rawValue }
 
@@ -45,6 +49,7 @@ public enum RevealStyle: String, CaseIterable, Identifiable, Sendable, Equatable
         case .tracking: "Tracking"
         case .diffusion: "Diffusion"
         case .waveGlow: "Wave Glow"
+        case .trailFade: "Trail Fade"
         }
     }
 
@@ -52,7 +57,7 @@ public enum RevealStyle: String, CaseIterable, Identifiable, Sendable, Equatable
         switch self {
         case .typewriter, .llmTokens, .charCascade, .diffusion: .character
         case .lineSlide: .line
-        case .none, .wordFade, .blurIn, .shimmer, .tracking, .waveGlow: .word
+        case .none, .wordFade, .blurIn, .shimmer, .tracking, .waveGlow, .trailFade: .word
         }
     }
 
@@ -68,6 +73,7 @@ public enum RevealStyle: String, CaseIterable, Identifiable, Sendable, Equatable
         case .tracking: .tracking
         case .diffusion: .scramble
         case .waveGlow: .glow
+        case .trailFade: .trailFade
         }
     }
 
@@ -85,13 +91,16 @@ public enum RevealStyle: String, CaseIterable, Identifiable, Sendable, Equatable
         case .tracking: 100...100
         case .diffusion: 22...40
         case .waveGlow: 105...105
+        case .trailFade: 24...36
         }
     }
 
-    /// Units unlocked per tick (LLM-token chunks unlock 1–4 chars at once).
+    /// Units unlocked per tick (LLM-token chunks unlock 1–4 chars at once;
+    /// trail fade sweeps 1–2 words to match its fast cadence).
     public var unitsPerStep: ClosedRange<Int> {
         switch self {
         case .llmTokens: 1...4
+        case .trailFade: 1...2
         case .none, .typewriter, .wordFade, .blurIn, .lineSlide,
              .charCascade, .shimmer, .tracking, .diffusion, .waveGlow: 1...1
         }
