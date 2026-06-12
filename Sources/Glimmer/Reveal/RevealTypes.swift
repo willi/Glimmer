@@ -1,5 +1,3 @@
-import SwiftUI
-
 // MARK: - Granularity & Treatment
 
 /// The unit a reveal style unlocks at a time (spec R1).
@@ -16,6 +14,10 @@ public enum RevealTreatment: Sendable, Equatable {
 
 /// A named reveal style: granularity + cadence + treatment (spec 4.2, appendix).
 public enum RevealStyle: String, CaseIterable, Identifiable, Sendable, Equatable {
+    /// No reveal: `GlimmerRevealView` renders the full document via the
+    /// standard `MarkdownView` path and never starts the reveal driver.
+    /// (Named `none` to match the reveal spec; avoid `RevealStyle?` in API
+    /// signatures so this never collides with `Optional.none`.)
     case none
     case typewriter
     case llmTokens
@@ -88,7 +90,11 @@ public enum RevealStyle: String, CaseIterable, Identifiable, Sendable, Equatable
 
     /// Units unlocked per tick (LLM-token chunks unlock 1–4 chars at once).
     public var unitsPerStep: ClosedRange<Int> {
-        self == .llmTokens ? 1...4 : 1...1
+        switch self {
+        case .llmTokens: 1...4
+        case .none, .typewriter, .wordFade, .blurIn, .lineSlide,
+             .charCascade, .shimmer, .tracking, .diffusion, .waveGlow: 1...1
+        }
     }
 }
 
@@ -99,8 +105,10 @@ public enum CatchUpPolicy: Sendable, Equatable {
     /// Always the exact style cadence, regardless of backlog.
     case strict
     /// Accelerate (shorten intervals, down to 0.25x) to keep lag within bound.
+    /// `maxLagSeconds` must be > 0.
     case adaptive(maxLagSeconds: Double)
     /// Exact cadence until lag exceeds the cap, then snap to fully revealed.
+    /// `maxLagSeconds` must be > 0.
     case cappedSnap(maxLagSeconds: Double)
 }
 

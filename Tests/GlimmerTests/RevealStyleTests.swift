@@ -45,8 +45,9 @@ final class RevealStyleTests: XCTestCase {
 
     func testUnitsPerStep() {
         XCTAssertEqual(RevealStyle.llmTokens.unitsPerStep, 1...4)
-        XCTAssertEqual(RevealStyle.wordFade.unitsPerStep, 1...1)
-        XCTAssertEqual(RevealStyle.typewriter.unitsPerStep, 1...1)
+        for style in RevealStyle.allCases where style != .llmTokens {
+            XCTAssertEqual(style.unitsPerStep, 1...1, "\(style) should unlock one unit per step")
+        }
     }
 
     func testRevealConfigurationDefaults() {
