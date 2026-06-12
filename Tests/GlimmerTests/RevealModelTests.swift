@@ -218,4 +218,27 @@ final class RevealModelTests: XCTestCase {
         XCTAssertEqual(words.count, 2)
         XCTAssertEqual(words[0].atoms.count, 2) // 'a', 'b' grouped in one layout word
     }
+
+    func testInProgressLastWordKeepsIDWhileTextChanges() {
+        // Spec 9.3: the streaming tail's last word changes text; its id must not.
+        let p = allAtoms(model("Alpha hel"))
+        let f = allAtoms(model("Alpha hello"))
+        XCTAssertEqual(p.count, f.count)
+        XCTAssertEqual(p.last?.id, f.last?.id)
+        XCTAssertEqual(atomText(p.last!), "hel")
+        XCTAssertEqual(atomText(f.last!), "hello")
+    }
+
+    func testBlocksWithoutCountablesNeverVisibleAtZero() {
+        // Mid-stream artifacts like a bare "#" must not flash in before reveal starts.
+        let m = model("#")
+        for block in m.blocks {
+            XCTAssertGreaterThan(block.firstRevealIndex, 0)
+        }
+    }
+
+    func testSoftBreakParagraphCountsWordsAcrossLines() {
+        let m = model("alpha\nbeta")
+        XCTAssertEqual(m.countableCount, 2)
+    }
 }

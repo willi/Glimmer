@@ -113,7 +113,7 @@ struct RevealFlattener {
                 } else {
                     var atoms: [RevealAtom] = []
                     for ch in token.slice.revealCharacters() {
-                        atoms.append(makeAtom(kind: .text(ch), countable: true, url: ch.runs.first?.link))
+                        atoms.append(makeAtom(kind: .text(ch), countable: true, url: linkURL(in: ch)))
                     }
                     guard !atoms.isEmpty else { continue }
                     words.append(RevealWord(id: atoms[0].id, atoms: atoms, isWhitespace: false, isLineBreak: false))
@@ -122,12 +122,16 @@ struct RevealFlattener {
         case .line:
             appendLines(from: content, into: &words)
         }
-        let first = words.flatMap(\.atoms).first(where: \.isCountable)?.revealIndex ?? 0
+        // A block with no countable atoms (e.g. an empty heading mid-stream)
+        // must never gate open on its own; re-flattening assigns a real index
+        // once content arrives.
+        let first = words.flatMap(\.atoms).first(where: \.isCountable)?.revealIndex ?? Int.max
         blocks.append(RevealBlock(id: blocks.count, kind: kind, words: words, node: nil, firstRevealIndex: first))
     }
 
     /// Groups words into lines of `wordsPerLine`, each line one countable atom
     /// followed by a forced break (line-slide style, spec appendix).
+    /// Line atoms carry no link URL — line-slide reveals are not tappable (documented limitation).
     private mutating func appendLines(from content: AttributedString, into words: inout [RevealWord]) {
         var line = AttributedString()
         var wordCount = 0
@@ -169,8 +173,17 @@ struct RevealFlattener {
             let atom = makeAtom(kind: .space(slice), countable: false, url: nil)
             return RevealWord(id: atom.id, atoms: [atom], isWhitespace: true, isLineBreak: false)
         }
-        let atom = makeAtom(kind: .text(slice), countable: true, url: slice.runs.first?.link)
+        let atom = makeAtom(kind: .text(slice), countable: true, url: linkURL(in: slice))
         return RevealWord(id: atom.id, atoms: [atom], isWhitespace: false, isLineBreak: false)
+    }
+
+    /// The first link found in any run of the slice (a word can straddle a
+    /// link boundary, so the first run alone is not enough).
+    private func linkURL(in slice: AttributedString) -> URL? {
+        for run in slice.runs {
+            if let url = run.link { return url }
+        }
+        return nil
     }
 
     private mutating func makeAtom(kind: RevealAtom.Kind, countable: Bool, url: URL?) -> RevealAtom {
