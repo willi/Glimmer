@@ -20,6 +20,7 @@ public struct ContentView: View {
                     NavigationLink("Tappable Images", destination: TappableImageExample())
                     NavigationLink("GitHub Emojis", destination: GitHubEmojiDemo())
                     NavigationLink("Live Preview (Demo)", destination: LivePreviewDemoScreen())
+                    NavigationLink("Streaming Reveal", destination: StreamingRevealDemo())
                 }
                 
                 Section("Performance Demos") {
