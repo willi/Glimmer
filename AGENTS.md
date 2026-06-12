@@ -96,6 +96,8 @@ Additional note: Keep the public API surface minimal and well-documented.
 - Minimize `AttributedString` regeneration and leverage SwiftUI view diffing.
 - Use Instruments (SwiftUI template) to profile hot paths.
 - Consider fragment pools and caching for memory efficiency.
+- Benchmark harness: `ProfilingBenchmarkTests/testPhaseTimings` (per-phase timings on a complex corpus); `testProfilingLoop` with `TEST_RUNNER_GLIMMER_PROFILING=1` for Instruments attach. Benchmark in Release (`-configuration Release ENABLE_TESTABILITY=YES`).
+- `maxRenderCacheEntries` (default 4096) must exceed the re-rendered document's block count or the LRU thrashes to 0% hits.
 
 ## Common Development Tasks
 

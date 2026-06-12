@@ -128,6 +128,9 @@ Markdown Text → Parser (AST) → AttributedString → SwiftUI Views
 - Parallel parsing threshold: 10KB documents
 - Measure performance with large inputs to avoid regressions
 - Performance-sensitive code in parsers/renderers requires careful testing
+- **Benchmark harness**: `ProfilingBenchmarkTests/testPhaseTimings` prints per-phase timings over a ~0.5MB complex corpus; `testProfilingLoop` (opt-in: `TEST_RUNNER_GLIMMER_PROFILING=1`) runs a long loop for attaching Instruments. Benchmark in Release: add `-configuration Release ENABLE_TESTABILITY=YES` (Debug roughly doubles parse times)
+- **Render cache sizing**: `maxRenderCacheEntries` (default 4096) must exceed the block count of documents being re-rendered, or the LRU thrashes to a 0% hit rate on sequential renders
+- Profiling-verified hot paths: `AttributedString` rope operations and grapheme walking dominate render/flatten; prefer fewer, larger AttributedString operations over many small slices (a run-based tokenizer rewrite measured *slower* than rope sub-slicing — see `RevealTokenization.swift`)
 
 ## Common Development Tasks
 

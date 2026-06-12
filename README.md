@@ -91,6 +91,7 @@ MarkdownView(
     configuration: MarkdownConfiguration(
         baseFont: .custom("Georgia", size: 16),
         codeFont: .custom("Menlo", size: 14),
+        textColor: .primary,            // Foreground color for body text
         linkColor: .purple,
         codeBlockTheme: .dark // Use a dark theme for code blocks
     )
@@ -529,6 +530,8 @@ Advanced toggles for experimentation:
 - `InlineParser.useUTF8FastPath = true` to enable a UTF‑8 byte-scanning fast path for some ASCII patterns
 - `GitHubEmojis.useLazyEmojiURLMap = true` to load a small JSON override map and fall back to the static full map
 
+For CLI profiling, `Tests/GlimmerTests/ProfilingBenchmarkTests.swift` prints per-phase timings (parse, render, cache warm/cold, reveal flatten) over a ~0.5MB complex corpus, and its `testProfilingLoop` (opt-in via the `GLIMMER_PROFILING=1` environment variable, pass with `TEST_RUNNER_GLIMMER_PROFILING=1` through xcodebuild) runs a long loop for attaching Instruments.
+
 ### Benchmark Results
 - **Large documents**: Optimized for fast parsing
 - **Memory usage**: Efficient memory management with consolidated parsers
@@ -552,6 +555,8 @@ let config = MarkdownConfiguration.builder()
 // - Memory pressure (iOS)
 // - Thread-safe operations
 ```
+
+The per-block render cache (`maxRenderCacheEntries`, default 4096) must comfortably exceed the block count of the largest documents you re-render — an LRU smaller than the working set thrashes on sequential renders and hits 0%. The `.performance` preset uses 8192.
 
 ### Performance Metrics
 Enable performance tracking to monitor parsing:
@@ -584,8 +589,9 @@ Examples (from the repo root):
 # List schemes
 xcodebuild -list
 
-# Run tests on an installed iOS simulator (update device name if needed)
-xcodebuild -scheme Glimmer -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' test
+# Run tests on an installed iOS simulator (update device name if needed;
+# list devices with: xcrun simctl list devices available)
+xcodebuild -scheme Glimmer -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 
 # Or open Package.swift in Xcode and run the GlimmerTests target
 ```
