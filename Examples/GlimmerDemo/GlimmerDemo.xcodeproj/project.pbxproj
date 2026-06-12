@@ -22,6 +22,8 @@
 		A1F0010A2E49A00000DEMO01 /* MainDemos.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F000FA2E49A00000DEMO01 /* MainDemos.swift */; };
 		A1F0010B2E49A00000DEMO01 /* ParallelParsingDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F000FB2E49A00000DEMO01 /* ParallelParsingDemo.swift */; };
 		A1F0010C2E49A00000DEMO01 /* QuickExampleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F000FC2E49A00000DEMO01 /* QuickExampleView.swift */; };
+		A1F0010E2E49A00000DEMO01 /* EditorTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F000FE2E49A00000DEMO01 /* EditorTextView.swift */; };
+		A1F0010F2E49A00000DEMO01 /* StreamingRevealDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F000FF2E49A00000DEMO01 /* StreamingRevealDemo.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -40,6 +42,8 @@
 		A1F000FA2E49A00000DEMO01 /* MainDemos.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainDemos.swift; sourceTree = SOURCE_ROOT; };
 		A1F000FB2E49A00000DEMO01 /* ParallelParsingDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelParsingDemo.swift; sourceTree = SOURCE_ROOT; };
 		A1F000FC2E49A00000DEMO01 /* QuickExampleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickExampleView.swift; sourceTree = SOURCE_ROOT; };
+		A1F000FE2E49A00000DEMO01 /* EditorTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorTextView.swift; sourceTree = SOURCE_ROOT; };
+		A1F000FF2E49A00000DEMO01 /* StreamingRevealDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingRevealDemo.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -169,6 +173,8 @@
 				A1F0010A2E49A00000DEMO01 /* MainDemos.swift in Sources */,
 				A1F0010B2E49A00000DEMO01 /* ParallelParsingDemo.swift in Sources */,
 				A1F0010C2E49A00000DEMO01 /* QuickExampleView.swift in Sources */,
+				A1F0010E2E49A00000DEMO01 /* EditorTextView.swift in Sources */,
+				A1F0010F2E49A00000DEMO01 /* StreamingRevealDemo.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
