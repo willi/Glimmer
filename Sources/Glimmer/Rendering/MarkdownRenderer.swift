@@ -229,6 +229,7 @@ public struct MarkdownRenderer {
         configuration.baseFont.hash(into: &hasher)
         configuration.codeFont.hash(into: &hasher)
         configuration.headingFonts.hash(into: &hasher)
+        configuration.textColor.hash(into: &hasher)
         configuration.linkColor.hash(into: &hasher)
         configuration.mentionColor.hash(into: &hasher)
         configuration.issueColor.hash(into: &hasher)
@@ -434,6 +435,7 @@ public struct MarkdownRenderer {
             } else if let baseFont = context.baseFont {
                 value.font = baseFont
             }
+            value.foregroundColor = configuration.textColor
             if context.isStrikethrough {
                 value.strikethroughStyle = .single
             }
