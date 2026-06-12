@@ -229,9 +229,15 @@ public final class ParallelMarkdownParser {
         var results: [ParseResult] = []
         let resultsLock = NSLock()
         let group = DispatchGroup()
+        let semaphore = DispatchSemaphore(value: parallelConfig.concurrency)
         for chunk in chunks {
             group.enter()
             queue.async {
+                semaphore.wait()
+                defer {
+                    semaphore.signal()
+                    group.leave()
+                }
                 let startTime = CFAbsoluteTimeGetCurrent()
                 var state = ParserState(text: chunk.text)
                 let blocks = BlockParser.parseBlocks(&state, configuration: self.markdownConfig)
@@ -239,7 +245,6 @@ public final class ParallelMarkdownParser {
                 resultsLock.lock()
                 results.append(ParseResult(index: chunk.index, blocks: blocks, parseTime: parseTime))
                 resultsLock.unlock()
-                group.leave()
             }
         }
         group.wait()

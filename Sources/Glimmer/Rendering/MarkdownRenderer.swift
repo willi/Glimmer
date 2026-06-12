@@ -19,9 +19,60 @@ public struct MarkdownRenderer {
     private var cachedCodeInlineAttrs: AttributeContainer?
 
     // MARK: - Render Cache
-    private struct RCState { var dict: [String: AttributedString] = [:]; var order: [String] = [] }
+    private final class RCNode {
+        let key: String
+        var value: AttributedString
+        weak var prev: RCNode?
+        var next: RCNode?
+
+        init(key: String, value: AttributedString) {
+            self.key = key
+            self.value = value
+        }
+    }
+
+    private struct RCState {
+        var dict: [String: RCNode] = [:]
+        var head: RCNode?
+        var tail: RCNode?
+    }
+
     private static let renderCache = OSAllocatedUnfairLock(initialState: RCState())
     private static let stats = OSAllocatedUnfairLock(initialState: (hits: 0, misses: 0))
+
+    private static func rcAppendToTail(_ state: inout RCState, _ node: RCNode) {
+        node.prev = state.tail
+        node.next = nil
+        if let tail = state.tail {
+            tail.next = node
+        } else {
+            state.head = node
+        }
+        state.tail = node
+    }
+
+    private static func rcDetach(_ state: inout RCState, _ node: RCNode) {
+        let prev = node.prev
+        let next = node.next
+        if let prev = prev {
+            prev.next = next
+        } else {
+            state.head = next
+        }
+        if let next = next {
+            next.prev = prev
+        } else {
+            state.tail = prev
+        }
+        node.prev = nil
+        node.next = nil
+    }
+
+    private static func rcMoveToTail(_ state: inout RCState, _ node: RCNode) {
+        guard state.tail !== node else { return }
+        rcDetach(&state, node)
+        rcAppendToTail(&state, node)
+    }
 
     public mutating func render(blocks: [MarkdownParser.BlockNode], configuration: MarkdownConfiguration) -> AttributedString {
         beginSession(configuration: configuration)
@@ -52,7 +103,7 @@ public struct MarkdownRenderer {
         cachedTableHeaderAttrs = tableHeaderAttributes(configuration: configuration)
         cachedCodeInlineAttrs = codeInlineAttributes(configuration: configuration)
     }
-
+    
     private mutating func renderBlocks(_ blocks: [MarkdownParser.BlockNode], configuration: MarkdownConfiguration) -> AttributedString {
         var result = AttributedString()
         for (index, block) in blocks.enumerated() {
@@ -72,20 +123,29 @@ public struct MarkdownRenderer {
 
     private mutating func renderBlock(_ block: MarkdownParser.BlockNode, configuration: MarkdownConfiguration) -> AttributedString {
         if configuration.enableRenderCaching, let key = renderCacheKey(for: block, styleKey: sessionStyleKey ?? styleKey(configuration)) {
-            if let cached = Self.renderCache.withLock({ $0.dict[key] }) {
-                // touch LRU
-                Self.renderCache.withLock { state in
-                    if let i = state.order.firstIndex(of: key) { state.order.remove(at: i); state.order.append(key) }
-                }
+            if let cached = Self.renderCache.withLock({ state -> AttributedString? in
+                guard let node = state.dict[key] else { return nil }
+                Self.rcMoveToTail(&state, node)
+                return node.value
+            }) {
                 Self.stats.withLock { $0.hits += 1 }
                 return cached
             }
             let rendered = renderBlockUncached(block, configuration: configuration)
             Self.renderCache.withLock { state in
-                if state.dict[key] == nil { state.order.append(key) }
-                state.dict[key] = rendered
-                while state.order.count > max(1, configuration.maxRenderCacheEntries) {
-                    let evict = state.order.removeFirst(); state.dict.removeValue(forKey: evict)
+                if let existing = state.dict[key] {
+                    existing.value = rendered
+                    Self.rcMoveToTail(&state, existing)
+                } else {
+                    let node = RCNode(key: key, value: rendered)
+                    state.dict[key] = node
+                    Self.rcAppendToTail(&state, node)
+                }
+
+                let limit = max(1, configuration.maxRenderCacheEntries)
+                while state.dict.count > limit, let evict = state.head {
+                    Self.rcDetach(&state, evict)
+                    state.dict.removeValue(forKey: evict.key)
                 }
             }
             Self.stats.withLock { $0.misses += 1 }
@@ -291,7 +351,11 @@ public struct MarkdownRenderer {
 
     // MARK: - Public Cache Controls
     public static func clearRenderCache() {
-        renderCache.withLock { state in state.dict.removeAll(); state.order.removeAll() }
+        renderCache.withLock { state in
+            state.dict.removeAll()
+            state.head = nil
+            state.tail = nil
+        }
         stats.withLock { $0.hits = 0; $0.misses = 0 }
     }
 
@@ -305,109 +369,169 @@ public struct MarkdownRenderer {
         heading.mergeAttributes(headingAttributes(font: headingFont))
         return heading
     }
-    
+
+    private struct InlineRenderContext {
+        let baseFont: Font?
+        let forcedFont: Font?
+        let isStrikethrough: Bool
+
+        func withEmphasis() -> InlineRenderContext {
+            guard forcedFont == nil else { return self }
+            return InlineRenderContext(
+                baseFont: baseFont,
+                forcedFont: (baseFont ?? .body).italic(),
+                isStrikethrough: isStrikethrough
+            )
+        }
+
+        func withStrong() -> InlineRenderContext {
+            guard forcedFont == nil else { return self }
+            return InlineRenderContext(
+                baseFont: baseFont,
+                forcedFont: (baseFont ?? .body).bold(),
+                isStrikethrough: isStrikethrough
+            )
+        }
+
+        func withStrikethrough() -> InlineRenderContext {
+            InlineRenderContext(
+                baseFont: baseFont,
+                forcedFont: forcedFont ?? baseFont,
+                isStrikethrough: true
+            )
+        }
+    }
+
     public func renderInlines(_ nodes: [MarkdownParser.InlineNode], configuration: MarkdownConfiguration, baseFont: Font? = nil) -> AttributedString {
         var result = AttributedString()
-        
-        for node in nodes {
-            result += renderInline(node, configuration: configuration, baseFont: baseFont)
-        }
-        
+        let context = InlineRenderContext(baseFont: baseFont, forcedFont: nil, isStrikethrough: false)
+        appendInlines(nodes, to: &result, configuration: configuration, context: context)
         return result
     }
-    
-    private func renderInline(_ node: MarkdownParser.InlineNode, configuration: MarkdownConfiguration, baseFont: Font? = nil) -> AttributedString {
+
+    private func appendInlines(
+        _ nodes: [MarkdownParser.InlineNode],
+        to result: inout AttributedString,
+        configuration: MarkdownConfiguration,
+        context: InlineRenderContext
+    ) {
+        for node in nodes {
+            appendInline(node, to: &result, configuration: configuration, context: context)
+        }
+    }
+
+    private func appendInline(
+        _ node: MarkdownParser.InlineNode,
+        to result: inout AttributedString,
+        configuration: MarkdownConfiguration,
+        context: InlineRenderContext
+    ) {
         switch node {
         case .text(let text):
-            var result = AttributedString(text)
-            if let baseFont = baseFont {
-                result.font = baseFont
+            var value = AttributedString(text)
+            if let forcedFont = context.forcedFont {
+                value.font = forcedFont
+            } else if let baseFont = context.baseFont {
+                value.font = baseFont
             }
-            return result
-            
+            if context.isStrikethrough {
+                value.strikethroughStyle = .single
+            }
+            result.append(value)
+
         case .emphasis(let children):
-            var emphasized = renderInlines(children, configuration: configuration, baseFont: baseFont)
-            if let baseFont = baseFont {
-                emphasized.font = baseFont.italic()
-            } else {
-                emphasized.font = .body.italic()
-            }
-            return emphasized
-            
+            appendInlines(children, to: &result, configuration: configuration, context: context.withEmphasis())
+
         case .strong(let children):
-            var strong = renderInlines(children, configuration: configuration, baseFont: baseFont)
-            if let baseFont = baseFont {
-                strong.font = baseFont.bold()
-            } else {
-                strong.font = .body.bold()
-            }
-            return strong
-            
+            appendInlines(children, to: &result, configuration: configuration, context: context.withStrong())
+
         case .strikethrough(let children):
-            var strikethrough = renderInlines(children, configuration: configuration, baseFont: baseFont)
-            var attrs = AttributeContainer()
-            if let baseFont = baseFont { attrs.font = baseFont }
-            attrs.strikethroughStyle = .single
-            strikethrough.mergeAttributes(attrs)
-            return strikethrough
-            
+            appendInlines(children, to: &result, configuration: configuration, context: context.withStrikethrough())
+
         case .code(let code):
             var codeText = AttributedString(code)
             if let attrs = cachedCodeInlineAttrs { codeText.mergeAttributes(attrs) }
-            return codeText
-            
+            applyInlineContext(&codeText, context: context)
+            result.append(codeText)
+
         case .link(let url, _, let children):
-            let content = renderInlines(children, configuration: configuration, baseFont: baseFont)
-            return styledLink(content, url: url, configuration: configuration)
-            
+            var content = AttributedString()
+            appendInlines(children, to: &content, configuration: configuration, context: context)
+            var linked = styledLink(content, url: url, configuration: configuration)
+            applyInlineContext(&linked, context: context)
+            result.append(linked)
+
         case .image(let url, let alt, _):
-            return AttributedString("[Image: \(alt.isEmpty ? url.absoluteString : alt)]")
-            
+            var image = AttributedString("[Image: \(alt.isEmpty ? url.absoluteString : alt)]")
+            applyInlineContext(&image, context: context)
+            result.append(image)
+
         case .autolink(let url, _, let originalText):
-            return styledLink(AttributedString(originalText), url: url, configuration: configuration)
-            
+            var autolink = styledLink(AttributedString(originalText), url: url, configuration: configuration)
+            applyInlineContext(&autolink, context: context)
+            result.append(autolink)
+
         case .mention(let username):
-            var m = AttributedString("@\(username)")
-            if let attrs = cachedMentionAttrs { m.mergeAttributes(attrs) }
-            return m
-            
+            var mention = AttributedString("@\(username)")
+            if let attrs = cachedMentionAttrs { mention.mergeAttributes(attrs) }
+            applyInlineContext(&mention, context: context)
+            result.append(mention)
+
         case .issueReference(let number):
-            var isx = AttributedString("#\(number)")
-            if let attrs = cachedIssueAttrs { isx.mergeAttributes(attrs) }
-            return isx
-            
+            var issue = AttributedString("#\(number)")
+            if let attrs = cachedIssueAttrs { issue.mergeAttributes(attrs) }
+            applyInlineContext(&issue, context: context)
+            result.append(issue)
+
         case .commitSHA(_, let short):
-            var s = AttributedString(short)
-            if let attrs = cachedCommitAttrs { s.mergeAttributes(attrs) }
-            return s
-            
+            var commit = AttributedString(short)
+            if let attrs = cachedCommitAttrs { commit.mergeAttributes(attrs) }
+            applyInlineContext(&commit, context: context)
+            result.append(commit)
+
         case .repositoryReference(let owner, let repo):
-            var r = AttributedString("\(owner)/\(repo)")
-            if let attrs = cachedRepoAttrs { r.mergeAttributes(attrs) }
-            return r
-            
+            var repository = AttributedString("\(owner)/\(repo)")
+            if let attrs = cachedRepoAttrs { repository.mergeAttributes(attrs) }
+            applyInlineContext(&repository, context: context)
+            result.append(repository)
+
         case .pullRequestReference(let owner, let repo, let number):
-            var p = AttributedString("\(owner)/\(repo)#\(number)")
-            if let attrs = cachedPRAttrs { p.mergeAttributes(attrs) }
-            return p
-            
+            var pullRequest = AttributedString("\(owner)/\(repo)#\(number)")
+            if let attrs = cachedPRAttrs { pullRequest.mergeAttributes(attrs) }
+            applyInlineContext(&pullRequest, context: context)
+            result.append(pullRequest)
+
         case .lineBreak, .softBreak:
-            return AttributedString("\n")
-            
+            var lineBreak = AttributedString("\n")
+            applyInlineContext(&lineBreak, context: context)
+            result.append(lineBreak)
+
         case .html(let tag):
-            // For now, handle <br> tags as line breaks
             if tag.lowercased() == "<br>" || tag.lowercased() == "<br/>" || tag.lowercased() == "<br />" {
-                return AttributedString("\n")
+                var lineBreak = AttributedString("\n")
+                applyInlineContext(&lineBreak, context: context)
+                result.append(lineBreak)
+            } else {
+                var html = AttributedString(tag)
+                applyInlineContext(&html, context: context)
+                result.append(html)
             }
-            // Other HTML tags are rendered as plain text for safety
-            return AttributedString(tag)
+
         case .footnoteReference(let label):
-            // Style the footnote reference as a superscript link
-            // Use [*] for inline footnotes, [label] for regular ones
             let displayLabel = label.starts(with: "inline-") ? "*" : label
             var ref = AttributedString("[\(displayLabel)]")
             ref.mergeAttributes(footnoteRefAttributes(label: label, configuration: configuration))
-            return ref
+            applyInlineContext(&ref, context: context)
+            result.append(ref)
+        }
+    }
+
+    private func applyInlineContext(_ value: inout AttributedString, context: InlineRenderContext) {
+        if let forcedFont = context.forcedFont {
+            value.font = forcedFont
+        }
+        if context.isStrikethrough {
+            value.strikethroughStyle = .single
         }
     }
 

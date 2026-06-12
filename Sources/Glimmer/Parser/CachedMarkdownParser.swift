@@ -26,8 +26,25 @@ public final class CachedMarkdownParser: NSObject, @unchecked Sendable, NSCacheD
             return Date().timeIntervalSince(created) > ttl
         }
     }
-    
-    private struct CacheState { var cache: [CacheKey: CacheEntry] = [:]; var currentSize = 0 }
+
+    private final class LRUNode {
+        let key: CacheKey
+        var entry: CacheEntry
+        weak var prev: LRUNode?
+        var next: LRUNode?
+
+        init(key: CacheKey, entry: CacheEntry) {
+            self.key = key
+            self.entry = entry
+        }
+    }
+
+    private struct CacheState {
+        var cache: [CacheKey: LRUNode] = [:]
+        var head: LRUNode?
+        var tail: LRUNode?
+        var currentSize = 0
+    }
     private let lock = OSAllocatedUnfairLock(initialState: CacheState())
     private let useNSCache: Bool
     private var nsCache: NSCache<WrappedKey, WrappedEntry>?
@@ -69,41 +86,65 @@ public final class CachedMarkdownParser: NSObject, @unchecked Sendable, NSCacheD
         }()
         
         // Check cache
-        if useNSCache, let box = nsCache?.object(forKey: WrappedKey(key)) {
-            var entry = box.entry
-            if entry.isExpired(ttl: configuration.cacheTimeToLiveSeconds) {
-                // Remove expired entry
-                nsCache?.removeObject(forKey: WrappedKey(key))
-                let sz = entry.size
-                lock.withLock { state in state.currentSize = max(0, state.currentSize - sz) }
-                metricsLock.withLock { $0.evictions += 1 }
+        var didMiss = false
+
+        if useNSCache {
+            if let box = nsCache?.object(forKey: WrappedKey(key)) {
+                var entry = box.entry
+                if entry.isExpired(ttl: configuration.cacheTimeToLiveSeconds) {
+                    // Remove expired entry
+                    nsCache?.removeObject(forKey: WrappedKey(key))
+                    let sz = entry.size
+                    lock.withLock { state in state.currentSize = max(0, state.currentSize - sz) }
+                    metricsLock.withLock { $0.evictions += 1 }
+                    didMiss = true
+                } else {
+                    entry.lastAccess = Date()
+                    // Replace updated entry to refresh access metadata
+                    let updated = WrappedEntry(entry: entry)
+                    nsCache?.setObject(updated, forKey: WrappedKey(key), cost: entry.size)
+                    metricsLock.withLock { $0.hits += 1 }
+                    return entry.blocks
+                }
             } else {
-                entry.lastAccess = Date()
-                // Replace updated entry to refresh access metadata
-                let updated = WrappedEntry(entry: entry)
-                nsCache?.setObject(updated, forKey: WrappedKey(key), cost: entry.size)
-                metricsLock.withLock { $0.hits += 1 }
-                return entry.blocks
-            }
-        } else if var entry = lock.withLock({ $0.cache[key] }) {
-            // Check if entry is expired
-            if entry.isExpired(ttl: configuration.cacheTimeToLiveSeconds) {
-                // Remove expired entry
-                let sz = entry.size
-                lock.withLock { state in state.currentSize -= sz; state.cache.removeValue(forKey: key) }
-                metricsLock.withLock { $0.evictions += 1 }
-            } else {
-                // Update last access time
-                entry.lastAccess = Date()
-                let updatedEntry = entry
-                lock.withLock { state in state.cache[key] = updatedEntry }
-                metricsLock.withLock { $0.hits += 1 }
-                
-                // Performance tracking disabled
-                
-                return entry.blocks
+                didMiss = true
             }
         } else {
+            enum DictLookup {
+                case hit([MarkdownParser.BlockNode])
+                case expired
+                case miss
+            }
+
+            let lookup = lock.withLock { state -> DictLookup in
+                guard let node = state.cache[key] else { return .miss }
+                if node.entry.isExpired(ttl: configuration.cacheTimeToLiveSeconds) {
+                    state.currentSize = max(0, state.currentSize - node.entry.size)
+                    detachNode(&state, node)
+                    state.cache.removeValue(forKey: key)
+                    return .expired
+                }
+
+                var updatedEntry = node.entry
+                updatedEntry.lastAccess = Date()
+                node.entry = updatedEntry
+                moveToTail(&state, node)
+                return .hit(updatedEntry.blocks)
+            }
+
+            switch lookup {
+            case .hit(let blocks):
+                metricsLock.withLock { $0.hits += 1 }
+                return blocks
+            case .expired:
+                metricsLock.withLock { $0.evictions += 1 }
+                didMiss = true
+            case .miss:
+                didMiss = true
+            }
+        }
+
+        if didMiss {
             metricsLock.withLock { $0.misses += 1 }
         }
         
@@ -126,6 +167,11 @@ public final class CachedMarkdownParser: NSObject, @unchecked Sendable, NSCacheD
                 c.totalCostLimit = configuration.maxCacheSizeMB * 1024 * 1024
                 let now = Date()
                 let entry = CacheEntry(blocks: blocks, size: estimatedSize, created: now, lastAccess: now)
+                if let existing = c.object(forKey: WrappedKey(key)) {
+                    lock.withLock { state in
+                        state.currentSize = max(0, state.currentSize - existing.entry.size)
+                    }
+                }
                 c.setObject(WrappedEntry(entry: entry), forKey: WrappedKey(key), cost: estimatedSize)
                 lock.withLock { state in state.currentSize += estimatedSize }
             } else {
@@ -142,7 +188,19 @@ public final class CachedMarkdownParser: NSObject, @unchecked Sendable, NSCacheD
                         created: now,
                         lastAccess: now
                     )
-                    lock.withLock { state in state.cache[key] = entry; state.currentSize += estimatedSize }
+                    lock.withLock { state in
+                        if let existing = state.cache[key] {
+                            state.currentSize = max(0, state.currentSize - existing.entry.size)
+                            existing.entry = entry
+                            state.currentSize += entry.size
+                            moveToTail(&state, existing)
+                        } else {
+                            let node = LRUNode(key: key, entry: entry)
+                            state.cache[key] = node
+                            appendToTail(&state, node)
+                            state.currentSize += estimatedSize
+                        }
+                    }
                     
                     // Perform periodic cleanup
                     if lock.withLock({ $0.cache.count % 100 == 0 }) {
@@ -157,7 +215,12 @@ public final class CachedMarkdownParser: NSObject, @unchecked Sendable, NSCacheD
     
     /// Clear all cached entries
     public func clearCache() {
-        lock.withLock { state in state.cache.removeAll(); state.currentSize = 0 }
+        lock.withLock { state in
+            state.cache.removeAll()
+            state.head = nil
+            state.tail = nil
+            state.currentSize = 0
+        }
         nsCache?.removeAllObjects()
         
         // Cache cleared
@@ -193,35 +256,83 @@ public final class CachedMarkdownParser: NSObject, @unchecked Sendable, NSCacheD
         
         return size
     }
-    
+
+    private func appendToTail(_ state: inout CacheState, _ node: LRUNode) {
+        node.prev = state.tail
+        node.next = nil
+        if let tail = state.tail {
+            tail.next = node
+        } else {
+            state.head = node
+        }
+        state.tail = node
+    }
+
+    private func detachNode(_ state: inout CacheState, _ node: LRUNode) {
+        let prev = node.prev
+        let next = node.next
+        if let prev = prev {
+            prev.next = next
+        } else {
+            state.head = next
+        }
+        if let next = next {
+            next.prev = prev
+        } else {
+            state.tail = prev
+        }
+        node.prev = nil
+        node.next = nil
+    }
+
+    private func moveToTail(_ state: inout CacheState, _ node: LRUNode) {
+        guard state.tail !== node else { return }
+        detachNode(&state, node)
+        appendToTail(&state, node)
+    }
+
+    @discardableResult
+    private func evictLeastRecentlyUsedLocked(_ state: inout CacheState) -> Bool {
+        guard let oldest = state.head else { return false }
+        detachNode(&state, oldest)
+        _ = state.cache.removeValue(forKey: oldest.key)
+        state.currentSize = max(0, state.currentSize - oldest.entry.size)
+        return true
+    }
+
     private func ensureCacheSpace(needed: Int, maxSize: Int) {
-        // If adding this entry would exceed max size, evict entries
-        while lock.withLock({ $0.currentSize + needed > maxSize && !$0.cache.isEmpty }) { evictLeastRecentlyUsed() }
-    }
-    
-    private func evictLeastRecentlyUsed() {
-        guard let oldestKey = lock.withLock({ $0.cache.min(by: { $0.value.lastAccess < $1.value.lastAccess })?.key }) else {
-            return
+        let evictedCount = lock.withLock { state -> Int in
+            var evicted = 0
+            while state.currentSize + needed > maxSize, !state.cache.isEmpty {
+                if evictLeastRecentlyUsedLocked(&state) {
+                    evicted += 1
+                } else {
+                    break
+                }
+            }
+            return evicted
         }
-        
-        if let entry = lock.withLock({ state in state.cache.removeValue(forKey: oldestKey) }) {
-            lock.withLock { $0.currentSize -= entry.size }
-            metricsLock.withLock { $0.evictions += 1 }
-            
-            // Evicted cache entry
+
+        if evictedCount > 0 {
+            metricsLock.withLock { $0.evictions += evictedCount }
         }
     }
-    
+
     private func cleanupExpiredEntries(ttl: TimeInterval) {
         let evictedCount: Int = lock.withLock { state in
-            var toRemove: [CacheKey] = []
-            for (key, entry) in state.cache where entry.isExpired(ttl: ttl) {
-                toRemove.append(key)
-                state.currentSize -= entry.size
+            var expiredNodes: [LRUNode] = []
+            for node in state.cache.values where node.entry.isExpired(ttl: ttl) {
+                expiredNodes.append(node)
             }
-            for key in toRemove { state.cache.removeValue(forKey: key) }
-            return toRemove.count
+
+            for node in expiredNodes {
+                detachNode(&state, node)
+                _ = state.cache.removeValue(forKey: node.key)
+                state.currentSize = max(0, state.currentSize - node.entry.size)
+            }
+            return expiredNodes.count
         }
+
         if evictedCount > 0 {
             metricsLock.withLock { $0.evictions += evictedCount }
         }
@@ -283,8 +394,21 @@ public extension CachedMarkdownParser {
                 c.totalCostLimit = target
             } else {
                 // Remove 50% of least recently used entries
-                let half = lock.withLock { $0.currentSize / 2 }
-                while lock.withLock({ $0.currentSize > half && !$0.cache.isEmpty }) { evictLeastRecentlyUsed() }
+                let evictedCount = lock.withLock { state -> Int in
+                    let half = state.currentSize / 2
+                    var evicted = 0
+                    while state.currentSize > half, !state.cache.isEmpty {
+                        if evictLeastRecentlyUsedLocked(&state) {
+                            evicted += 1
+                        } else {
+                            break
+                        }
+                    }
+                    return evicted
+                }
+                if evictedCount > 0 {
+                    metricsLock.withLock { $0.evictions += evictedCount }
+                }
             }
             
         case .critical:
@@ -292,7 +416,14 @@ public extension CachedMarkdownParser {
             if useNSCache {
                 nsCache?.removeAllObjects()
             }
-            let evicted = lock.withLock { state in let c = state.cache.count; state.cache.removeAll(); state.currentSize = 0; return c }
+            let evicted = lock.withLock { state in
+                let c = state.cache.count
+                state.cache.removeAll()
+                state.head = nil
+                state.tail = nil
+                state.currentSize = 0
+                return c
+            }
             metricsLock.withLock { $0.evictions += evicted }
             
             // Memory pressure: cleared entire cache

@@ -104,6 +104,7 @@ public struct MarkdownView: View {
     @State private var footnoteDefinitions: [String: [MarkdownParser.BlockNode]] = [:]
     @State private var lastParsedMarkdown: String = ""
     @State private var isStreamingMode = false
+    @State private var streamingParser: StreamingMarkdownParser?
     @Environment(\.openURL) private var openURL
     
     public init(
@@ -164,6 +165,7 @@ public struct MarkdownView: View {
         .onDisappear {
             parseTask?.cancel()
             parseTask = nil
+            streamingParser = nil
             // Ensure isLoading is reset when view disappears
             isLoading = false
         }
@@ -198,11 +200,13 @@ public struct MarkdownView: View {
                           markdown.hasPrefix(lastParsedMarkdown) && 
                           markdown.count > lastParsedMarkdown.count
         
-        if isStreaming && !blocks.isEmpty {
-            // In streaming mode, only parse the new content
-            // Streaming mode detected, incremental parse
+        if enableStreaming {
             isStreamingMode = true
-            await parseIncrementally()
+            if isStreaming && !blocks.isEmpty {
+                await parseIncrementally()
+            } else {
+                await parseStreamingDocument()
+            }
         } else {
             // Full parse for new content or major changes
             isStreamingMode = false
@@ -214,31 +218,61 @@ public struct MarkdownView: View {
     
     @MainActor
     private func parseIncrementally() async {
-        // For streaming, we'll parse the full document but avoid clearing existing blocks
-        // Don't set isLoading for incremental updates to avoid UI blocking
-        let configCopy = configuration
-        let markdownCopy = markdown
-        
-        let detachedParseTask = Task.detached(priority: .userInitiated) {
-            autoreleasepool {
-                // Incremental parse
-                return Glimmer.parse(markdownCopy, configuration: configCopy)
-            }
+        guard let parser = streamingParser,
+              markdown.hasPrefix(lastParsedMarkdown),
+              markdown.count >= lastParsedMarkdown.count else {
+            await parseStreamingDocument()
+            return
         }
-        
-        let parsed = await detachedParseTask.value
-        
+
+        let delta = String(markdown.dropFirst(lastParsedMarkdown.count))
+        if !delta.isEmpty {
+            _ = parser.parseChunk(delta)
+        }
+
         if !Task.isCancelled {
-            // Update blocks directly without animation for smooth streaming
-            blocks = parsed
-            
-            footnoteDefinitions = extractFootnoteDefinitions(from: parsed)
-            // Incremental parse complete
+            let snapshot = parser.snapshotBlocks()
+            blocks = snapshot
+            footnoteDefinitions = extractFootnoteDefinitions(from: snapshot)
         }
+    }
+
+    @MainActor
+    private func parseStreamingDocument() async {
+        guard !markdown.isEmpty else {
+            if !blocks.isEmpty {
+                blocks.removeAll(keepingCapacity: false)
+            }
+            footnoteDefinitions = [:]
+            streamingParser = StreamingMarkdownParser(configuration: configuration)
+            isLoading = false
+            return
+        }
+
+        if blocks.isEmpty {
+            isLoading = true
+        }
+
+        defer {
+            isLoading = false
+        }
+
+        let parser = StreamingMarkdownParser(configuration: configuration)
+        _ = parser.parseChunk(markdown)
+        let snapshot = parser.snapshotBlocks()
+
+        guard !Task.isCancelled else {
+            return
+        }
+
+        streamingParser = parser
+        blocks = snapshot
+        footnoteDefinitions = extractFootnoteDefinitions(from: snapshot)
     }
     
     @MainActor
     private func parseFullDocument() async {
+        streamingParser = nil
         // Skip parsing if markdown is empty
         guard !markdown.isEmpty else {
             // Markdown is empty, skipping parse

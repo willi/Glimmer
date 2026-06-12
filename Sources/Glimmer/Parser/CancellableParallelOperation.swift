@@ -90,15 +90,26 @@ public final class CancellableParallelOperation {
         }
 
         let totalChunks = chunks.count
+        let semaphore = DispatchSemaphore(value: parallelConfig.concurrency)
+        let dispatchGroup = group
         struct ResultsState { var completed: Int = 0; var results: [LocalParseResult] = [] }
         let resultsLock = OSAllocatedUnfairLock(initialState: ResultsState())
 
         for chunk in chunks {
             if isCancelled { break }
-            group.enter()
+            dispatchGroup.enter()
             queue.async { [weak self] in
-                guard let self = self else { return }
-                if self.isCancelled { self.group.leave(); return }
+                guard let self = self else {
+                    dispatchGroup.leave()
+                    return
+                }
+                semaphore.wait()
+                defer {
+                    semaphore.signal()
+                    dispatchGroup.leave()
+                }
+
+                if self.isCancelled { return }
 
                 var state = ParserState(text: chunk.text)
                 let blocks = BlockParser.parseBlocks(&state, configuration: self.markdownConfig)
@@ -121,12 +132,10 @@ public final class CancellableParallelOperation {
                         handler?(monotonicProgress)
                     }
                 }
-
-                self.group.leave()
             }
         }
 
-        group.notify(queue: .global(qos: .userInitiated)) { [weak self] in
+        dispatchGroup.notify(queue: .global(qos: .userInitiated)) { [weak self] in
             guard let self = self else { return }
             if self.isCancelled { self.finish(with: []) }
             else {

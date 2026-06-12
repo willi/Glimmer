@@ -63,4 +63,36 @@ final class StreamingParserTests: XCTestCase {
         XCTAssertTrue(blocks.contains { if case .paragraph = $0 { return true } else { return false } })
         XCTAssertFalse(blocks.contains { if case .table = $0 { return true } else { return false } })
     }
+
+    func testSnapshotIncludesPendingParagraphWithoutNewline() {
+        let parser = StreamingMarkdownParser(configuration: .default)
+        _ = parser.parseChunk("Pending paragraph content")
+
+        let snapshot = parser.snapshotBlocks()
+        XCTAssertEqual(snapshot.count, 1)
+        guard case let .paragraph(children) = snapshot[0] else {
+            return XCTFail("Expected pending paragraph in snapshot.")
+        }
+        XCTAssertTrue(children.contains { if case .text = $0 { return true } else { return false } })
+    }
+
+    func testSnapshotMaintainsSingleParagraphAcrossIncrementalContinuation() {
+        let parser = StreamingMarkdownParser(configuration: .default)
+        _ = parser.parseChunk("Hello")
+        _ = parser.parseChunk(" world\n")
+
+        let snapshot = parser.snapshotBlocks()
+        XCTAssertEqual(snapshot.count, 1)
+
+        guard case let .paragraph(children) = snapshot[0] else {
+            return XCTFail("Expected merged paragraph in snapshot.")
+        }
+
+        let text = children.compactMap { node -> String? in
+            if case let .text(value) = node { return value }
+            return nil
+        }.joined()
+
+        XCTAssertEqual(text, "Hello world")
+    }
 }

@@ -39,17 +39,31 @@ public class StreamingMarkdownParser {
     public func parseChunk(_ chunk: String) -> [MarkdownParser.BlockNode] {
         pendingText += chunk
         var completedBlocks: [MarkdownParser.BlockNode] = []
-        
-        // Process text line by line
-        while let lineEnd = pendingText.firstIndex(of: "\n") {
-            let line = String(pendingText[..<lineEnd])
-            pendingText.removeFirst(pendingText.distance(from: pendingText.startIndex, to: lineEnd) + 1)
-            
-            if let blocks = processLine(line) {
-                completedBlocks.append(contentsOf: blocks)
+
+        // Process text line-by-line using index scanning, then compact once.
+        var lineStart = pendingText.startIndex
+        var index = lineStart
+
+        while index < pendingText.endIndex {
+            if pendingText[index] == "\n" {
+                let line = String(pendingText[lineStart..<index])
+                if let blocks = processLine(line) {
+                    completedBlocks.append(contentsOf: blocks)
+                }
+                lineStart = pendingText.index(after: index)
             }
+            index = pendingText.index(after: index)
         }
-        
+
+        // Remove fully processed prefix; keep trailing partial line in-place.
+        if lineStart > pendingText.startIndex {
+            pendingText.removeSubrange(..<lineStart)
+        }
+
+        if !completedBlocks.isEmpty {
+            parsedBlocks.append(contentsOf: completedBlocks)
+        }
+
         return completedBlocks
     }
     
@@ -100,8 +114,19 @@ public class StreamingMarkdownParser {
             finalBlocks.append(.blockquote(children: blocks))
             currentBlockquote = nil
         }
+
+        if !finalBlocks.isEmpty {
+            parsedBlocks.append(contentsOf: finalBlocks)
+        }
         
         return finalBlocks
+    }
+
+    /// Returns a snapshot of all completed blocks plus best-effort previews for pending content.
+    public func snapshotBlocks() -> [MarkdownParser.BlockNode] {
+        var snapshot = parsedBlocks
+        snapshot.append(contentsOf: previewPendingBlocks())
+        return snapshot
     }
     
     /// Reset the parser state
@@ -110,6 +135,8 @@ public class StreamingMarkdownParser {
         currentCodeBlock = nil
         currentList = nil
         currentBlockquote = nil
+        pendingTableHeader = nil
+        currentTableLines = nil
         parsedBlocks = []
     }
     
@@ -501,6 +528,83 @@ public class StreamingMarkdownParser {
         }
         
         return [.list(ordered: ordered, tight: true, items: listItems)]
+    }
+
+    private func previewPendingBlocks() -> [MarkdownParser.BlockNode] {
+        var preview: [MarkdownParser.BlockNode] = []
+
+        if let tableLines = currentTableLines {
+            var lines = tableLines
+            if !pendingText.isEmpty {
+                lines.append(pendingText)
+            }
+
+            if let (headers, rows, _) = GFMExtensions.parseTable(lines: lines, configuration: configuration) {
+                preview.append(.table(header: headers, rows: rows))
+            } else {
+                for line in lines {
+                    if let blocks = processNewLine(line) {
+                        preview.append(contentsOf: blocks)
+                    }
+                }
+            }
+            return preview
+        }
+
+        if let header = pendingTableHeader {
+            if let blocks = processNewLine(header) {
+                preview.append(contentsOf: blocks)
+            }
+            if !pendingText.isEmpty, let blocks = processNewLine(pendingText) {
+                preview.append(contentsOf: blocks)
+            }
+            return preview
+        }
+
+        if let codeBlock = currentCodeBlock {
+            var lines = codeBlock.lines
+            if !pendingText.isEmpty {
+                lines.append(pendingText)
+            }
+            preview.append(.codeBlock(language: codeBlock.language, content: lines.joined(separator: "\n")))
+            return preview
+        }
+
+        if let list = currentList {
+            var items = list.items
+            if !pendingText.isEmpty {
+                if items.isEmpty {
+                    items.append(pendingText)
+                } else {
+                    items[items.count - 1] += pendingText
+                }
+            }
+            preview.append(contentsOf: parseListItems(items, ordered: list.ordered))
+            return preview
+        }
+
+        if let blockquote = currentBlockquote {
+            var lines = blockquote.lines
+            if !pendingText.isEmpty {
+                if pendingText.hasPrefix(">") {
+                    let content = pendingText.dropFirst().trimmingCharacters(in: CharacterSet(charactersIn: " "))
+                    lines.append(String(content))
+                } else {
+                    lines.append(pendingText)
+                }
+            }
+
+            let content = lines.joined(separator: "\n")
+            let blocks = MarkdownParser.parse(content, configuration: configuration)
+            preview.append(.blockquote(children: blocks))
+            return preview
+        }
+
+        if !pendingText.isEmpty, let blocks = processNewLine(pendingText) {
+            preview.append(contentsOf: blocks)
+        }
+
+        return preview
     }
 }
 

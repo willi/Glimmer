@@ -42,7 +42,6 @@ public struct MarkdownParser {
         guard configuration.enableFootnotes else {
             return (markdown, [])
         }
-        
         var processed = markdown
         var definitions: [BlockNode] = []
         var counter = 1
@@ -88,7 +87,8 @@ public struct MarkdownParser {
     public static func preprocess(_ markdown: String, configuration: MarkdownConfiguration = .default) -> String {
         var processedMarkdown = markdown
         
-        // Process emoji shortcodes if enabled
+        // Process emoji shortcodes if enabled.
+        // A pre-scan guard (e.g. contains(":")) is slower than the regex no-match fast path.
         if configuration.enableEmojiShortcodes {
             processedMarkdown = GitHubEmojis.processEmojiShortcodes(processedMarkdown)
         }

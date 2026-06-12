@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 
 // Extension for precise width calculation using NSTextLayoutManager
 extension NSAttributedString {
@@ -23,9 +24,194 @@ extension NSAttributedString {
 }
 
 public struct TextMeasurement {
+    // MARK: - Table Width Cache
+
+    private struct TableWidthCacheKey: Hashable {
+        let tableHash: Int
+        let fontHash: Int
+    }
+
+    private final class WidthCacheNode {
+        let key: TableWidthCacheKey
+        var value: [CGFloat]
+        weak var prev: WidthCacheNode?
+        var next: WidthCacheNode?
+
+        init(key: TableWidthCacheKey, value: [CGFloat]) {
+            self.key = key
+            self.value = value
+        }
+    }
+
+    private struct WidthCacheState {
+        var dict: [TableWidthCacheKey: WidthCacheNode] = [:]
+        var head: WidthCacheNode?
+        var tail: WidthCacheNode?
+        var hits: Int = 0
+        var misses: Int = 0
+    }
+
+    private static let widthCacheCapacity = 128
+    private static let widthCacheLock = OSAllocatedUnfairLock(initialState: WidthCacheState())
+
+    private static func appendToTail(_ state: inout WidthCacheState, _ node: WidthCacheNode) {
+        node.prev = state.tail
+        node.next = nil
+        if let tail = state.tail {
+            tail.next = node
+        } else {
+            state.head = node
+        }
+        state.tail = node
+    }
+
+    private static func detachNode(_ state: inout WidthCacheState, _ node: WidthCacheNode) {
+        let prev = node.prev
+        let next = node.next
+        if let prev = prev {
+            prev.next = next
+        } else {
+            state.head = next
+        }
+        if let next = next {
+            next.prev = prev
+        } else {
+            state.tail = prev
+        }
+        node.prev = nil
+        node.next = nil
+    }
+
+    private static func moveToTail(_ state: inout WidthCacheState, _ node: WidthCacheNode) {
+        guard state.tail !== node else { return }
+        detachNode(&state, node)
+        appendToTail(&state, node)
+    }
+
+    private static func makeTableWidthCacheKey(
+        header: [MarkdownParser.TableCell],
+        rows: [[MarkdownParser.TableCell]],
+        baseFont: Font
+    ) -> TableWidthCacheKey {
+        var tableHasher = Hasher()
+        tableHasher.combine(header.count)
+        for cell in header {
+            hashInlines(cell.content, into: &tableHasher)
+        }
+        tableHasher.combine(rows.count)
+        for row in rows {
+            tableHasher.combine(row.count)
+            for cell in row {
+                hashInlines(cell.content, into: &tableHasher)
+            }
+        }
+
+        var fontHasher = Hasher()
+        fontHasher.combine(baseFont)
+
+        return TableWidthCacheKey(
+            tableHash: tableHasher.finalize(),
+            fontHash: fontHasher.finalize()
+        )
+    }
+
+    private static func hashInlines(_ nodes: [MarkdownParser.InlineNode], into hasher: inout Hasher) {
+        hasher.combine(nodes.count)
+        for node in nodes {
+            switch node {
+            case .text(let string):
+                hasher.combine(0); hasher.combine(string)
+            case .strong(let children):
+                hasher.combine(1); hashInlines(children, into: &hasher)
+            case .emphasis(let children):
+                hasher.combine(2); hashInlines(children, into: &hasher)
+            case .strikethrough(let children):
+                hasher.combine(3); hashInlines(children, into: &hasher)
+            case .code(let code):
+                hasher.combine(4); hasher.combine(code)
+            case .link(let url, let title, let children):
+                hasher.combine(5)
+                hasher.combine(url.absoluteString)
+                hasher.combine(title ?? "")
+                hashInlines(children, into: &hasher)
+            case .image(let url, let alt, let title):
+                hasher.combine(6)
+                hasher.combine(url.absoluteString)
+                hasher.combine(alt)
+                hasher.combine(title ?? "")
+            case .autolink(let url, let type, let originalText):
+                hasher.combine(7)
+                hasher.combine(url.absoluteString)
+                hasher.combine(originalText)
+                switch type {
+                case .url: hasher.combine(0)
+                case .www: hasher.combine(1)
+                case .email: hasher.combine(2)
+                }
+            case .mention(let username):
+                hasher.combine(8); hasher.combine(username)
+            case .issueReference(let number):
+                hasher.combine(9); hasher.combine(number)
+            case .commitSHA(let sha, let short):
+                hasher.combine(10); hasher.combine(sha); hasher.combine(short)
+            case .repositoryReference(let owner, let repo):
+                hasher.combine(11); hasher.combine(owner); hasher.combine(repo)
+            case .pullRequestReference(let owner, let repo, let number):
+                hasher.combine(12)
+                hasher.combine(owner)
+                hasher.combine(repo)
+                hasher.combine(number)
+            case .lineBreak:
+                hasher.combine(13)
+            case .softBreak:
+                hasher.combine(14)
+            case .html(let tag):
+                hasher.combine(15); hasher.combine(tag)
+            case .footnoteReference(let label):
+                hasher.combine(16); hasher.combine(label)
+            }
+        }
+    }
     
     /// Calculate column widths for a table
     public static func calculateColumnWidths(
+        header: [MarkdownParser.TableCell],
+        rows: [[MarkdownParser.TableCell]],
+        baseFont: Font
+    ) -> [CGFloat] {
+        let key = makeTableWidthCacheKey(header: header, rows: rows, baseFont: baseFont)
+
+        if let cached = widthCacheLock.withLock({ state -> [CGFloat]? in
+            guard let node = state.dict[key] else { return nil }
+            state.hits += 1
+            moveToTail(&state, node)
+            return node.value
+        }) {
+            return cached
+        }
+
+        let calculated = calculateColumnWidthsUncached(header: header, rows: rows, baseFont: baseFont)
+        widthCacheLock.withLock { state in
+            state.misses += 1
+            if let existing = state.dict[key] {
+                existing.value = calculated
+                moveToTail(&state, existing)
+            } else {
+                let node = WidthCacheNode(key: key, value: calculated)
+                state.dict[key] = node
+                appendToTail(&state, node)
+            }
+
+            while state.dict.count > widthCacheCapacity, let evict = state.head {
+                detachNode(&state, evict)
+                state.dict.removeValue(forKey: evict.key)
+            }
+        }
+
+        return calculated
+    }
+
+    private static func calculateColumnWidthsUncached(
         header: [MarkdownParser.TableCell],
         rows: [[MarkdownParser.TableCell]],
         baseFont: Font
@@ -65,6 +251,31 @@ public struct TextMeasurement {
             }
         }
         return finalWidths
+    }
+
+    // Internal testing hooks
+    static func clearColumnWidthCacheForTesting() {
+        widthCacheLock.withLock { state in
+            state.dict.removeAll()
+            state.head = nil
+            state.tail = nil
+            state.hits = 0
+            state.misses = 0
+        }
+    }
+
+    static func columnWidthCacheStatsForTesting() -> (hits: Int, misses: Int, entries: Int) {
+        widthCacheLock.withLock { state in
+            (state.hits, state.misses, state.dict.count)
+        }
+    }
+
+    static func calculateColumnWidthsUncachedForTesting(
+        header: [MarkdownParser.TableCell],
+        rows: [[MarkdownParser.TableCell]],
+        baseFont: Font
+    ) -> [CGFloat] {
+        calculateColumnWidthsUncached(header: header, rows: rows, baseFont: baseFont)
     }
     
     /// Measure the width of inline nodes with proper formatting
