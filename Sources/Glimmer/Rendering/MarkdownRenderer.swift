@@ -24,10 +24,25 @@ public struct MarkdownRenderer {
     private static let stats = OSAllocatedUnfairLock(initialState: (hits: 0, misses: 0))
 
     public mutating func render(blocks: [MarkdownParser.BlockNode], configuration: MarkdownConfiguration) -> AttributedString {
-        // Precompute a style fingerprint for this render session
-        let styleFP = styleKey(configuration)
-        self.sessionStyleKey = styleFP
-        // Precompute attribute containers used repeatedly
+        beginSession(configuration: configuration)
+        var result = AttributedString()
+
+        // First pass: render main content and collect footnote definitions
+        let mainContent = renderBlocks(blocks, configuration: configuration)
+        result += mainContent
+
+        // Render footnotes if any were found
+        if !footnoteDefinitions.isEmpty {
+            result += renderFootnoteSection(configuration: configuration)
+        }
+
+        return result
+    }
+
+    /// Primes the per-session attribute caches so inline rendering can be used
+    /// standalone (outside `render(blocks:)`), e.g. by the reveal flattener.
+    public mutating func beginSession(configuration: MarkdownConfiguration) {
+        sessionStyleKey = styleKey(configuration)
         cachedMentionAttrs = mentionAttributes(configuration: configuration)
         cachedIssueAttrs = issueAttributes(configuration: configuration)
         cachedRepoAttrs = repoAttributes(configuration: configuration)
@@ -36,20 +51,8 @@ public struct MarkdownRenderer {
         cachedBlockquoteAttrs = blockquoteAttributes(configuration: configuration)
         cachedTableHeaderAttrs = tableHeaderAttributes(configuration: configuration)
         cachedCodeInlineAttrs = codeInlineAttributes(configuration: configuration)
-        var result = AttributedString()
-        
-        // First pass: render main content and collect footnote definitions
-        let mainContent = renderBlocks(blocks, configuration: configuration)
-        result += mainContent
-        
-        // Render footnotes if any were found
-        if !footnoteDefinitions.isEmpty {
-            result += renderFootnoteSection(configuration: configuration)
-        }
-        
-        return result
     }
-    
+
     private mutating func renderBlocks(_ blocks: [MarkdownParser.BlockNode], configuration: MarkdownConfiguration) -> AttributedString {
         var result = AttributedString()
         for (index, block) in blocks.enumerated() {
