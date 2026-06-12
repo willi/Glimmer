@@ -8,32 +8,39 @@ import SwiftUI
 public struct MarkdownConfiguration: Hashable, Sendable {
     // MARK: - Feature Flags
 
+    // GitHub-specific extensions (mentions, issue/PR/repo references, commit
+    // SHAs, emoji shortcodes, bare-URL autolinks) are OFF by default: plain
+    // CommonMark-style rendering out of the box. Opt in per flag, or all at
+    // once via `MarkdownConfiguration.github` /
+    // `MarkdownConfigurationBuilder.enableGitHubFeatures()`.
+    // (Tables, task lists, and strikethrough are always parsed.)
+
     /// Enables or disables the parsing of GitHub-style @mentions (e.g., `@username`).
-    /// Default: `true`.
+    /// Default: `false`.
     public var enableMentions: Bool
 
     /// Enables or disables the parsing of GitHub-style issue references (e.g., `#123`).
-    /// Default: `true`.
+    /// Default: `false`.
     public var enableIssueReferences: Bool
 
-    /// Enables or disables the automatic conversion of URLs and email addresses into tappable links.
-    /// Default: `true`.
+    /// Enables or disables the automatic conversion of bare URLs and email addresses into tappable links.
+    /// Default: `false`.
     public var enableAutolinks: Bool
 
     /// Enables or disables the conversion of full-length commit SHAs into tappable links.
-    /// Default: `true`.
+    /// Default: `false`.
     public var enableCommitSHAs: Bool
 
     /// Enables or disables the conversion of repository references (e.g., `owner/repo`) into tappable links.
-    /// Default: `true`.
+    /// Default: `false`.
     public var enableRepositoryReferences: Bool
 
     /// Enables or disables the conversion of pull request references (e.g., `owner/repo#123`) into tappable links.
-    /// Default: `true`.
+    /// Default: `false`.
     public var enablePullRequestReferences: Bool
 
     /// Enables or disables the conversion of emoji shortcodes (e.g., `:rocket:`) into Unicode characters or images.
-    /// Default: `true`.
+    /// Default: `false`.
     public var enableEmojiShortcodes: Bool
 
     /// Enables or disables the parsing of footnotes (e.g., `[^1]`).
@@ -143,13 +150,13 @@ public struct MarkdownConfiguration: Hashable, Sendable {
 
     /// Public initializer to allow for custom configurations.
     public init(
-        enableMentions: Bool = true,
-        enableIssueReferences: Bool = true,
-        enableAutolinks: Bool = true,
-        enableCommitSHAs: Bool = true,
-        enableRepositoryReferences: Bool = true,
-        enablePullRequestReferences: Bool = true,
-        enableEmojiShortcodes: Bool = true,
+        enableMentions: Bool = false,
+        enableIssueReferences: Bool = false,
+        enableAutolinks: Bool = false,
+        enableCommitSHAs: Bool = false,
+        enableRepositoryReferences: Bool = false,
+        enablePullRequestReferences: Bool = false,
+        enableEmojiShortcodes: Bool = false,
         enableFootnotes: Bool = true,
         enableCaching: Bool = true,
         enableRenderCaching: Bool = true,

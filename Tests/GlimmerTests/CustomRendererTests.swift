@@ -4,9 +4,9 @@ import XCTest
 final class CustomRendererTests: XCTestCase {
     func testHTMLRendererRendersGitHubReferencesAndAutolinks() {
         let markdown = "@alice fixed #42 in owner/repo and owner/repo#7 at https://example.com commit deadbeef."
-        let blocks = MarkdownParser.parse(markdown)
+        let blocks = MarkdownParser.parse(markdown, configuration: .github)
         let renderer = HTMLMarkdownRenderer()
-        let html = renderer.render(blocks: blocks, configuration: .default)
+        let html = renderer.render(blocks: blocks, configuration: .github)
 
         XCTAssertTrue(html.contains("https://github.com/alice"))
         XCTAssertTrue(html.contains("class=\"issue-ref\">#42"))

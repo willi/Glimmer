@@ -17,9 +17,37 @@ final class MarkdownParserTests: XCTestCase {
     }
     
     func testConfigurationDefaults() {
+        // GitHub-specific extensions are opt-in: all disabled by default.
         let config = MarkdownConfiguration.default
-        XCTAssertTrue(config.enableMentions, "Mentions should be enabled by default")
-        XCTAssertTrue(config.enableIssueReferences, "Issue references should be enabled by default")
+        XCTAssertFalse(config.enableMentions, "Mentions should be disabled by default")
+        XCTAssertFalse(config.enableIssueReferences, "Issue references should be disabled by default")
+        XCTAssertFalse(config.enableAutolinks, "Autolinks should be disabled by default")
+        XCTAssertFalse(config.enableCommitSHAs, "Commit SHAs should be disabled by default")
+        XCTAssertFalse(config.enableRepositoryReferences, "Repo references should be disabled by default")
+        XCTAssertFalse(config.enablePullRequestReferences, "PR references should be disabled by default")
+        XCTAssertFalse(config.enableEmojiShortcodes, "Emoji shortcodes should be disabled by default")
+    }
+
+    func testGitHubPresetEnablesAllGitHubFeatures() {
+        let config = MarkdownConfiguration.github
+        XCTAssertTrue(config.enableMentions)
+        XCTAssertTrue(config.enableIssueReferences)
+        XCTAssertTrue(config.enableAutolinks)
+        XCTAssertTrue(config.enableCommitSHAs)
+        XCTAssertTrue(config.enableRepositoryReferences)
+        XCTAssertTrue(config.enablePullRequestReferences)
+        XCTAssertTrue(config.enableEmojiShortcodes)
+    }
+
+    func testGitHubFeaturesDisabledByDefaultInParsing() {
+        let md = "@alice fixed #42 in owner/repo at https://example.com :rocket:"
+        let blocks = MarkdownParser.parse(md)
+        guard case .paragraph(let inlines) = blocks.first else { return XCTFail("Expected paragraph") }
+        XCTAssertFalse(inlines.contains { if case .mention = $0 { return true } else { return false } })
+        XCTAssertFalse(inlines.contains { if case .issueReference = $0 { return true } else { return false } })
+        XCTAssertFalse(inlines.contains { if case .repositoryReference = $0 { return true } else { return false } })
+        XCTAssertFalse(inlines.contains { if case .autolink = $0 { return true } else { return false } })
+        XCTAssertFalse(inlines.contains { if case .image = $0 { return true } else { return false } })
     }
     
     func testCachedParser() {

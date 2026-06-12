@@ -4,7 +4,7 @@ import XCTest
 final class InlineAutolinkTests: XCTestCase {
     func testAngleBracketURL() {
         let md = "<https://example.com>"
-        let blocks = MarkdownParser.parse(md)
+        let blocks = MarkdownParser.parse(md, configuration: .github)
         guard case let .paragraph(children) = blocks.first else { return XCTFail("Expected paragraph") }
         guard case .autolink(let url, let type, let original) = children.first else { return XCTFail("Expected autolink") }
         XCTAssertEqual(url.absoluteString, "https://example.com")
@@ -14,7 +14,7 @@ final class InlineAutolinkTests: XCTestCase {
 
     func testAngleBracketEmail() {
         let md = "<user@example.com>"
-        let blocks = MarkdownParser.parse(md)
+        let blocks = MarkdownParser.parse(md, configuration: .github)
         guard case let .paragraph(children) = blocks.first else { return XCTFail("Expected paragraph") }
         guard case .autolink(let url, let type, let original) = children.first else { return XCTFail("Expected autolink") }
         XCTAssertEqual(url.absoluteString, "mailto:user@example.com")
@@ -24,7 +24,7 @@ final class InlineAutolinkTests: XCTestCase {
 
     func testWWWAutolink() {
         let md = "Go www.example.com!"
-        let blocks = MarkdownParser.parse(md)
+        let blocks = MarkdownParser.parse(md, configuration: .github)
         guard case let .paragraph(children) = blocks.first else { return XCTFail("Expected paragraph") }
         // Match any autolink in children
         guard let node = children.first(where: { if case .autolink = $0 { return true } else { return false } }) else {
@@ -39,7 +39,7 @@ final class InlineAutolinkTests: XCTestCase {
 
     func testTrimTrailingPunctuation() {
         let md = "See http://example.com, now."
-        let blocks = MarkdownParser.parse(md)
+        let blocks = MarkdownParser.parse(md, configuration: .github)
         guard case let .paragraph(children) = blocks.first else { return XCTFail("Expected paragraph") }
         // Should contain an autolink to the domain without comma
         XCTAssertTrue(children.contains { node in
@@ -50,7 +50,7 @@ final class InlineAutolinkTests: XCTestCase {
 
     func testTrimUnbalancedClosingParen() {
         let md = "Visit http://a.com)."
-        let blocks = MarkdownParser.parse(md)
+        let blocks = MarkdownParser.parse(md, configuration: .github)
         guard case let .paragraph(children) = blocks.first else { return XCTFail("Expected paragraph") }
         XCTAssertTrue(children.contains { node in
             if case let .autolink(url, _, _) = node { return url.absoluteString == "http://a.com" }
@@ -60,7 +60,7 @@ final class InlineAutolinkTests: XCTestCase {
 
     func testBalancedParensPreserved() {
         let md = "See http://example.com/path(foo)."
-        let blocks = MarkdownParser.parse(md)
+        let blocks = MarkdownParser.parse(md, configuration: .github)
         guard case let .paragraph(children) = blocks.first else { return XCTFail("Expected paragraph") }
         XCTAssertTrue(children.contains { node in
             if case let .autolink(url, _, _) = node { return url.absoluteString == "http://example.com/path(foo)" }
@@ -70,7 +70,7 @@ final class InlineAutolinkTests: XCTestCase {
 
     func testAngleBracketWithTrailingPunctuation() {
         let md = "<https://example.com>."
-        let blocks = MarkdownParser.parse(md)
+        let blocks = MarkdownParser.parse(md, configuration: .github)
         guard case let .paragraph(children) = blocks.first else { return XCTFail("Expected paragraph") }
         guard case .autolink(let url, let type, let original) = children.first else { return XCTFail("Expected autolink") }
         XCTAssertEqual(url.absoluteString, "https://example.com")
@@ -80,7 +80,7 @@ final class InlineAutolinkTests: XCTestCase {
 
     func testWWWAutolinkTrimComma() {
         let md = "Check www.site.com, please"
-        let blocks = MarkdownParser.parse(md)
+        let blocks = MarkdownParser.parse(md, configuration: .github)
         guard case let .paragraph(children) = blocks.first else { return XCTFail("Expected paragraph") }
         XCTAssertTrue(children.contains { node in
             if case let .autolink(url, _, original) = node {

@@ -21,6 +21,7 @@ struct BasicFeaturesDemo: View {
             ScrollView {
                 MarkdownView(
                     markdown: interactiveMarkdown,
+                    configuration: .github,
                     onLinkTap: { url in
                         print("🔗 Link: \(url)")
                     },

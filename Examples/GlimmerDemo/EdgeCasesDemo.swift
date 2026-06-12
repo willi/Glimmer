@@ -57,7 +57,7 @@ struct EdgeCasesDemo: View {
             ScrollView {
                 MarkdownView(
                     markdown: testCases[selectedCase].markdown,
-                    configuration: .default,
+                    configuration: .github,
                     onLinkTap: { url in
                         print("🔗 Edge case link: \(url)")
                     }

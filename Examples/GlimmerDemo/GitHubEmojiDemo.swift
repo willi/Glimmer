@@ -56,7 +56,7 @@ struct GitHubEmojiDemo: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                     
-                    MarkdownTextWithAsyncImages(customEmojiExample)
+                    MarkdownTextWithAsyncImages(customEmojiExample, configuration: .github)
                         .padding()
                         .background(Color.gray.opacity(0.1))
                         .cornerRadius(8)
@@ -65,7 +65,7 @@ struct GitHubEmojiDemo: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                     
-                    MarkdownText(customEmojiExample)
+                    MarkdownText(customEmojiExample, configuration: .github)
                         .padding()
                         .background(Color.blue.opacity(0.1))
                         .cornerRadius(8)

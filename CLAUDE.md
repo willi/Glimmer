@@ -87,6 +87,7 @@ Markdown Text → Parser (AST) → AttributedString → SwiftUI Views
 **Configuration**
 - `MarkdownConfiguration`: SwiftUI-friendly configuration with builder API
 - Presets: `.default`, `.github`, `.minimal`, `.performance`
+- **GitHub-specific extensions are OFF by default** (@mentions, issue/PR/repo references, commit SHAs, emoji shortcodes, bare-URL autolinks). Opt in via `.github`, `enableGitHubFeatures()`, or individual flags. Tables/task lists/strikethrough are always parsed.
 - Follows Apple HIG for typography, colors, and spacing
 
 ### Key Design Patterns

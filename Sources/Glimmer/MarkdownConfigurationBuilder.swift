@@ -4,13 +4,14 @@ import SwiftUI
 /// Builder pattern for creating MarkdownConfiguration instances
 public class MarkdownConfigurationBuilder {
     // MARK: - Feature Flags
-    private var enableMentions = true
-    private var enableIssueReferences = true
-    private var enableAutolinks = true
-    private var enableCommitSHAs = true
-    private var enableRepositoryReferences = true
-    private var enablePullRequestReferences = true
-    private var enableEmojiShortcodes = true
+    // GitHub-specific extensions are off by default (see MarkdownConfiguration).
+    private var enableMentions = false
+    private var enableIssueReferences = false
+    private var enableAutolinks = false
+    private var enableCommitSHAs = false
+    private var enableRepositoryReferences = false
+    private var enablePullRequestReferences = false
+    private var enableEmojiShortcodes = false
     private var enableFootnotes = true
     private var enableCaching = true
     private var enableRenderCaching = true
@@ -50,6 +51,8 @@ public class MarkdownConfigurationBuilder {
     
     // MARK: - Feature Configuration
     
+    /// Enables every GitHub-specific extension: @mentions, issue/PR/repo
+    /// references, commit SHAs, emoji shortcodes, and bare-URL autolinks.
     @discardableResult
     public func enableGitHubFeatures() -> Self {
         enableMentions = true
@@ -57,9 +60,12 @@ public class MarkdownConfigurationBuilder {
         enableCommitSHAs = true
         enableRepositoryReferences = true
         enablePullRequestReferences = true
+        enableEmojiShortcodes = true
+        enableAutolinks = true
         return self
     }
-    
+
+    /// Disables every GitHub-specific extension (the default state).
     @discardableResult
     public func disableGitHubFeatures() -> Self {
         enableMentions = false
@@ -67,6 +73,8 @@ public class MarkdownConfigurationBuilder {
         enableCommitSHAs = false
         enableRepositoryReferences = false
         enablePullRequestReferences = false
+        enableEmojiShortcodes = false
+        enableAutolinks = false
         return self
     }
     

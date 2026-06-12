@@ -10,6 +10,7 @@ struct QuickExampleView: View {
         ScrollView {
             MarkdownView(
                 markdown: markdown,
+                configuration: .github,
                 onLinkTap: { url in
                     print("🔗 Link tapped: \(url)")
                 },

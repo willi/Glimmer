@@ -128,7 +128,7 @@ final class ParserFeatureCoverageTests: XCTestCase {
 
     func testIssueReferenceParses() {
         let markdown = "Fixes #123."
-        let blocks = MarkdownParser.parse(markdown)
+        let blocks = MarkdownParser.parse(markdown, configuration: .github)
         guard case .paragraph(let inlines) = blocks.first else {
             return XCTFail("Expected paragraph")
         }
@@ -161,7 +161,7 @@ final class ParserFeatureCoverageTests: XCTestCase {
 
     func testEmojiShortcodeParsesToUnicodeText() {
         let markdown = ":rocket:"
-        let blocks = MarkdownParser.parse(markdown)
+        let blocks = MarkdownParser.parse(markdown, configuration: .github)
         guard case .paragraph(let inlines) = blocks.first else {
             return XCTFail("Expected paragraph")
         }
@@ -175,7 +175,7 @@ final class ParserFeatureCoverageTests: XCTestCase {
         }
 
         let markdown = ":octocat:"
-        let blocks = MarkdownParser.parse(markdown)
+        let blocks = MarkdownParser.parse(markdown, configuration: .github)
         guard case .paragraph(let inlines) = blocks.first else {
             return XCTFail("Expected paragraph")
         }

@@ -82,6 +82,7 @@ Additional note: Keep the public API surface minimal and well-documented.
 ### Configuration
 - `MarkdownConfiguration`: Configuration type with builder-style API.
 - Presets: `.default`, `.github`, `.minimal`, `.performance`.
+- GitHub-specific extensions (mentions, issue/PR/repo refs, commit SHAs, emoji shortcodes, bare-URL autolinks) are disabled by default; opt in via `.github` or `enableGitHubFeatures()`. Tests/demos exercising GFM must pass an opted-in configuration.
 
 ### Key Design Patterns
 - AST-based parsing: parse once, render multiple formats.

@@ -9,7 +9,7 @@ A high-performance, SwiftUI-native Markdown parser and renderer with full GitHub
 - 📝 **Full GFM Support**: Complete GitHub Flavored Markdown specification support, including all GitHub autolinks
 - 🎨 **Beautiful Rendering**: Proper nested list formatting, flexible image rendering, and themed syntax highlighting
 - 🌈 **Extended Syntax Highlighting**: 18+ languages including Swift, Go, Rust, TypeScript, Python, Ruby, Java, C++, SQL, HTML, CSS, and JSON
-- 🔗 **Interactive Elements**: Tappable links, @mentions, issue references, commit SHAs, and repository references
+- 🔗 **Interactive Elements**: Tappable links, @mentions, issue references, commit SHAs, and repository references (GitHub-specific extensions are opt-in via `.github`)
 - 🔧 **Highly Configurable**: Fluent builder API for easy configuration with presets for common use cases
 - 📱 **iOS Native**: Optimized specifically for iOS 18+
 - 🎯 **SwiftUI Native**: Built specifically for SwiftUI with `AttributedString` rendering
@@ -97,10 +97,10 @@ MarkdownView(
     )
 )
 
-// Interactive usage with callbacks
+// Interactive usage with callbacks (GitHub extensions need the .github preset)
 MarkdownView(
     markdown: content,
-    configuration: .default,
+    configuration: .github,
     onLinkTap: { url in 
         // Handle link tap
         print("Tapped link: \(url)")
@@ -169,6 +169,9 @@ MarkdownTextWithAsyncImages(markdownWithImages)
 - **Autolinks** (`<https://example.com>` or `<user@example.com>`)
 
 ### GitHub Extensions
+
+> **Disabled by default.** All GitHub-specific extensions below (except task lists, which are core markdown here) are opt-in: use the `MarkdownConfiguration.github` preset, `MarkdownConfiguration.builder().enableGitHubFeatures()`, or the individual `enable…` flags. The default configuration renders plain CommonMark-style markdown (including tables, task lists, and strikethrough).
+
 - **@mentions** (e.g., @username)
 - **Issue References** (e.g., #123)
 - **Task Lists** (`- [ ]` and `- [x]`)
