@@ -50,6 +50,19 @@ public struct RevealBlock: Identifiable, Sendable {
     public let node: MarkdownParser.BlockNode?
     /// The block becomes visible once `revealedCount >= firstRevealIndex`.
     public let firstRevealIndex: Int
+
+    /// Identity for SwiftUI diffing: changes when a streaming block changes
+    /// shape (e.g. paragraph → wholeBlock once a code fence completes), so
+    /// the new representation transitions in instead of mutating in place.
+    public var viewIdentity: String {
+        switch kind {
+        case .paragraph: "\(id)-p"
+        case .heading(let level): "\(id)-h\(level)"
+        case .listItem(let marker, let depth): "\(id)-li\(depth)-\(marker)"
+        case .blockquote(let depth): "\(id)-q\(depth)"
+        case .wholeBlock: "\(id)-b"
+        }
+    }
 }
 
 /// The flattened reveal model for a buffer (spec §5, advanced hosts).

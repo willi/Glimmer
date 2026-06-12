@@ -12,12 +12,17 @@ public struct GlimmerRevealView: View {
 
     @State private var model: RevealModel = .empty
     @State private var driver: RevealDriver
+    @State private var fullPlainText: String = ""
+    @State private var didComplete = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.openURL) private var openURL
 
-    /// - Note: `reveal.style` and `reveal.revealID` are captured when the view
-    ///   identity is created. To switch styles mid-stream, give the view a new
-    ///   identity (e.g. `.id(style)`).
+    /// - Note: the entire `RevealConfiguration` except `isStreaming` is
+    ///   captured when the view identity is created (style, catch-up policy,
+    ///   `revealID`, duration cap). To change any of them mid-stream, give the
+    ///   view a new identity (e.g. `.id(style)`). Hosts that re-mount the view
+    ///   (lazy lists, optimistic→final message swaps) should set `revealID` so
+    ///   progress resumes instead of replaying (spec R6).
     public init(
         markdown: String,
         reveal: RevealConfiguration,
@@ -35,9 +40,17 @@ public struct GlimmerRevealView: View {
 
     public var body: some View {
         if reveal.style == .none {
-            // Opt-out: today's behavior, no reveal machinery (spec R12).
-            MarkdownView(markdown: markdown, configuration: configuration, onLinkTap: onLinkTap)
-                .onAppear { onComplete?() }
+            // Opt-out: settled rendering with no reveal machinery (spec R12).
+            // Non-scrolling content so hosts control their own scroll container.
+            InteractiveMarkdownContent(
+                blocks: Glimmer.parse(markdown, configuration: configuration),
+                configuration: configuration,
+                onLinkTap: handleLink,
+                onMentionTap: nil,
+                onIssueTap: nil,
+                onFootnoteTap: nil
+            )
+            .onAppear { fireCompletionOnce() }
         } else {
             revealBody
         }
@@ -49,7 +62,7 @@ public struct GlimmerRevealView: View {
 
     private var revealBody: some View {
         VStack(alignment: .leading, spacing: 16) {
-            ForEach(visibleBlocks) { block in
+            ForEach(visibleBlocks, id: \.viewIdentity) { block in
                 RevealBlockView(
                     block: block,
                     revealedCount: driver.revealedCount,
@@ -72,7 +85,7 @@ public struct GlimmerRevealView: View {
         }
         .task {
             await driver.run()
-            if driver.isComplete { onComplete?() }
+            if driver.isComplete { fireCompletionOnce() }
         }
     }
 
@@ -97,17 +110,20 @@ public struct GlimmerRevealView: View {
             blocks, granularity: reveal.style.granularity, configuration: configuration
         )
         driver.update(totalCountable: model.countableCount, isStreaming: reveal.isStreaming)
-    }
-
-    /// VoiceOver reads the full current text, not per-word fragments (R11).
-    private var fullPlainText: String {
-        model.blocks.flatMap(\.words).flatMap(\.atoms).reduce(into: "") { acc, atom in
+        // Cache VoiceOver text so it isn't recomputed on every body evaluation (Fix 6).
+        fullPlainText = model.blocks.flatMap(\.words).flatMap(\.atoms).reduce(into: "") { acc, atom in
             switch atom.kind {
             case .text(let s), .space(let s): acc += String(s.characters)
             case .lineBreak: acc += "\n"
             case .block: break
             }
         }
+    }
+
+    private func fireCompletionOnce() {
+        guard !didComplete else { return }
+        didComplete = true
+        onComplete?()
     }
 
     private func handleLink(_ url: URL) {
@@ -295,32 +311,51 @@ struct RevealScrambleTextView: View {
         "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz0123456789@#%&*+=<>/?"
     )
 
+    /// True when every countable atom in the block is at or below revealedCount.
+    private var isFullyRevealed: Bool {
+        !block.words.contains { word in
+            word.atoms.contains { $0.isCountable && $0.revealIndex > revealedCount }
+        }
+    }
+
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.055)) { _ in
-            RevealFlowLayout(lineSpacing: 2) {
-                ForEach(block.words) { word in
-                    if word.isLineBreak {
-                        Color.clear
-                            .frame(width: 0, height: 0)
-                            .revealLineBreak()
-                    } else if word.isWhitespace {
-                        if case .space(let s) = word.atoms[0].kind {
-                            Text(s)
-                        }
-                    } else {
-                        HStack(spacing: 0) {
-                            ForEach(word.atoms) { atom in
-                                if case .text(let s) = atom.kind {
-                                    if atom.revealIndex <= revealedCount {
-                                        Text(s)
-                                    } else {
-                                        Text(scrambled(s)).opacity(0.7)
-                                    }
+        if isFullyRevealed {
+            // Fully revealed: stop the 55ms timeline; nothing left to scramble (R10).
+            flowContent { s in s }
+        } else {
+            TimelineView(.periodic(from: .now, by: 0.055)) { _ in
+                flowContent { s in scrambled(s) }
+            }
+        }
+    }
+
+    /// Flow layout content, parameterized by a transform applied to unrevealed atoms.
+    @ViewBuilder private func flowContent(
+        unrevealed transform: @escaping (AttributedString) -> AttributedString
+    ) -> some View {
+        RevealFlowLayout(lineSpacing: 2) {
+            ForEach(block.words) { word in
+                if word.isLineBreak {
+                    Color.clear
+                        .frame(width: 0, height: 0)
+                        .revealLineBreak()
+                } else if word.isWhitespace {
+                    if case .space(let s) = word.atoms[0].kind {
+                        Text(s)
+                    }
+                } else {
+                    HStack(spacing: 0) {
+                        ForEach(word.atoms) { atom in
+                            if case .text(let s) = atom.kind {
+                                if atom.revealIndex <= revealedCount {
+                                    Text(s)
+                                } else {
+                                    Text(transform(s)).opacity(0.7)
                                 }
                             }
                         }
-                        .accessibilityHidden(true)
                     }
+                    .accessibilityHidden(true)
                 }
             }
         }

@@ -19,6 +19,7 @@ public final class RevealDriver {
 
     private var totalCountable = 0
     private var isStreaming: Bool
+    private var hasReceivedUpdate = false
     private let style: RevealStyle
     private let catchUp: CatchUpPolicy
     private let revealID: String?
@@ -52,6 +53,7 @@ public final class RevealDriver {
 
     /// Feeds the driver the current buffer state. Call on every parse.
     public func update(totalCountable: Int, isStreaming: Bool) {
+        hasReceivedUpdate = true
         self.totalCountable = totalCountable
         self.isStreaming = isStreaming
         if revealedCount > totalCountable {
@@ -70,7 +72,7 @@ public final class RevealDriver {
                     revealedCount = totalCountable
                 } else {
                     var interval = RevealPacing.intervalSeconds(
-                        style: style, behind: behind, catchUp: catchUp, jitter: .random(in: 0...1)
+                        style: style, behind: behind, catchUp: catchUp, jitter: .random(in: 0..<1)
                     )
                     if let cap = demoDurationCap, totalCountable > 0 {
                         interval = min(interval, cap / Double(totalCountable))
@@ -81,7 +83,8 @@ public final class RevealDriver {
                     revealedCount = min(totalCountable, revealedCount + step)
                 }
                 store.record(revealedCount, for: revealID)
-            } else if !isStreaming {
+            } else if hasReceivedUpdate && !isStreaming {
+                // Never complete before the first buffer update — .task may start before the initial rebuild.
                 isComplete = true
                 return
             } else {
