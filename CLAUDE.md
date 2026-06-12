@@ -8,11 +8,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Testing
 ```bash
-# Run all tests (requires iOS Simulator)
-xcodebuild -scheme Glimmer-Package -destination 'platform=iOS Simulator,name=iPhone 15' test
+# Run all tests (requires iOS Simulator; substitute any installed device —
+# list with: xcrun simctl list devices available)
+xcodebuild -scheme Glimmer -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 
 # Run specific test
-xcodebuild -scheme Glimmer-Package -destination 'platform=iOS Simulator,name=iPhone 15' test -only-testing:GlimmerTests/MarkdownParserTests
+xcodebuild -scheme Glimmer -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test -only-testing:GlimmerTests/MarkdownParserTests
 ```
 
 ### Demo App
@@ -25,13 +26,15 @@ open Examples/GlimmerDemo/GlimmerDemo.xcodeproj
 ### Build Package
 ```bash
 # Build package (iOS only)
-xcodebuild -scheme Glimmer-Package -destination 'platform=iOS Simulator,name=iPhone 15' build
+xcodebuild -scheme Glimmer -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
 ```
 
 ### Important Notes
 - **iOS-only package**: `swift test` on macOS will fail due to UIKit dependencies
+- **Scheme name**: The package scheme is `Glimmer` (there is no `Glimmer-Package` scheme)
 - **Swift Package Manager**: Primary package manifest uses Swift tools 5.9+
 - **Public API surface**: Keep minimal and well-documented
+- **Demo app sources**: `Examples/GlimmerDemo/GlimmerDemo.xcodeproj` uses an explicit source file list — new demo `.swift` files must be added to `project.pbxproj` (PBXBuildFile + PBXFileReference + Sources phase) or the app target won't compile them
 
 ## Architecture Overview
 
@@ -49,6 +52,7 @@ Markdown Text → Parser (AST) → AttributedString → SwiftUI Views
 - `StreamingMarkdownView`: SwiftUI view for real-time markdown updates
 - `AttributedTextView`: SwiftUI wrapper for attributed text rendering
 - `MarkdownText`: Pure SwiftUI text rendering without images
+- `GlimmerRevealView` (`Sources/Glimmer/Reveal/`): Animated per-token reveal of streaming markdown (11 styles)
 
 **SwiftUI Integration Features**
 - Native `AttributedString` rendering for optimal SwiftUI performance
@@ -72,6 +76,13 @@ Markdown Text → Parser (AST) → AttributedString → SwiftUI Views
 **Rendering** (`Sources/Glimmer/Rendering/`)
 - `MarkdownRenderer`: Converts AST to `AttributedString` for SwiftUI `Text`
 - `CustomRenderer`: Protocol for alternative formats (HTML/PlainText)
+
+**Streaming Reveal** (`Sources/Glimmer/Reveal/`)
+- Pipeline: buffer → parse (cached) → `RevealFlattener` (AST → `RevealAtom`s with stable ordinal ids) → `RevealDriver` (clock-paced `revealedCount` with adaptive catch-up) → `GlimmerRevealView` (renders visible atoms, newest animate in)
+- `RevealStyle`/`RevealTreatment`/`RevealConfiguration`: the 11 styles, their granularities (char/word/line), cadences, and entrance treatments (`RevealTypes.swift`)
+- `RevealProgressStore`: monotonic per-`revealID` progress so re-mounted views resume instead of replaying
+- `RevealPacing`/`RevealTrail`: pure, unit-tested pacing and trail-opacity math
+- Settle strategy A: the reveal view IS the settled view — no engine swap, no layout pop; styling reuses `MarkdownRenderer.renderInlines` via `beginSession`
 
 **Configuration**
 - `MarkdownConfiguration`: SwiftUI-friendly configuration with builder API
@@ -140,6 +151,12 @@ Markdown Text → Parser (AST) → AttributedString → SwiftUI Views
 4. Handle `AttributedString` generation in `MarkdownRenderer.swift`
 5. Test with SwiftUI previews and edge cases
 
+### Adding a Reveal Style
+1. Add the case to `RevealStyle` in `RevealTypes.swift` and fill in every mapping switch (`displayName`, `granularity`, `treatment`, `nominalUnitIntervalMs`, `unitsPerStep` — all exhaustive, the compiler enforces it)
+2. If it needs a new entrance animation, add a `RevealTreatment` case, its curve in `RevealTreatments.swift`, and either a per-unit effect in `RevealUnitView` or a dedicated render path in `GlimmerRevealView` (see `RevealTrailTextView`/`RevealScrambleTextView` for cursor-driven styles)
+3. Update the mapping assertions in `Tests/GlimmerTests/RevealStyleTests.swift`; put any pure math in `RevealPacing.swift` and test it in `RevealDriverTests.swift`
+4. The demo picker picks up new styles automatically via `RevealStyle.allCases`
+
 ### Extending GitHub Features
 1. Add pattern matching in `GFMExtensions.swift`
 2. Update `MarkdownView` for SwiftUI tap callbacks
@@ -159,6 +176,7 @@ Markdown Text → Parser (AST) → AttributedString → SwiftUI Views
 - **Views**: SwiftUI components, the primary API for consumers
 - **Parser**: AST generation optimized for SwiftUI rendering
 - **Rendering**: AST to `AttributedString` conversion for SwiftUI `Text`
+- **Reveal**: Animated streaming reveal (atom model, paced driver, reveal-aware views)
 - **Utilities**: SwiftUI helpers (font mapping, text measurement, themes)
 - **Linter**: Markdown validation rules
 - **Export**: AST to markdown/HTML conversion

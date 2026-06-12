@@ -22,6 +22,7 @@ A high-performance, SwiftUI-native Markdown parser and renderer with full GitHub
 - ⚡ **Parallel Parsing**: Multi-threaded parsing for documents >10KB with configurable concurrency
 - 💾 **Advanced Caching**: Size-limited cache (50MB default) with TTL, LRU eviction, and memory pressure handling
 - 🌊 **Streaming Support**: Process markdown incrementally with `StreamingMarkdownView` for real-time updates
+- ✨ **Streaming Reveal**: Animated per-word/character reveal of streaming LLM output via `GlimmerRevealView` — 11 styles (typewriter, word fade, blur-in, shimmer, diffusion, trail fade, …) with adaptive catch-up and cross-remount resume
 - 🔍 **Markdown Linting**: 20+ configurable lint rules with severity levels and fix suggestions
 - 📤 **Multiple Export Formats**: Export to HTML, Plain Text, or back to Markdown
 - 🎭 **Custom Renderers**: Protocol-based extensibility for custom output formats
@@ -321,6 +322,31 @@ let finalBlocks = parser.finish()
 - **Network streaming**: Display content as it downloads
 - **Progressive rendering**: Better perceived performance
 
+## Streaming Reveal
+
+`GlimmerRevealView` renders streaming LLM/chat output with per-unit animated reveal — fully styled markdown from the first frame (no raw `**` markers), settling into Glimmer's normal rendering with zero layout pop because the reveal path *is* the settled path.
+
+```swift
+GlimmerRevealView(
+    markdown: message.text,                        // grows as tokens stream in
+    reveal: RevealConfiguration(
+        style: .wordFade,                          // any of the 11 styles
+        catchUp: .adaptive(maxLagSeconds: 1.5),    // accelerate when the buffer races ahead
+        isStreaming: message.isStreaming,
+        revealID: message.turnID                   // resume across re-mounts (optimistic→final swaps)
+    ),
+    onLinkTap: { url in /* handle */ },
+    onComplete: { /* reveal finished */ }
+)
+
+// One-shot mode for previews/demos (fits long inputs into a duration cap):
+GlimmerRevealView.demo("# Hello **world**", style: .shimmer, durationCap: 6)
+```
+
+**Styles** (`RevealStyle`): `typewriter` (blinking caret), `llmTokens`, `wordFade`, `blurIn`, `lineSlide`, `charCascade`, `shimmer`, `tracking`, `diffusion` (scramble→lock), `waveGlow`, and `trailFade` (a soft opacity gradient trailing the cursor, like Gemini's reveal). Use `.none` to opt out entirely.
+
+The reveal cadence is clock-driven and decoupled from how fast text arrives; rich elements (code blocks, tables, images, blockquotes) reveal as whole units, links stay tappable, VoiceOver reads the full text, and Reduce Motion downgrades to a plain progressive reveal. Try every style in the demo app under **Advanced Demos → Streaming Reveal**.
+
 ## Custom Renderers
 
 Render markdown to different output formats:
@@ -411,6 +437,17 @@ Sources/Glimmer/
 ├── Rendering/
 │   ├── CustomRenderer.swift
 │   └── MarkdownRenderer.swift
+├── Reveal/
+│   ├── GlimmerRevealView.swift
+│   ├── RevealAtom.swift
+│   ├── RevealDriver.swift
+│   ├── RevealFlattener.swift
+│   ├── RevealFlowLayout.swift
+│   ├── RevealPacing.swift
+│   ├── RevealProgressStore.swift
+│   ├── RevealTokenization.swift
+│   ├── RevealTreatments.swift
+│   └── RevealTypes.swift
 ├── Views/
 │   ├── AttributedTextView.swift
 │   ├── FootnoteDetailView.swift
@@ -564,6 +601,10 @@ Check out the `Examples/` directory for comprehensive demos showcasing all of Gl
 - **Advanced Features**: Configuration builder, streaming, performance testing, and export
 - **Markdown Linter**: Real-time validation and best practices checking
 
+#### Advanced Demos
+- **Streaming Reveal**: All 11 reveal styles with a simulated LLM token stream and one-shot playback
+- **GitHub Flavored Markdown**, **Edge Cases**, **Inline Images**, **GitHub Emojis**, **Live Preview**
+
 #### Performance Demos
 - **Parallel Parsing**: Multi-threaded parsing with metrics
 - **Performance Benchmarks**: Compare Sequential, Parallel, and Streaming
@@ -575,10 +616,10 @@ Check out the `Examples/` directory for comprehensive demos showcasing all of Gl
 ### Running Examples
 
 ```bash
-open Examples/GlimmerDemo.xcodeproj
+open Examples/GlimmerDemo/GlimmerDemo.xcodeproj
 
 # Optional: build demo from CLI
-xcodebuild -project Examples/GlimmerDemo.xcodeproj -scheme GlimmerDemo -destination 'generic/platform=iOS Simulator' build
+xcodebuild -project Examples/GlimmerDemo/GlimmerDemo.xcodeproj -scheme GlimmerDemo -destination 'generic/platform=iOS Simulator' build
 ```
 
 See [Examples/README.md](Examples/README.md) for detailed documentation.

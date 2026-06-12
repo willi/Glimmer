@@ -2,19 +2,19 @@
 
 ## Project Structure & Module Organization
 - `Sources/Glimmer/`: Main library code.
-  - `Parser/`, `Rendering/`, `Views/`, `Utilities/`, `Linter/`, `Export/` modules.
+  - `Parser/`, `Rendering/`, `Reveal/`, `Views/`, `Utilities/`, `Linter/`, `Export/` modules.
 - `Tests/GlimmerTests/`: XCTest suites (e.g., `GlimmerTests.swift`, `MarkdownParserTests.swift`).
 - `Examples/GlimmerDemo/`: SwiftUI demo app (Xcode project) showcasing features.
 - `Package.swift`: SwiftPM manifest (Swift tools 5.9, iOS 17 target).
 
 ## Build, Test, and Development Commands
 - Xcode (recommended): Open `Package.swift` or `Examples/GlimmerDemo/GlimmerDemo.xcodeproj`, choose an iOS 17+ simulator, then run tests for the `GlimmerTests` target.
-- CLI with Xcode: `xcodebuild -scheme Glimmer-Package -destination 'platform=iOS Simulator,name=iPhone 15' test`
-  - Use `-destination 'platform=iOS Simulator,name=iPhone 15 Pro,OS=latest'` to pin OS/device.
-- Run a specific test: `xcodebuild -scheme Glimmer-Package -destination 'platform=iOS Simulator,name=iPhone 15' test -only-testing:GlimmerTests/MarkdownParserTests`.
-- Build the package (iOS-only): `xcodebuild -scheme Glimmer-Package -destination 'platform=iOS Simulator,name=iPhone 15' build`.
-- Run demo: `open Examples/GlimmerDemo/GlimmerDemo.xcodeproj` and run the `GlimmerDemo` target on a simulator.
-Note: This package is iOS-only; `swift test` on macOS will fail due to UIKit.
+- CLI with Xcode: `xcodebuild -scheme Glimmer -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test`
+  - The package scheme is `Glimmer`. Substitute any installed simulator (`xcrun simctl list devices available`).
+- Run a specific test: `xcodebuild -scheme Glimmer -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test -only-testing:GlimmerTests/MarkdownParserTests`.
+- Build the package (iOS-only): `xcodebuild -scheme Glimmer -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build`.
+- Run demo: `open Examples/GlimmerDemo/GlimmerDemo.xcodeproj` and run the `GlimmerDemo` target on a simulator. New demo `.swift` files must be added to the app target in `project.pbxproj` (explicit source list).
+Note: This package is iOS-only; `swift test` / `swift build` on macOS will fail due to UIKit.
 
 ## Coding Style & Naming Conventions
 - Follow Swift API Design Guidelines.
@@ -35,12 +35,12 @@ Additional conventions for this project:
 - Framework: XCTest.
 - Location: Place tests under `Tests/GlimmerTests/` with filenames ending in `Tests.swift`.
 - Conventions: Test methods start with `test...` (e.g., `test<Feature><Scenario>`) and assert behavior-focused outcomes (e.g., parsed block counts, attributed output non-empty). Group edge cases in dedicated test files.
-- Running: `swift test` locally and in CI; use `--filter` for focused runs.
+- Running: use `xcodebuild -scheme Glimmer ... test` against an iOS simulator (`swift test` does not work on macOS); use `-only-testing:` for focused runs.
 
 ## Commit & Pull Request Guidelines
 - Commits: Use clear, present-tense summaries (e.g., "Add streaming parser chunking"). Small, focused commits preferred.
 - Conventional Commits are welcome (e.g., `feat(parser): add lazy windowing`).
-- PRs must: describe changes and rationale, link issues, include tests for new behavior, update docs/examples when relevant, and pass `swift test`.
+- PRs must: describe changes and rationale, link issues, include tests for new behavior, update docs/examples when relevant, and pass the test suite on an iOS simulator.
 - Screenshots: Include when UI rendering changes (SwiftUI views, demos).
 
 Additional note: Keep the public API surface minimal and well-documented.
@@ -57,6 +57,7 @@ Additional note: Keep the public API surface minimal and well-documented.
 - `MarkdownView`: Primary SwiftUI view with tap handlers for links, mentions, issues.
 - `MarkdownTextWithAsyncImages`: SwiftUI view supporting inline async image loading.
 - `StreamingMarkdownView`: SwiftUI view for real-time markdown updates.
+- `GlimmerRevealView`: Animated per-token reveal of streaming markdown (11 `RevealStyle`s, adaptive catch-up, resume via `revealID`); lives in `Sources/Glimmer/Reveal/`.
 - `AttributedTextView`: SwiftUI wrapper for attributed text rendering.
 - `MarkdownText`: Pure SwiftUI text rendering without images.
 
@@ -72,6 +73,11 @@ Additional note: Keep the public API surface minimal and well-documented.
 ### Rendering
 - `MarkdownRenderer`: Converts AST to `AttributedString` for SwiftUI `Text`.
 - `CustomRenderer`: Protocol for alternative formats (HTML/PlainText).
+
+### Streaming Reveal (`Sources/Glimmer/Reveal/`)
+- Buffer → parse (cached) → `RevealFlattener` (atoms with stable ids) → `RevealDriver` (clock-paced) → `GlimmerRevealView`.
+- The reveal view is also the settled view (no engine swap); inline styling reuses `MarkdownRenderer.renderInlines` via `beginSession`.
+- Pure pacing/trail math in `RevealPacing.swift` is unit-tested without a clock; driver tests inject a fake `sleep`.
 
 ### Configuration
 - `MarkdownConfiguration`: Configuration type with builder-style API.
