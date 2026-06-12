@@ -100,20 +100,30 @@ struct RevealFlattener {
     // MARK: - Inline flattening
 
     private mutating func appendInlineBlock(kind: BlockKindTag, content: AttributedString) {
+        // One pass over the block's runs decides whether any per-word link
+        // resolution is needed at all; most blocks contain no links, and the
+        // per-word run scans were a measured hotspot.
+        let hasLinks = content.runs.contains { $0.link != nil }
         var words: [RevealWord] = []
         switch granularity {
         case .word:
             for token in content.revealTokens() {
-                words.append(makeWord(from: token.slice, isWhitespace: token.isWhitespace))
+                words.append(makeWord(
+                    from: token.slice, isWhitespace: token.isWhitespace,
+                    containsNewline: token.containsNewline, hasLinks: hasLinks
+                ))
             }
         case .character:
             for token in content.revealTokens() {
                 if token.isWhitespace {
-                    words.append(makeWord(from: token.slice, isWhitespace: true))
+                    words.append(makeWord(
+                        from: token.slice, isWhitespace: true,
+                        containsNewline: token.containsNewline, hasLinks: hasLinks
+                    ))
                 } else {
                     var atoms: [RevealAtom] = []
                     for ch in token.slice.revealCharacters() {
-                        atoms.append(makeAtom(kind: .text(ch), countable: true, url: linkURL(in: ch)))
+                        atoms.append(makeAtom(kind: .text(ch), countable: true, url: hasLinks ? linkURL(in: ch) : nil))
                     }
                     guard !atoms.isEmpty else { continue }
                     words.append(RevealWord(id: atoms[0].id, atoms: atoms, isWhitespace: false, isLineBreak: false))
@@ -164,16 +174,21 @@ struct RevealFlattener {
         flushLine()
     }
 
-    private mutating func makeWord(from slice: AttributedString, isWhitespace: Bool) -> RevealWord {
+    private mutating func makeWord(
+        from slice: AttributedString,
+        isWhitespace: Bool,
+        containsNewline: Bool,
+        hasLinks: Bool
+    ) -> RevealWord {
         if isWhitespace {
-            if slice.characters.contains(where: \.isNewline) {
+            if containsNewline {
                 let atom = makeAtom(kind: .lineBreak, countable: false, url: nil)
                 return RevealWord(id: atom.id, atoms: [atom], isWhitespace: false, isLineBreak: true)
             }
             let atom = makeAtom(kind: .space(slice), countable: false, url: nil)
             return RevealWord(id: atom.id, atoms: [atom], isWhitespace: true, isLineBreak: false)
         }
-        let atom = makeAtom(kind: .text(slice), countable: true, url: linkURL(in: slice))
+        let atom = makeAtom(kind: .text(slice), countable: true, url: hasLinks ? linkURL(in: slice) : nil)
         return RevealWord(id: atom.id, atoms: [atom], isWhitespace: false, isLineBreak: false)
     }
 

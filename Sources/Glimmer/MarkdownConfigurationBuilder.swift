@@ -37,7 +37,7 @@ public class MarkdownConfigurationBuilder {
     private var maxInlineIterations = 50000
     private var maxCacheSizeMB = 50
     private var cacheTimeToLiveSeconds: TimeInterval = 300
-    private var maxRenderCacheEntries = 1000
+    private var maxRenderCacheEntries = 4096
     
     // MARK: - Interaction Handlers
     private var onImageTap: (@Sendable (URL, String) -> Void)?
@@ -301,7 +301,7 @@ public class MarkdownConfigurationBuilder {
         maxInlineIterations = 25000
         maxCacheSizeMB = 100
         cacheTimeToLiveSeconds = 600
-        maxRenderCacheEntries = 2000
+        maxRenderCacheEntries = 8192
         enableRenderCaching = true
         enablePerformanceTracking = true
         return self

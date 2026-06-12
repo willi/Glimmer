@@ -61,6 +61,11 @@ public struct MarkdownConfiguration: Hashable, Sendable {
     /// An array of fonts for heading levels 1 through 6.
     public var headingFonts: [Font]
 
+    /// The base foreground color for body text (paragraphs, headings, list text).
+    /// Inline elements with their own color (links, mentions, code) are unaffected.
+    /// Default: `.primary`.
+    public var textColor: Color
+
     /// The color for tappable links.
     /// Default: `.blue`.
     public var linkColor: Color
@@ -115,7 +120,9 @@ public struct MarkdownConfiguration: Hashable, Sendable {
     /// Default: `300` (5 minutes).
     public var cacheTimeToLiveSeconds: TimeInterval
     /// Maximum number of cached rendered blocks retained in-memory (LRU).
-    /// Default: `1000`.
+    /// Must comfortably exceed the block count of the largest documents you
+    /// re-render, or sequential renders thrash the LRU and hit 0%.
+    /// Default: `4096`.
     public var maxRenderCacheEntries: Int
     
     // MARK: - Interaction Handlers
@@ -152,6 +159,7 @@ public struct MarkdownConfiguration: Hashable, Sendable {
             .largeTitle.bold(), .title.bold(), .title2.bold(),
             .title3.bold(), .headline, .subheadline.bold()
         ],
+        textColor: Color = .primary,
         linkColor: Color = .blue,
         mentionColor: Color = .mint,
         issueColor: Color = .blue,
@@ -165,7 +173,7 @@ public struct MarkdownConfiguration: Hashable, Sendable {
         maxInlineIterations: Int = 50000,
         maxCacheSizeMB: Int = 50,
         cacheTimeToLiveSeconds: TimeInterval = 300,
-        maxRenderCacheEntries: Int = 1000,
+        maxRenderCacheEntries: Int = 4096,
         onImageTap: (@Sendable (URL, String) -> Void)? = nil,
         enableStrictMode: Bool = false,
         enablePerformanceTracking: Bool = false
@@ -183,6 +191,7 @@ public struct MarkdownConfiguration: Hashable, Sendable {
         self.baseFont = baseFont
         self.codeFont = codeFont
         self.headingFonts = headingFonts
+        self.textColor = textColor
         self.linkColor = linkColor
         self.mentionColor = mentionColor
         self.issueColor = issueColor
@@ -222,6 +231,7 @@ public struct MarkdownConfiguration: Hashable, Sendable {
         hasher.combine(baseFont)
         hasher.combine(codeFont)
         hasher.combine(headingFonts)
+        hasher.combine(textColor)
         hasher.combine(linkColor)
         hasher.combine(mentionColor)
         hasher.combine(issueColor)
@@ -256,6 +266,7 @@ public struct MarkdownConfiguration: Hashable, Sendable {
                lhs.baseFont == rhs.baseFont &&
                lhs.codeFont == rhs.codeFont &&
                lhs.headingFonts == rhs.headingFonts &&
+               lhs.textColor == rhs.textColor &&
                lhs.linkColor == rhs.linkColor &&
                lhs.mentionColor == rhs.mentionColor &&
                lhs.issueColor == rhs.issueColor &&

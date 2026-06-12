@@ -69,6 +69,32 @@ final class RevealModelTests: XCTestCase {
         XCTAssertEqual(chars[1].runs.first?.font, Font.body.bold())
     }
 
+    func testRevealCharactersPreservePerRunAttributes() {
+        var s = AttributedString("ab")
+        if let range = s.range(of: "b") {
+            s[range].link = URL(string: "https://example.com")
+        }
+        let chars = s.revealCharacters()
+        XCTAssertEqual(chars.count, 2)
+        XCTAssertNil(chars[0].runs.first?.link)
+        XCTAssertEqual(chars[1].runs.first?.link?.absoluteString, "https://example.com")
+    }
+
+    func testRevealTokensMarkNewlineWhitespace() {
+        let tokens = AttributedString("a \n b").revealTokens()
+        XCTAssertEqual(tokens.count, 3) // "a", " \n ", "b"
+        XCTAssertTrue(tokens[1].containsNewline)
+        XCTAssertFalse(tokens[0].containsNewline)
+        let plain = AttributedString("a b").revealTokens()
+        XCTAssertFalse(plain[1].containsNewline)
+    }
+
+    func testRevealTokensLeadingNewline() {
+        let tokens = AttributedString("\na").revealTokens()
+        XCTAssertEqual(tokens.count, 2)
+        XCTAssertTrue(tokens[0].containsNewline)
+    }
+
     // MARK: - Flattener helpers
 
     private func model(_ md: String, style: RevealStyle = .wordFade) -> RevealModel {
