@@ -80,4 +80,110 @@ final class RevealDriverTests: XCTestCase {
             XCTAssertTrue((1...4).contains(s), "step \(s) out of range at jitter \(jitter)")
         }
     }
+
+    // MARK: - Driver
+
+    private func makeDriver(
+        _ config: RevealConfiguration,
+        store: RevealProgressStore? = nil,
+        sleep: @escaping @MainActor (Double) async throws -> Void = { _ in }
+    ) -> RevealDriver {
+        RevealDriver(configuration: config, store: store ?? RevealProgressStore(), sleep: sleep)
+    }
+
+    func testDrainsToTotalAndCompletes() async {
+        let driver = makeDriver(RevealConfiguration(style: .wordFade, isStreaming: false))
+        driver.update(totalCountable: 10, isStreaming: false)
+        await driver.run()
+        XCTAssertEqual(driver.revealedCount, 10)
+        XCTAssertTrue(driver.isComplete)
+    }
+
+    func testRevealedCountIsMonotonicAndBounded() async {
+        var counts: [Int] = []
+        let store = RevealProgressStore()
+        var driver: RevealDriver!
+        driver = makeDriver(RevealConfiguration(style: .llmTokens, isStreaming: false), store: store) { _ in
+            counts.append(driver.revealedCount)
+        }
+        driver.update(totalCountable: 9, isStreaming: false)
+        await driver.run()
+        XCTAssertEqual(driver.revealedCount, 9)
+        XCTAssertEqual(counts, counts.sorted(), "revealedCount must be monotonic")
+        XCTAssertTrue(counts.allSatisfy { $0 <= 9 })
+    }
+
+    func testIdlesWhileStreamingThenCompletesWhenStreamEnds() async {
+        var idleTicks = 0
+        var driver: RevealDriver!
+        driver = makeDriver(RevealConfiguration(style: .wordFade, isStreaming: true)) { seconds in
+            if seconds < 0.02 { // the 16ms idle wait
+                idleTicks += 1
+                if idleTicks >= 3 {
+                    driver.update(totalCountable: 5, isStreaming: false)
+                }
+            }
+        }
+        driver.update(totalCountable: 5, isStreaming: true)
+        await driver.run()
+        XCTAssertTrue(driver.isComplete)
+        XCTAssertEqual(driver.revealedCount, 5)
+        XCTAssertGreaterThanOrEqual(idleTicks, 3, "driver must idle-wait while streaming with drained buffer")
+    }
+
+    func testBufferGrowthMidRunExtendsReveal() async {
+        var sleeps = 0
+        var driver: RevealDriver!
+        driver = makeDriver(RevealConfiguration(style: .wordFade, isStreaming: true)) { _ in
+            sleeps += 1
+            if sleeps == 3 {
+                driver.update(totalCountable: 8, isStreaming: false)
+            }
+        }
+        driver.update(totalCountable: 4, isStreaming: true)
+        await driver.run()
+        XCTAssertEqual(driver.revealedCount, 8)
+        XCTAssertTrue(driver.isComplete)
+    }
+
+    func testResumeSeedsRevealedCountAndAnimateFrom() {
+        let store = RevealProgressStore()
+        store.record(7, for: "turn-1")
+        let driver = makeDriver(
+            RevealConfiguration(style: .wordFade, isStreaming: true, revealID: "turn-1"),
+            store: store
+        )
+        XCTAssertEqual(driver.revealedCount, 7)
+        XCTAssertEqual(driver.animateFrom, 7)
+    }
+
+    func testDriverRecordsProgressToStore() async {
+        let store = RevealProgressStore()
+        let driver = makeDriver(
+            RevealConfiguration(style: .wordFade, isStreaming: false, revealID: "turn-2"),
+            store: store
+        )
+        driver.update(totalCountable: 6, isStreaming: false)
+        await driver.run()
+        XCTAssertEqual(store.resume("turn-2"), 6)
+    }
+
+    func testCappedSnapRevealsAllAtOnceWhenFarBehind() async {
+        var sleeps = 0
+        let driver = makeDriver(
+            RevealConfiguration(style: .wordFade, catchUp: .cappedSnap(maxLagSeconds: 1.5), isStreaming: false)
+        ) { _ in sleeps += 1 }
+        driver.update(totalCountable: 500, isStreaming: false) // far beyond 20-unit cap
+        await driver.run()
+        XCTAssertEqual(driver.revealedCount, 500)
+        XCTAssertEqual(sleeps, 0, "snap must not pace through the backlog")
+    }
+
+    func testUpdateClampsWhenBufferShrinks() {
+        let store = RevealProgressStore()
+        store.record(10, for: "t")
+        let resumed = makeDriver(RevealConfiguration(style: .wordFade, isStreaming: true, revealID: "t"), store: store)
+        resumed.update(totalCountable: 4, isStreaming: true) // buffer replaced with shorter content
+        XCTAssertEqual(resumed.revealedCount, 4)
+    }
 }
