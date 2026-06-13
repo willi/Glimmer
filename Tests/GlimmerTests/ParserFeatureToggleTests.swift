@@ -133,6 +133,8 @@ final class ParserFeatureToggleTests: XCTestCase {
                 return html
             case .footnoteReference(let label):
                 return "[^\(label)]"
+            case .extensionInline(let node):
+                return node.literal
             }
         }.joined()
     }

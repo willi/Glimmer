@@ -42,6 +42,7 @@ public class MarkdownConfigurationBuilder {
     
     // MARK: - Interaction Handlers
     private var onImageTap: (@Sendable (URL, String) -> Void)?
+    private var markdownExtensions: [MarkdownExtension] = []
     
     // MARK: - Validation Options
     private var enableStrictMode = false
@@ -269,6 +270,18 @@ public class MarkdownConfigurationBuilder {
         onImageTap = handler
         return self
     }
+
+    @discardableResult
+    public func addExtension(_ markdownExtension: MarkdownExtension) -> Self {
+        markdownExtensions.append(markdownExtension)
+        return self
+    }
+
+    @discardableResult
+    public func addExtensions(_ markdownExtensions: [MarkdownExtension]) -> Self {
+        self.markdownExtensions.append(contentsOf: markdownExtensions)
+        return self
+    }
     
     // MARK: - Preset Configurations
     
@@ -347,6 +360,7 @@ public class MarkdownConfigurationBuilder {
             cacheTimeToLiveSeconds: cacheTimeToLiveSeconds,
             maxRenderCacheEntries: maxRenderCacheEntries,
             onImageTap: onImageTap,
+            markdownExtensions: markdownExtensions,
             enableStrictMode: enableStrictMode,
             enablePerformanceTracking: enablePerformanceTracking
         )

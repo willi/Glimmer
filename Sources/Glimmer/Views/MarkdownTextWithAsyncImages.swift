@@ -141,6 +141,9 @@ public struct MarkdownTextWithAsyncImages: View {
                 .font(.caption2)
                 .baselineOffset(6)
                 .foregroundColor(configuration.linkColor)
+
+        case .extensionInline(let node):
+            return Text(node.literal)
         }
     }
     
@@ -215,6 +218,8 @@ public struct MarkdownTextWithAsyncImages: View {
                 urls.append(contentsOf: extractImageURLs(from: children))
             case .link(_, _, let children):
                 urls.append(contentsOf: extractImageURLs(from: children))
+            case .extensionInline:
+                break
             default:
                 break
             }

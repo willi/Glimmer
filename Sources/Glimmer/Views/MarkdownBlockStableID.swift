@@ -99,6 +99,8 @@ enum MarkdownBlockStableID {
                 out += alt
             case .footnoteReference(let label):
                 out += "[" + label + "]"
+            case .extensionInline(let node):
+                out += node.literal
             }
         }
         return out

@@ -86,6 +86,10 @@ public struct MarkdownParser {
     
     public static func preprocess(_ markdown: String, configuration: MarkdownConfiguration = .default) -> String {
         var processedMarkdown = markdown
+
+        for markdownExtension in configuration.markdownExtensions {
+            processedMarkdown = markdownExtension.preprocess(processedMarkdown)
+        }
         
         // Process emoji shortcodes if enabled.
         // A pre-scan guard (e.g. contains(":")) is slower than the regex no-match fast path.

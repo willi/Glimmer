@@ -373,6 +373,9 @@ public struct MarkdownExporter {
             
         case .footnoteReference(let label):
             return "[^\(label)]"
+
+        case .extensionInline(let node):
+            return node.literal
         }
     }
     

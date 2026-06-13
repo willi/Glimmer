@@ -2,26 +2,26 @@ import Foundation
 
 /// Handles parsing of inline markdown elements
 public struct InlineParser {
-    
+
     // MARK: - Main Inline Parsing
-    
+
     public static func parseInlineOptimized(_ text: String, configuration: MarkdownConfiguration = .default) -> [MarkdownParser.InlineNode] {
         var state = ParserState(text: text)
         return parseInlineElements(&state, configuration: configuration)
     }
     // Fast-path is now per-state using ParserState.asciiFastPath
-    
+
     static func parseInlineElements(_ state: inout ParserState, configuration: MarkdownConfiguration) -> [MarkdownParser.InlineNode] {
         var inlines: [MarkdownParser.InlineNode] = []
         var iterationCount = 0
         let maxIterations = configuration.maxInlineIterations
-        
-        
+
+
         // Decide ASCII fast-path once per state if not already set
         if state.asciiFastPath == false {
             state.asciiFastPath = ParsingHelpers.isASCII(state.text)
         }
-        
+
         while !state.isAtEnd {
             iterationCount += 1
             if iterationCount > maxIterations {
@@ -30,10 +30,16 @@ public struct InlineParser {
                 if !remaining.isEmpty { inlines.append(.text(remaining)) }
                 break
             }
-            
+
             let mark = state.mark()
             guard let ch = state.current() else { break }
-            
+
+            if let extensionInline = parseExtensionInline(&state, configuration: configuration) {
+                state.flushFragmentBuffer(&inlines)
+                inlines.append(extensionInline)
+                continue
+            }
+
             switch ch {
             case "\\":
                 state.advance()
@@ -44,7 +50,7 @@ public struct InlineParser {
                 } else {
                     state.appendToFragmentBuffer("\\")
                 }
-                
+
             case "`":
                 if let code = parseInlineCode(&state) {
                     state.flushFragmentBuffer(&inlines)
@@ -53,7 +59,7 @@ public struct InlineParser {
                     state.appendToFragmentBuffer("`")
                     state.advance()
                 }
-                
+
             case "*", "_":
                 if let emphasis = parseEmphasis(&state, delimiter: ch, configuration: configuration) {
                     state.flushFragmentBuffer(&inlines)
@@ -62,7 +68,7 @@ public struct InlineParser {
                     state.appendToFragmentBuffer(ch)
                     state.advance()
                 }
-                
+
             case "~":
                 if let strikethrough = parseStrikethrough(&state, configuration: configuration) {
                     state.flushFragmentBuffer(&inlines)
@@ -71,7 +77,7 @@ public struct InlineParser {
                     state.appendToFragmentBuffer(ch)
                     state.advance()
                 }
-                
+
             case "[":
                 if configuration.enableFootnotes, let next = state.peek(1), next == "^" {
                     if let footnote = parseFootnoteReference(&state) {
@@ -88,7 +94,7 @@ public struct InlineParser {
                     state.appendToFragmentBuffer(ch)
                     state.advance()
                 }
-                
+
             case "!":
                 if let next = state.peek(1), next == "[" {
                     if let image = parseImage(&state, configuration: configuration) {
@@ -102,7 +108,7 @@ public struct InlineParser {
                     state.appendToFragmentBuffer(ch)
                     state.advance()
                 }
-                
+
             case "<":
                 if let autolink = parseUnifiedAutolink(&state, angleBracketMode: true) {
                     state.flushFragmentBuffer(&inlines)
@@ -114,7 +120,7 @@ public struct InlineParser {
                     state.appendToFragmentBuffer(ch)
                     state.advance()
                 }
-                
+
             case "@":
                 if configuration.enableMentions, let mention = parseMention(&state) {
                     state.flushFragmentBuffer(&inlines)
@@ -123,7 +129,7 @@ public struct InlineParser {
                     state.appendToFragmentBuffer(ch)
                     state.advance()
                 }
-                
+
             case "#":
                 if configuration.enableIssueReferences, let issue = parseIssueReference(&state) {
                     state.flushFragmentBuffer(&inlines)
@@ -132,17 +138,17 @@ public struct InlineParser {
                     state.appendToFragmentBuffer(ch)
                     state.advance()
                 }
-                
+
             case ":":
                 if configuration.enableEmojiShortcodes, let emoji = parseEmojiShortcode(&state) {
                     state.flushFragmentBuffer(&inlines)
                     inlines.append(emoji)
                 } else {
-                    
+
                     state.appendToFragmentBuffer(ch)
                     state.advance()
                 }
-                
+
             case "h", "m", "f", "w":
                 // Prefer repository references first
                 if configuration.enableRepositoryReferences, let repo = parseRepositoryReference(&state) {
@@ -155,7 +161,7 @@ public struct InlineParser {
                     state.appendToFragmentBuffer(ch)
                     state.advance()
                 }
-                
+
             default:
                 if configuration.enableRepositoryReferences, ch.isLetter, let repo = parseRepositoryReference(&state) {
                     state.flushFragmentBuffer(&inlines)
@@ -168,29 +174,58 @@ public struct InlineParser {
                     state.advance()
                 }
             }
-            
+
             // Safety check: ensure we made progress
             if state.currentIndex == mark.index {
                 // Fallback consume one char
                 if let c = state.current() { state.appendToFragmentBuffer(c); state.advance() }
             }
         }
-        
+
         state.flushFragmentBuffer(&inlines)
         return inlines
     }
-    
+
+    static func parseExtensionInline(_ state: inout ParserState, configuration: MarkdownConfiguration) -> MarkdownParser.InlineNode? {
+        guard !configuration.markdownExtensions.isEmpty, let ch = state.current() else { return nil }
+
+        for markdownExtension in configuration.markdownExtensions
+            where markdownExtension.shouldAttemptInlineParse(for: ch) {
+            let context = MarkdownExtensionInlineContext(
+                source: state.text,
+                startIndex: state.currentIndex
+            )
+            guard let match = markdownExtension.parseInline(context),
+                  match.endIndex > state.currentIndex,
+                  match.endIndex <= state.endIndex else {
+                continue
+            }
+
+            state.move(to: match.endIndex)
+            return .extensionInline(
+                MarkdownParser.ExtensionNode(
+                    namespace: markdownExtension.id,
+                    name: match.name,
+                    literal: match.literal,
+                    fields: match.fields
+                )
+            )
+        }
+
+        return nil
+    }
+
     // MARK: - Inline Element Parsers
-    
+
     static func parseInlineCode(_ state: inout ParserState) -> MarkdownParser.InlineNode? {
-        
+
         let mark = state.mark()
-        
+
         // Count opening backticks
         var opening = 0
         while let ch = state.current(), ch == "`" { opening += 1; state.advance() }
         guard opening > 0 else { state.restore(mark); return nil }
-        
+
         var code = ""; code.reserveCapacity(32)
         while let ch = state.current() {
             if ch == "`" {
@@ -208,14 +243,14 @@ public struct InlineParser {
                 state.advance()
             }
         }
-        
+
         // No matching closing backticks
         state.restore(mark)
         return nil
     }
-    
+
     static func parseEmphasis(_ state: inout ParserState, delimiter: Character, configuration: MarkdownConfiguration) -> MarkdownParser.InlineNode? {
-        
+
         let mark = state.mark()
         // Optimistically try 3, 2, 1 without pre-counting; helper will validate
         if let r = parseEmphasisWithCount(&state, delimiter: delimiter, count: 3, configuration: configuration) { return r }
@@ -226,7 +261,7 @@ public struct InlineParser {
         state.restore(mark)
         return nil
     }
-    
+
     private static func parseEmphasisWithCount(_ state: inout ParserState, delimiter: Character, count: Int, configuration: MarkdownConfiguration) -> MarkdownParser.InlineNode? {
         let mark = state.mark()
         // Consume opening delimiters
@@ -234,10 +269,10 @@ public struct InlineParser {
             guard let ch = state.current(), ch == delimiter else { state.restore(mark); return nil }
             state.advance()
         }
-        
+
         // Don't allow emphasis to start with whitespace
         if let ch = state.current(), ch == " " { state.restore(mark); return nil }
-        
+
         let contentStartIndex = state.currentIndex
         var pendingDepth = 0
         while let ch = state.current() {
@@ -277,14 +312,14 @@ public struct InlineParser {
         state.restore(mark)
         return nil
     }
-    
+
     static func parseStrikethrough(_ state: inout ParserState, configuration: MarkdownConfiguration) -> MarkdownParser.InlineNode? {
-        
+
         let mark = state.mark()
-        
+
         guard state.current() == "~", state.peek(1) == "~" else { return nil }
         state.advance(); state.advance() // consume opening ~~
-        
+
         // Find closing ~~
         let contentStartIndex = state.currentIndex
         while let ch = state.current(), let next = state.peek(1) {
@@ -292,24 +327,24 @@ public struct InlineParser {
                 // emit content between contentStartIndex and currentIndex
                 let content = state.substring(from: contentStartIndex, to: state.currentIndex)
                 state.advance(); state.advance() // consume closing ~~
-                
+
                 var innerState = ParserState(text: content)
                 let innerContent = parseInlineElements(&innerState, configuration: configuration)
                 return .strikethrough(children: innerContent)
             }
             state.advance()
         }
-        
+
         state.restore(mark)
         return nil
     }
-    
+
     static func parseLink(_ state: inout ParserState, configuration: MarkdownConfiguration) -> MarkdownParser.InlineNode? {
-        
+
         let mark = state.mark()
         guard state.current() == "[" else { return nil }
         state.advance()
-        
+
         // Parse link text with nested brackets
         var linkText = ""; linkText.reserveCapacity(128)
         var depth = 1
@@ -320,7 +355,7 @@ public struct InlineParser {
             else { linkText.append(ch); state.advance() }
         }
         guard depth == 0 else { state.restore(mark); return nil }
-        
+
         // Inline destination: (URL [title])
         if state.current() == "(" {
             state.advance()
@@ -387,13 +422,13 @@ public struct InlineParser {
         state.restore(mark)
         return nil
     }
-    
+
     static func parseImage(_ state: inout ParserState, configuration: MarkdownConfiguration) -> MarkdownParser.InlineNode? {
-        
+
         let mark = state.mark()
         guard state.current() == "!", state.peek(1) == "[" else { return nil }
         state.advance(); state.advance() // consume ![
-        
+
         var altText = ""; altText.reserveCapacity(128)
         var depth = 1
         while let ch = state.current(), depth > 0 {
@@ -403,7 +438,7 @@ public struct InlineParser {
             else { altText.append(ch); state.advance() }
         }
         guard depth == 0 else { state.restore(mark); return nil }
-        
+
         if state.current() == "(" {
             state.advance()
             guard let (inner, after) = ParsingHelpers.scanBalanced(in: state.text, from: state.currentIndex, end: state.endIndex, open: "(", close: ")", allowEscape: true) else {
@@ -452,9 +487,9 @@ public struct InlineParser {
         state.restore(mark)
         return nil
     }
-    
+
     static func parseFootnoteReference(_ state: inout ParserState) -> MarkdownParser.InlineNode? {
-        
+
         let mark = state.mark()
         guard state.current() == "[", state.peek(1) == "^" else { return nil }
         state.advance(); state.advance()
@@ -472,9 +507,9 @@ public struct InlineParser {
         guard !label.isEmpty else { state.restore(mark); return nil }
         return .footnoteReference(label: label)
     }
-    
+
     static func parseHTMLTag(_ state: inout ParserState) -> MarkdownParser.InlineNode? {
-        
+
         let mark = state.mark()
         guard state.current() == "<" else { return nil }
         state.advance()
@@ -502,21 +537,21 @@ public struct InlineParser {
         let html = state.substring(from: mark.index, to: state.currentIndex)
         return .html(html)
     }
-    
+
     // (legacy OLD_ autolink helpers removed)
-    
+
     static func parseMention(_ state: inout ParserState) -> MarkdownParser.InlineNode? {
         let mark = state.mark()
         guard state.current() == "@" else { return nil }
-        
+
         // Reject if preceded by [A-Za-z0-9_-]
         if mark.index > state.text.startIndex {
             let prev = state.text[state.text.index(before: mark.index)]
             if prev.isLetter || prev.isNumber || prev == "_" || prev == "-" { return nil }
         }
-        
+
         state.advance() // consume '@'
-        
+
         // Scan username characters
         var idx = state.currentIndex
         let end = state.endIndex
@@ -532,9 +567,9 @@ public struct InlineParser {
         }
         let username = scanned
         state.move(to: idx)
-        
+
         guard !username.isEmpty else { state.restore(mark); return nil }
-        
+
         // Disambiguate emails: if next is '.' followed by domain-like chars, not a mention
         if let ch = state.current(), ch == "." {
             var idx = state.currentIndex
@@ -565,10 +600,10 @@ public struct InlineParser {
             }
             if hasDomainChars { state.restore(mark); return nil }
         }
-        
+
         return .mention(username: username)
     }
-    
+
     static func parseIssueReference(_ state: inout ParserState) -> MarkdownParser.InlineNode? {
         let mark = state.mark()
         guard state.current() == "#" else { return nil }
@@ -590,7 +625,7 @@ public struct InlineParser {
         guard !digits.isEmpty, let n = Int(digits) else { state.restore(mark); return nil }
         return .issueReference(number: n)
     }
-    
+
     static func parseEmojiShortcode(_ state: inout ParserState) -> MarkdownParser.InlineNode? {
         let mark = state.mark()
         guard state.current() == ":" else { return nil }
@@ -611,7 +646,7 @@ public struct InlineParser {
         guard state.current() == ":" else { state.restore(mark); return nil }
         state.advance()
         guard !name.isEmpty else { state.restore(mark); return nil }
-        
+
         if let emoji = GitHubEmojis.emojiMap[name] {
             if emoji.hasPrefix(":") && emoji.hasSuffix(":") {
                 if let imageUrl = GitHubEmojis.emojiURL(for: name), let url = URL(string: imageUrl) {
@@ -626,7 +661,7 @@ public struct InlineParser {
         state.restore(mark)
         return nil
     }
-    
+
     static func parseCommitSHA(_ state: inout ParserState) -> MarkdownParser.InlineNode? {
         let mark = state.mark()
         // Start boundary: previous char should not be alphanumeric
@@ -648,10 +683,10 @@ public struct InlineParser {
         let shortSha = String(sha.prefix(7))
         return .commitSHA(sha: sha, short: shortSha)
     }
-    
+
     static func parseRepositoryReference(_ state: inout ParserState) -> MarkdownParser.InlineNode? {
         let mark = state.mark()
-        
+
         // owner
         var idx = state.currentIndex
         let end = state.endIndex
@@ -685,7 +720,7 @@ public struct InlineParser {
         }
         state.move(to: idx)
         guard !owner.isEmpty && !repo.isEmpty else { state.restore(mark); return nil }
-        
+
         // Optional #number => PR reference
         if state.current() == "#" {
             state.advance()
@@ -700,7 +735,7 @@ public struct InlineParser {
             state.move(to: dIdx)
             if let num = Int(digits) { return .pullRequestReference(owner: owner, repo: repo, number: num) }
         }
-        
+
         // Context check: if preceded by @ / : then not a standalone repo ref
         if mark.index > state.text.startIndex {
             let prev = state.text[state.text.index(before: mark.index)]
@@ -708,9 +743,9 @@ public struct InlineParser {
         }
         return .repositoryReference(owner: owner, repo: repo)
     }
-    
+
     // MARK: - Helper Methods
-    
+
     // Unified autolink parser supporting angle-bracket and extended autolinks
     static func parseUnifiedAutolink(_ state: inout ParserState, angleBracketMode: Bool) -> MarkdownParser.InlineNode? {
         let startMark = state.mark()
@@ -719,7 +754,7 @@ public struct InlineParser {
             state.advance()
         }
         let startIndex = state.currentIndex
-        
+
         @inline(__always)
         func hasPrefix(_ prefix: String) -> Bool {
             var idx = startIndex
@@ -729,7 +764,7 @@ public struct InlineParser {
             }
             return true
         }
-        
+
         enum Scheme { case httpLike, www, mailto, angle }
         let scheme: Scheme?
         if angleBracketMode { scheme = .angle }
@@ -737,7 +772,7 @@ public struct InlineParser {
         else if hasPrefix("mailto:") { scheme = .mailto }
         else if hasPrefix("www.") { scheme = .www }
         else { scheme = nil }
-        
+
         guard let schemeType = scheme else { return nil }
 
         @inline(__always)
@@ -750,7 +785,7 @@ public struct InlineParser {
             let domain = value[domainStart...]
             return domain.contains(".") && !domain.hasPrefix(".") && !domain.hasSuffix(".")
         }
-        
+
         var idx = startIndex
         var openParens = 0, closeParens = 0
         var openBrackets = 0, closeBrackets = 0
@@ -795,7 +830,7 @@ public struct InlineParser {
                 }
             }
         }
-        
+
         var endIndex = idx
         if angleBracketMode {
             if idx >= state.endIndex || state.text[idx] != ">" {
@@ -803,7 +838,7 @@ public struct InlineParser {
                 return nil
             }
         }
-        
+
         while endIndex > startIndex {
             let prev = state.text[state.text.index(before: endIndex)]
             if prev == "." || prev == "," || prev == ";" || prev == ":" || prev == "?" || prev == "!" {
@@ -820,9 +855,9 @@ public struct InlineParser {
             endIndex = state.text.index(before: endIndex)
             extraCloseBrackets -= 1
         }
-        
+
         if endIndex <= startIndex { state.restore(startMark); return nil }
-        
+
         let urlText = state.substring(from: startIndex, to: endIndex)
         // Determine autolink type and destination URL
         var linkURL: URL?
@@ -866,7 +901,7 @@ public struct InlineParser {
             }
         }
         guard let finalURL = linkURL else { state.restore(startMark); return nil }
-        
+
         if angleBracketMode {
             state.move(to: idx)
             if state.current() == ">" { state.advance() }

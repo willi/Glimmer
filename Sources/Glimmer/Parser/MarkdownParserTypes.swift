@@ -52,6 +52,21 @@ extension MarkdownParser {
         case softBreak
         case html(String)
         case footnoteReference(label: String)
+        case extensionInline(ExtensionNode)
+    }
+
+    public struct ExtensionNode: Sendable, Equatable, Hashable {
+        public let namespace: String
+        public let name: String
+        public let literal: String
+        public let fields: [String: String]
+
+        public init(namespace: String, name: String, literal: String, fields: [String: String]) {
+            self.namespace = namespace
+            self.name = name
+            self.literal = literal
+            self.fields = fields
+        }
     }
     
     public struct ListItem: Sendable {

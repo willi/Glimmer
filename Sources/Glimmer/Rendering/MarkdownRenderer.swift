@@ -236,6 +236,7 @@ public struct MarkdownRenderer {
         configuration.codeBackgroundColor.hash(into: &hasher)
         configuration.blockquoteColor.hash(into: &hasher)
         configuration.codeBlockTheme.hash(into: &hasher)
+        configuration.markdownExtensions.hash(into: &hasher)
         return String(hasher.finalize())
     }
 
@@ -346,6 +347,9 @@ public struct MarkdownRenderer {
             case .footnoteReference(let label):
                 hasher.combine(16)
                 hasher.combine(label)
+            case .extensionInline(let node):
+                hasher.combine(17)
+                hasher.combine(node)
             }
         }
     }
@@ -525,7 +529,37 @@ public struct MarkdownRenderer {
             ref.mergeAttributes(footnoteRefAttributes(label: label, configuration: configuration))
             applyInlineContext(&ref, context: context)
             result.append(ref)
+
+        case .extensionInline(let node):
+            if var rendered = renderExtensionInline(node, configuration: configuration) {
+                applyInlineContext(&rendered, context: context)
+                result.append(rendered)
+            } else {
+                var literal = AttributedString(node.literal)
+                if let forcedFont = context.forcedFont {
+                    literal.font = forcedFont
+                } else if let baseFont = context.baseFont {
+                    literal.font = baseFont
+                }
+                literal.foregroundColor = configuration.textColor
+                if context.isStrikethrough {
+                    literal.strikethroughStyle = .single
+                }
+                result.append(literal)
+            }
         }
+    }
+
+    private func renderExtensionInline(
+        _ node: MarkdownParser.ExtensionNode,
+        configuration: MarkdownConfiguration
+    ) -> AttributedString? {
+        for markdownExtension in configuration.markdownExtensions where markdownExtension.id == node.namespace {
+            if let rendered = markdownExtension.renderInline(node) {
+                return rendered
+            }
+        }
+        return nil
     }
 
     private func applyInlineContext(_ value: inout AttributedString, context: InlineRenderContext) {

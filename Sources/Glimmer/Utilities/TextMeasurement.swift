@@ -169,6 +169,8 @@ public struct TextMeasurement {
                 hasher.combine(15); hasher.combine(tag)
             case .footnoteReference(let label):
                 hasher.combine(16); hasher.combine(label)
+            case .extensionInline(let node):
+                hasher.combine(17); hasher.combine(node)
             }
         }
     }
@@ -412,6 +414,11 @@ public struct TextMeasurement {
             var text = AttributedString("[\(displayLabel)]")
             text.font = .system(.caption2)
             text.baselineOffset = 6 // Superscript effect
+            return text
+
+        case .extensionInline(let node):
+            var text = AttributedString(node.literal)
+            text.font = baseFont
             return text
         }
     }

@@ -206,6 +206,9 @@ public struct HTMLMarkdownRenderer: MarkdownRendererProtocol {
             
         case .footnoteReference(let label):
             return "<sup><a href=\"#fn-\(label)\" class=\"footnote-ref\">[\(label)]</a></sup>"
+
+        case .extensionInline(let node):
+            return escapeHTML(node.literal)
         }
     }
     
@@ -446,6 +449,9 @@ public struct PlainTextMarkdownRenderer: MarkdownRendererProtocol {
             
         case .footnoteReference(let label):
             return "[\(label)]"
+
+        case .extensionInline(let node):
+            return node.literal
         }
     }
 }

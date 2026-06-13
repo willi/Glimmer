@@ -137,6 +137,10 @@ public struct MarkdownConfiguration: Hashable, Sendable {
     /// Handler called when an inline image is tapped
     /// Default: `nil`.
     public var onImageTap: (@Sendable (URL, String) -> Void)?
+
+    /// Host-provided syntax/rendering extensions.
+    /// Default: `[]`.
+    public var markdownExtensions: [MarkdownExtension]
     
     // MARK: - Validation Options
     
@@ -182,6 +186,7 @@ public struct MarkdownConfiguration: Hashable, Sendable {
         cacheTimeToLiveSeconds: TimeInterval = 300,
         maxRenderCacheEntries: Int = 4096,
         onImageTap: (@Sendable (URL, String) -> Void)? = nil,
+        markdownExtensions: [MarkdownExtension] = [],
         enableStrictMode: Bool = false,
         enablePerformanceTracking: Bool = false
     ) {
@@ -214,6 +219,7 @@ public struct MarkdownConfiguration: Hashable, Sendable {
         self.cacheTimeToLiveSeconds = cacheTimeToLiveSeconds
         self.maxRenderCacheEntries = maxRenderCacheEntries
         self.onImageTap = onImageTap
+        self.markdownExtensions = markdownExtensions
         self.enableStrictMode = enableStrictMode
         self.enablePerformanceTracking = enablePerformanceTracking
     }
@@ -253,9 +259,11 @@ public struct MarkdownConfiguration: Hashable, Sendable {
         hasher.combine(maxCacheSizeMB)
         hasher.combine(cacheTimeToLiveSeconds)
         hasher.combine(maxRenderCacheEntries)
+        hasher.combine(markdownExtensions)
         hasher.combine(enableStrictMode)
         hasher.combine(enablePerformanceTracking)
-        // Note: onImageTap is intentionally excluded from hash
+        // Note: closures are intentionally excluded from hash. Extensions must
+        // bump version when parsing or rendering behavior changes.
     }
     
     public static func == (lhs: MarkdownConfiguration, rhs: MarkdownConfiguration) -> Bool {
@@ -288,8 +296,24 @@ public struct MarkdownConfiguration: Hashable, Sendable {
                lhs.maxCacheSizeMB == rhs.maxCacheSizeMB &&
                lhs.cacheTimeToLiveSeconds == rhs.cacheTimeToLiveSeconds &&
                lhs.maxRenderCacheEntries == rhs.maxRenderCacheEntries &&
+               lhs.markdownExtensions == rhs.markdownExtensions &&
                lhs.enableStrictMode == rhs.enableStrictMode &&
                lhs.enablePerformanceTracking == rhs.enablePerformanceTracking
-        // Note: onImageTap is intentionally excluded from equality
+        // Note: closures are intentionally excluded from equality. Extensions
+        // must bump version when parsing or rendering behavior changes.
+    }
+}
+
+public extension MarkdownConfiguration {
+    func addingExtension(_ markdownExtension: MarkdownExtension) -> MarkdownConfiguration {
+        var copy = self
+        copy.markdownExtensions.append(markdownExtension)
+        return copy
+    }
+
+    func addingExtensions(_ markdownExtensions: [MarkdownExtension]) -> MarkdownConfiguration {
+        var copy = self
+        copy.markdownExtensions.append(contentsOf: markdownExtensions)
+        return copy
     }
 }

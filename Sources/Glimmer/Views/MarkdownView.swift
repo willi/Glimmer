@@ -1166,6 +1166,12 @@ struct MarkdownInlineView: View {
             attrs.baselineOffset = 6 // Superscript effect
             attrs.foregroundColor = configuration.linkColor
             return attrs
+
+        case .extensionInline(let node):
+            var text = AttributedString(node.literal)
+            text.font = baseFont
+            text.foregroundColor = configuration.textColor
+            return text
         }
     }
 }
@@ -1969,6 +1975,12 @@ struct InteractiveInlineView: View {
             attrs.foregroundColor = configuration.linkColor
             attrs.link = URL(string: "footnote://\(label)")
             return attrs
+
+        case .extensionInline(let node):
+            var text = AttributedString(node.literal)
+            applyStyles(&text, isBold: isBold, isItalic: isItalic, isStrikethrough: isStrikethrough)
+            text.foregroundColor = configuration.textColor
+            return text
         }
     }
     
