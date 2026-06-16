@@ -1,15 +1,23 @@
 import Foundation
+import os
 
 /// GitHub emoji shortcode mappings
 public enum GitHubEmojis {
     // MARK: - Lazy URL Map Feature Flag
     /// If enabled, the library will try to load emoji URL mappings from a bundled JSON file at runtime.
     /// Falls back to the static `emojiUrls` map if loading fails. Disabled by default.
-    public static var useLazyEmojiURLMap: Bool = false
+    public static var useLazyEmojiURLMap: Bool {
+        get { lazyMapState.withLock { $0.useLazyEmojiURLMap } }
+        set { lazyMapState.withLock { $0.useLazyEmojiURLMap = newValue } }
+    }
 
-    private static let lazyMapLock = NSLock()
-    private static var cachedEmojiURLMap: [String: String]?
-    private static var attemptedLoad = false
+    private struct LazyMapState: @unchecked Sendable {
+        var useLazyEmojiURLMap = false
+        var cachedEmojiURLMap: [String: String]?
+        var attemptedLoad = false
+    }
+
+    private static let lazyMapState = OSAllocatedUnfairLock(initialState: LazyMapState())
     /// Complete emoji mappings from GitHub shortcodes to Unicode characters
     /// Generated from GitHub's emoji API
     public static let emojiMap: [String: String] = [
@@ -3954,17 +3962,24 @@ public enum GitHubEmojis {
 
     // MARK: - Internal Lazy Loader
     private static func emojiURLMapLazy() -> [String: String]? {
-        lazyMapLock.lock()
-        if let cached = cachedEmojiURLMap {
-            lazyMapLock.unlock()
+        let shouldLoad = lazyMapState.withLock { state -> (cached: [String: String]?, shouldLoad: Bool) in
+            if let cached = state.cachedEmojiURLMap {
+                return (cached, false)
+            }
+            if state.attemptedLoad {
+                return (nil, false)
+            }
+            state.attemptedLoad = true
+            return (nil, true)
+        }
+
+        if let cached = shouldLoad.cached {
             return cached
         }
-        if attemptedLoad {
-            lazyMapLock.unlock()
+        if !shouldLoad.shouldLoad {
             return nil
         }
-        attemptedLoad = true
-        lazyMapLock.unlock()
+
         #if SWIFT_PACKAGE
         if let url = Bundle.module.url(forResource: "emoji_urls", withExtension: "json") {
             do {
@@ -3973,10 +3988,9 @@ public enum GitHubEmojis {
                     // Merge JSON (overrides) with static fallback to ensure full coverage
                     var merged = emojiUrls
                     for (k, v) in raw { merged[k] = v }
-                    lazyMapLock.lock()
-                    cachedEmojiURLMap = merged
-                    lazyMapLock.unlock()
-                    return merged
+                    let mergedMap = merged
+                    lazyMapState.withLock { $0.cachedEmojiURLMap = mergedMap }
+                    return mergedMap
                 }
             } catch {
                 #if DEBUG

@@ -73,6 +73,7 @@ public struct Glimmer {
 // MARK: - Convenience Views
 
 /// A namespace for convenient markdown views
+@MainActor
 public enum Markdown {
     
     /// Display a code block with optional language and configuration.

@@ -19,7 +19,7 @@ public struct MarkdownRenderer {
     private var cachedCodeInlineAttrs: AttributeContainer?
 
     // MARK: - Render Cache
-    private final class RCNode {
+    private final class RCNode: @unchecked Sendable {
         let key: String
         var value: AttributedString
         weak var prev: RCNode?
@@ -31,7 +31,7 @@ public struct MarkdownRenderer {
         }
     }
 
-    private struct RCState {
+    private struct RCState: @unchecked Sendable {
         var dict: [String: RCNode] = [:]
         var head: RCNode?
         var tail: RCNode?

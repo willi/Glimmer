@@ -3,9 +3,9 @@ import os
 
 /// A cancellable parallel parsing operation that mirrors `ParallelMarkdownParser` behavior
 /// but allows callers to cancel in-flight work and observe progress.
-public final class CancellableParallelOperation {
-    public typealias ProgressHandler = (Double) -> Void
-    public typealias CompletionHandler = ([MarkdownParser.BlockNode]) -> Void
+public final class CancellableParallelOperation: @unchecked Sendable {
+    public typealias ProgressHandler = @Sendable (Double) -> Void
+    public typealias CompletionHandler = @Sendable ([MarkdownParser.BlockNode]) -> Void
 
     private let markdown: String
     private let parallelConfig: ParallelMarkdownParser.ParallelConfiguration
@@ -13,9 +13,9 @@ public final class CancellableParallelOperation {
 
     private let queue = DispatchQueue(label: "com.glimmer.parallel.cancellable", attributes: .concurrent)
     private let group = DispatchGroup()
-    private struct State { var isCancelled = false; var progress: ProgressHandler? = nil; var complete: CompletionHandler? = nil }
+    private struct State: Sendable { var isCancelled = false; var progress: ProgressHandler? = nil; var complete: CompletionHandler? = nil }
     private let state = OSAllocatedUnfairLock(initialState: State())
-    private struct ProgressState { var lastEmitted: Double = 0 }
+    private struct ProgressState: Sendable { var lastEmitted: Double = 0 }
     private let progressState = OSAllocatedUnfairLock(initialState: ProgressState())
     public var isCancelled: Bool { state.withLock { $0.isCancelled } }
 
@@ -58,8 +58,8 @@ public final class CancellableParallelOperation {
 
     // MARK: - Internal Execution
 
-    private struct LocalParseChunk { let index: Int; let text: String; let startOffset: Int }
-    private struct LocalParseResult { let index: Int; let blocks: [MarkdownParser.BlockNode] }
+    private struct LocalParseChunk: Sendable { let index: Int; let text: String; let startOffset: Int }
+    private struct LocalParseResult: Sendable { let index: Int; let blocks: [MarkdownParser.BlockNode] }
 
     public func start() {
         progressState.withLock { $0.lastEmitted = 0 }
@@ -92,7 +92,7 @@ public final class CancellableParallelOperation {
         let totalChunks = chunks.count
         let semaphore = DispatchSemaphore(value: parallelConfig.concurrency)
         let dispatchGroup = group
-        struct ResultsState { var completed: Int = 0; var results: [LocalParseResult] = [] }
+        struct ResultsState: Sendable { var completed: Int = 0; var results: [LocalParseResult] = [] }
         let resultsLock = OSAllocatedUnfairLock(initialState: ResultsState())
 
         for chunk in chunks {

@@ -5,10 +5,10 @@
   - `Parser/`, `Rendering/`, `Reveal/`, `Views/`, `Utilities/`, `Linter/`, `Export/` modules.
 - `Tests/GlimmerTests/`: XCTest suites (e.g., `GlimmerTests.swift`, `MarkdownParserTests.swift`).
 - `Examples/GlimmerDemo/`: SwiftUI demo app (Xcode project) showcasing features.
-- `Package.swift`: SwiftPM manifest (Swift tools 5.9, iOS 17 target).
+- `Package.swift`: SwiftPM manifest (Swift tools 6.0, iOS 18 target).
 
 ## Build, Test, and Development Commands
-- Xcode (recommended): Open `Package.swift` or `Examples/GlimmerDemo/GlimmerDemo.xcodeproj`, choose an iOS 17+ simulator, then run tests for the `GlimmerTests` target.
+- Xcode (recommended): Open `Package.swift` or `Examples/GlimmerDemo/GlimmerDemo.xcodeproj`, choose an iOS 18+ simulator, then run tests for the `GlimmerTests` target.
 - CLI with Xcode: `xcodebuild -scheme Glimmer -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test`
   - The package scheme is `Glimmer`. Substitute any installed simulator (`xcrun simctl list devices available`).
 - Run a specific test: `xcodebuild -scheme Glimmer -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test -only-testing:GlimmerTests/MarkdownParserTests`.
@@ -25,7 +25,7 @@ Note: This package is iOS-only; `swift test` / `swift build` on macOS will fail 
 - Formatting/Linting: No enforced tools in-repo; prefer SwiftFormat/SwiftLint locally before PRs.
 
 Additional conventions for this project:
-- Modern SwiftUI (iOS 17+, Swift 6) across all UI components.
+- Modern SwiftUI (iOS 18+, Swift 6) across all UI components.
 - Prefer SwiftUI-native solutions over UIKit bridging; no external dependencies.
 - Concurrency: use `async`/`await`, apply `@MainActor` to UI mutations, and adopt Swift 6 strict concurrency where applicable.
 - Observation: prefer the `@Observable` macro for view models; use `@State` for view-local state and `@Binding` for two-way data.
@@ -46,7 +46,7 @@ Additional conventions for this project:
 Additional note: Keep the public API surface minimal and well-documented.
 
 ## Security & Configuration Tips
-- Platform: iOS 17+ only. Ensure simulator/device targets match.
+- Platform: iOS 18+ only. Ensure simulator/device targets match.
 - Performance-sensitive code (parsers/renderers): avoid regressions; measure with large inputs where possible.
 
 ## Architecture Overview

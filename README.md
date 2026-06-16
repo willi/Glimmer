@@ -296,10 +296,12 @@ parser.parseAsync(markdown,
     }
 )
 
-// Get detailed performance metrics
-let (blocks, metrics) = parser.parseWithMetrics(markdown)
-print(metrics.formattedReport)
+// Or parse synchronously when progress callbacks are not needed
+let blocks = parser.parse(markdown)
 ```
+
+For detailed timing reports, use the demo app's Performance Benchmarks screen or
+`Tests/GlimmerTests/ProfilingBenchmarkTests.swift`.
 
 ### Streaming Parser
 
@@ -562,11 +564,15 @@ let config = MarkdownConfiguration.builder()
 The per-block render cache (`maxRenderCacheEntries`, default 4096) must comfortably exceed the block count of the largest documents you re-render — an LRU smaller than the working set thrashes on sequential renders and hits 0%. The `.performance` preset uses 8192.
 
 ### Performance Metrics
-Enable performance tracking to monitor parsing:
+Use the benchmark harnesses for timing and the cache APIs for hit/miss counters:
 
 ```swift
-let config = MarkdownConfiguration(enablePerformanceTracking: true)
-// After parsing, check metrics in console output
+let blocks = Glimmer.parse(markdown, configuration: .performance)
+let renderStats = Glimmer.getRenderCacheStatistics()
+
+let cache = CachedMarkdownParser()
+_ = cache.parse(markdown, configuration: .performance)
+let parserStats = cache.getCacheStatistics()
 ```
 
 ### Memory Pressure Handling

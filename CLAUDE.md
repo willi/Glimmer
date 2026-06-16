@@ -20,7 +20,7 @@ xcodebuild -scheme Glimmer -destination 'platform=iOS Simulator,name=iPhone 17 P
 ```bash
 # Open demo in Xcode
 open Examples/GlimmerDemo/GlimmerDemo.xcodeproj
-# Then run on iOS Simulator (iOS 17+)
+# Then run on iOS Simulator (iOS 18+)
 ```
 
 ### Build Package
@@ -38,7 +38,7 @@ xcodebuild -scheme Glimmer -destination 'platform=iOS Simulator,name=iPhone 17 P
 
 ## Architecture Overview
 
-Glimmer is a **SwiftUI-native** Markdown renderer built specifically for iOS 17+. The architecture prioritizes SwiftUI integration:
+Glimmer is a **SwiftUI-native** Markdown renderer built specifically for iOS 18+. The architecture prioritizes SwiftUI integration:
 
 ```
 Markdown Text → Parser (AST) → AttributedString → SwiftUI Views
@@ -101,7 +101,7 @@ Markdown Text → Parser (AST) → AttributedString → SwiftUI Views
 ## Development Conventions
 
 ### Code Style
-- **Modern SwiftUI** architecture (iOS 17+, Swift 6.0+)
+- **Modern SwiftUI** architecture (iOS 18+, Swift 6.0+)
 - **Apple HIG compliance** for all UI components
 - Swift 6 observation (`@Observable` macro for view models)
 - Swift 6 concurrency (`async`/`await`, `@MainActor` for UI updates)

@@ -4,7 +4,7 @@ import Foundation
 public struct MarkdownExporter {
     
     /// Export options for customizing output
-    public struct ExportOptions {
+    public struct ExportOptions: Sendable {
         /// Use ATX-style headers (#) instead of Setext-style (underlines)
         public var useATXHeaders: Bool = true
         

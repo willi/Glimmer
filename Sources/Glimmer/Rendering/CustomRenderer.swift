@@ -31,13 +31,13 @@ public struct HTMLMarkdownRenderer: MarkdownRendererProtocol {
     
     private let options: HTMLRenderOptions
     
-    public struct HTMLRenderOptions {
+    public struct HTMLRenderOptions: Sendable {
         public var includeCSS: Bool = true
         public var cssClasses: CSSClasses = .defaultClasses
         public var syntaxHighlightTheme: String = "github"
         public var wrapInHTML: Bool = false
         
-        public struct CSSClasses {
+        public struct CSSClasses: Sendable {
             public var heading: String = "md-heading"
             public var paragraph: String = "md-paragraph"
             public var blockquote: String = "md-blockquote"

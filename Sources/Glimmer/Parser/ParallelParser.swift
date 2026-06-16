@@ -3,11 +3,11 @@ import os
 import QuartzCore
 
 /// Parallel markdown parser for very large documents
-public final class ParallelMarkdownParser {
+public final class ParallelMarkdownParser: @unchecked Sendable {
     
     // MARK: - Types
     
-    public struct ParallelConfiguration {
+    public struct ParallelConfiguration: Sendable {
         /// Number of concurrent parsing tasks
         public let concurrency: Int
         
@@ -33,13 +33,13 @@ public final class ParallelMarkdownParser {
         }
     }
     
-    private struct ParseChunk {
+    private struct ParseChunk: Sendable {
         let index: Int
         let text: String
         let startOffset: Int
     }
     
-    private struct ParseResult {
+    private struct ParseResult: Sendable {
         let index: Int
         let blocks: [MarkdownParser.BlockNode]
         let parseTime: TimeInterval
@@ -51,7 +51,7 @@ public final class ParallelMarkdownParser {
     private let markdownConfig: MarkdownConfiguration
     private let queue = DispatchQueue(label: "com.glimmer.parallel", attributes: .concurrent)
     private let parseGroup = DispatchGroup()
-    private struct ActiveOps { var ops: [CancellableParallelOperation] = [] }
+    private struct ActiveOps: Sendable { var ops: [CancellableParallelOperation] = [] }
     private let activeOpsLock = OSAllocatedUnfairLock(initialState: ActiveOps())
     
     // MARK: - Initialization
@@ -92,8 +92,8 @@ public final class ParallelMarkdownParser {
     /// Parse markdown asynchronously with progress reporting
     public func parseAsync(
         _ markdown: String,
-        progress: @escaping (Double) -> Void,
-        completion: @escaping ([MarkdownParser.BlockNode]) -> Void
+        progress: @escaping @Sendable (Double) -> Void,
+        completion: @escaping @Sendable ([MarkdownParser.BlockNode]) -> Void
     ) {
         let op = CancellableParallelOperation(
             markdown: markdown,
@@ -226,8 +226,8 @@ public final class ParallelMarkdownParser {
     }
 
     private func parseChunksInParallel(_ chunks: [ParseChunk]) -> [ParseResult] {
-        var results: [ParseResult] = []
-        let resultsLock = NSLock()
+        struct ResultsState: Sendable { var results: [ParseResult] = [] }
+        let resultsLock = OSAllocatedUnfairLock(initialState: ResultsState())
         let group = DispatchGroup()
         let semaphore = DispatchSemaphore(value: parallelConfig.concurrency)
         for chunk in chunks {
@@ -242,13 +242,11 @@ public final class ParallelMarkdownParser {
                 var state = ParserState(text: chunk.text)
                 let blocks = BlockParser.parseBlocks(&state, configuration: self.markdownConfig)
                 let parseTime = CFAbsoluteTimeGetCurrent() - startTime
-                resultsLock.lock()
-                results.append(ParseResult(index: chunk.index, blocks: blocks, parseTime: parseTime))
-                resultsLock.unlock()
+                resultsLock.withLock { $0.results.append(ParseResult(index: chunk.index, blocks: blocks, parseTime: parseTime)) }
             }
         }
         group.wait()
-        return results
+        return resultsLock.withLock { $0.results }
     }
     
     private func combineResults(_ results: [ParseResult]) -> [MarkdownParser.BlockNode] {

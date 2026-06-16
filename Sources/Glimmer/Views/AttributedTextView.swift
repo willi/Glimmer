@@ -206,7 +206,7 @@ private struct AttributedTextViewRepresentable: UIViewRepresentable {
 }
 
 /// Custom NSTextAttachment that stores image URL and alt text
-class ImageTextAttachment: NSTextAttachment {
+class ImageTextAttachment: NSTextAttachment, @unchecked Sendable {
     let imageURL: URL
     let altText: String
     
@@ -223,6 +223,7 @@ class ImageTextAttachment: NSTextAttachment {
 }
 
 /// Helper to create NSAttributedString with inline images
+@MainActor
 struct InlineImageRenderer {
     let configuration: MarkdownConfiguration
     let baseFont: UIFont
@@ -243,7 +244,7 @@ struct InlineImageRenderer {
     func render(_ nodes: [MarkdownParser.InlineNode]) -> NSAttributedString {
         let result = NSMutableAttributedString()
         
-        for (index, node) in nodes.enumerated() {
+        for node in nodes {
             let nodeResult = renderNode(node)
             
             result.append(nodeResult)
@@ -473,19 +474,6 @@ struct InlineImageRenderer {
         if let imageLoader = imageLoader {
             Task { @MainActor in
                 await imageLoader.loadImage(from: url, attachment: attachment)
-            }
-        } else {
-            // Fallback: Load without notification
-            Task {
-                do {
-                    let (data, _) = try await URLSession.shared.data(from: url)
-                    if let image = UIImage(data: data) {
-                        await MainActor.run {
-                            attachment.image = image
-                        }
-                    }
-                } catch {
-                }
             }
         }
         

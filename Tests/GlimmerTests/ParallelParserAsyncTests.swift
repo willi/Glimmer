@@ -1,4 +1,5 @@
 import XCTest
+import os
 @testable import Glimmer
 
 final class ParallelParserAsyncTests: XCTestCase {
@@ -18,19 +19,25 @@ final class ParallelParserAsyncTests: XCTestCase {
 
         let done = expectation(description: "completion called")
 
-        var lastProgress: Double = 0
-        var progressNeverDecreased = true
-        var progressNeverExceededOne = true
+        struct ProgressState: Sendable {
+            var lastProgress: Double = 0
+            var progressNeverDecreased = true
+            var progressNeverExceededOne = true
+        }
+        let progressState = OSAllocatedUnfairLock(initialState: ProgressState())
 
         parser.parseAsync(repeated, progress: { p in
-            if p < lastProgress { progressNeverDecreased = false }
-            if p > 1.0 { progressNeverExceededOne = false }
-            lastProgress = p
+            progressState.withLock { state in
+                if p < state.lastProgress { state.progressNeverDecreased = false }
+                if p > 1.0 { state.progressNeverExceededOne = false }
+                state.lastProgress = p
+            }
         }, completion: { blocks in
             XCTAssertFalse(blocks.isEmpty, "Expected parsed blocks")
-            XCTAssertEqual(lastProgress, 1.0, accuracy: 0.0001)
-            XCTAssertTrue(progressNeverDecreased, "Progress should be monotonic non-decreasing")
-            XCTAssertTrue(progressNeverExceededOne, "Progress should not exceed 1.0")
+            let state = progressState.withLock { $0 }
+            XCTAssertEqual(state.lastProgress, 1.0, accuracy: 0.0001)
+            XCTAssertTrue(state.progressNeverDecreased, "Progress should be monotonic non-decreasing")
+            XCTAssertTrue(state.progressNeverExceededOne, "Progress should not exceed 1.0")
             done.fulfill()
         })
 
@@ -81,4 +88,3 @@ final class ParallelParserAsyncTests: XCTestCase {
         wait(for: [notCompleted], timeout: 1.0)
     }
 }
-

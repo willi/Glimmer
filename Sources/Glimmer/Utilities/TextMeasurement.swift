@@ -26,12 +26,12 @@ extension NSAttributedString {
 public struct TextMeasurement {
     // MARK: - Table Width Cache
 
-    private struct TableWidthCacheKey: Hashable {
+    private struct TableWidthCacheKey: Hashable, Sendable {
         let tableHash: Int
         let fontHash: Int
     }
 
-    private final class WidthCacheNode {
+    private final class WidthCacheNode: @unchecked Sendable {
         let key: TableWidthCacheKey
         var value: [CGFloat]
         weak var prev: WidthCacheNode?
@@ -43,7 +43,7 @@ public struct TextMeasurement {
         }
     }
 
-    private struct WidthCacheState {
+    private struct WidthCacheState: @unchecked Sendable {
         var dict: [TableWidthCacheKey: WidthCacheNode] = [:]
         var head: WidthCacheNode?
         var tail: WidthCacheNode?

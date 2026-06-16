@@ -54,6 +54,8 @@ public struct PerformanceDemo: View {
 
         let markdown = CorpusGenerator.make(size: size)
         let charCount = markdown.count
+        let chunkBytes = chunkBytes
+        let iterations = iterations
 
         Task.detached {
             // Warm-up each once (not recorded)
@@ -87,14 +89,14 @@ public struct PerformanceDemo: View {
 
 // MARK: - Types
 
-private enum Strategy: String, CaseIterable, Identifiable {
+private enum Strategy: String, CaseIterable, Identifiable, Sendable {
     case sequential = "Sequential"
     case parallel = "Parallel"
     case streaming = "Streaming"
     var id: String { rawValue }
 }
 
-private struct ResultRow: Identifiable {
+private struct ResultRow: Identifiable, Sendable {
     let id = UUID()
     let strategy: Strategy
     let seconds: Double
@@ -104,7 +106,7 @@ private struct ResultRow: Identifiable {
     var charsPerSecDisplay: String { String(Int(charsPerSec)) }
 }
 
-private enum CorpusSize: CaseIterable { case small, medium, large, xl
+private enum CorpusSize: CaseIterable, Sendable { case small, medium, large, xl
     var label: String {
         switch self { case .small: return "Small (~2KB)"; case .medium: return "Medium (~20KB)"; case .large: return "Large (~200KB)"; case .xl: return "XL (~1MB)" }
     }
@@ -152,7 +154,7 @@ private enum Benchmark {
             let end = CFAbsoluteTimeGetCurrent()
             return (end - start, blocks.count)
         case .streaming:
-            var s = StreamingMarkdownParser(configuration: .default)
+            let s = StreamingMarkdownParser(configuration: .default)
             let start = CFAbsoluteTimeGetCurrent()
             for chunk in chunks(of: markdown, size: chunkBytes) {
                 _ = s.parseChunk(chunk)

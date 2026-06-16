@@ -6,7 +6,7 @@ public struct MarkdownLinter {
     // MARK: - Lint Rules
     
     /// Lint rule severity levels
-    public enum Severity: String, CaseIterable {
+    public enum Severity: String, CaseIterable, Sendable {
         case error
         case warning
         case info
@@ -14,7 +14,7 @@ public struct MarkdownLinter {
     }
     
     /// Lint issue found in markdown
-    public struct LintIssue: Identifiable {
+    public struct LintIssue: Identifiable, Sendable {
         public let id: UUID = UUID()
         public let rule: String
         public let severity: Severity
@@ -34,7 +34,7 @@ public struct MarkdownLinter {
     }
     
     /// Linter configuration
-    public struct LintConfiguration {
+    public struct LintConfiguration: Sendable {
         // Document structure
         public var requireTitleHeading: Bool = true
         public var maxHeadingLength: Int = 60
@@ -85,7 +85,7 @@ public struct MarkdownLinter {
         }()
     }
     
-    public enum OrderedListStyle {
+    public enum OrderedListStyle: Sendable {
         case period  // 1.
         case parenthesis  // 1)
     }

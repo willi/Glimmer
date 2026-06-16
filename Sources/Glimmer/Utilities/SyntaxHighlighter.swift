@@ -5,7 +5,7 @@ import os
 struct SyntaxHighlighter {
     private let theme: CodeHighlightingTheme
     // Cache highlighted output for repeated code blocks (LRU)
-    private struct HighlightState { var dict: [String: AttributedString] = [:]; var order: [String] = [] }
+    private struct HighlightState: @unchecked Sendable { var dict: [String: AttributedString] = [:]; var order: [String] = [] }
     private static let highlightCache = OSAllocatedUnfairLock(initialState: HighlightState())
     private static let highlightCapacity = 128
 
@@ -53,12 +53,16 @@ struct SyntaxHighlighter {
     }
 
     // Synchronous wrapper that blocks to get patterns (with a small in-process cache)
-    private static let compiledCache = OSAllocatedUnfairLock(initialState: [String: [(NSRegularExpression, Color)]]())
+    private struct CompiledPatternState: @unchecked Sendable {
+        var dict: [String: [(NSRegularExpression, Color)]] = [:]
+    }
+
+    private static let compiledCache = OSAllocatedUnfairLock(initialState: CompiledPatternState())
 
     private static func compiledPatternsSync(for language: String, theme: CodeHighlightingTheme) -> [(NSRegularExpression, Color)] {
         var hasher = Hasher(); theme.hash(into: &hasher)
         let key = language + "#" + String(hasher.finalize())
-        if let cached = compiledCache.withLock({ $0[key] }) { return cached }
+        if let cached = compiledCache.withLock({ $0.dict[key] }) { return cached }
 
         let patterns: [(String, Color)]
         switch language {
@@ -93,7 +97,7 @@ struct SyntaxHighlighter {
                 return nil
             }
         }
-        compiledCache.withLock { $0[key] = compiled }
+        compiledCache.withLock { $0.dict[key] = compiled }
         return compiled
     }
 

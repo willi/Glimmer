@@ -6,8 +6,8 @@ import os
 public final class CachedMarkdownParser: NSObject, @unchecked Sendable, NSCacheDelegate {
     
     /// Cache key combining markdown and configuration
-    struct CacheKey: Hashable {
-        enum MarkdownKey: Hashable {
+    struct CacheKey: Hashable, Sendable {
+        enum MarkdownKey: Hashable, Sendable {
             case inline(String)           // small content uses full text
             case hashed(length: Int, sha256: String) // large content uses hash
         }
@@ -16,7 +16,7 @@ public final class CachedMarkdownParser: NSObject, @unchecked Sendable, NSCacheD
     }
     
     /// Cache entry with metadata for eviction policy
-    struct CacheEntry {
+    struct CacheEntry: Sendable {
         let blocks: [MarkdownParser.BlockNode]
         let size: Int
         let created: Date
@@ -27,7 +27,7 @@ public final class CachedMarkdownParser: NSObject, @unchecked Sendable, NSCacheD
         }
     }
 
-    private final class LRUNode {
+    private final class LRUNode: @unchecked Sendable {
         let key: CacheKey
         var entry: CacheEntry
         weak var prev: LRUNode?
@@ -39,7 +39,7 @@ public final class CachedMarkdownParser: NSObject, @unchecked Sendable, NSCacheD
         }
     }
 
-    private struct CacheState {
+    private struct CacheState: @unchecked Sendable {
         var cache: [CacheKey: LRUNode] = [:]
         var head: LRUNode?
         var tail: LRUNode?
@@ -50,7 +50,7 @@ public final class CachedMarkdownParser: NSObject, @unchecked Sendable, NSCacheD
     private var nsCache: NSCache<WrappedKey, WrappedEntry>?
     
     // Performance metrics
-    private struct MetricsState { var hits = 0; var misses = 0; var evictions = 0 }
+    private struct MetricsState: Sendable { var hits = 0; var misses = 0; var evictions = 0 }
     private let metricsLock = OSAllocatedUnfairLock(initialState: MetricsState())
     
     public init(useNSCache: Bool = false) {
@@ -168,8 +168,9 @@ public final class CachedMarkdownParser: NSObject, @unchecked Sendable, NSCacheD
                 let now = Date()
                 let entry = CacheEntry(blocks: blocks, size: estimatedSize, created: now, lastAccess: now)
                 if let existing = c.object(forKey: WrappedKey(key)) {
+                    let existingSize = existing.entry.size
                     lock.withLock { state in
-                        state.currentSize = max(0, state.currentSize - existing.entry.size)
+                        state.currentSize = max(0, state.currentSize - existingSize)
                     }
                 }
                 c.setObject(WrappedEntry(entry: entry), forKey: WrappedKey(key), cost: estimatedSize)
@@ -341,7 +342,7 @@ public final class CachedMarkdownParser: NSObject, @unchecked Sendable, NSCacheD
 
 // MARK: - NSCache Support
 
-private final class WrappedKey: NSObject {
+private final class WrappedKey: NSObject, @unchecked Sendable {
     let key: CachedMarkdownParser.CacheKey
     init(_ key: CachedMarkdownParser.CacheKey) { self.key = key }
     override var hash: Int { key.hashValue }
@@ -351,7 +352,7 @@ private final class WrappedKey: NSObject {
     }
 }
 
-private final class WrappedEntry: NSObject {
+private final class WrappedEntry: NSObject, @unchecked Sendable {
     let entry: CachedMarkdownParser.CacheEntry
     init(entry: CachedMarkdownParser.CacheEntry) { self.entry = entry }
 }
@@ -359,7 +360,8 @@ private final class WrappedEntry: NSObject {
 extension CachedMarkdownParser {
     public func cache(_ cache: NSCache<AnyObject, AnyObject>, willEvictObject obj: Any) {
         if let box = obj as? WrappedEntry {
-            lock.withLock { state in state.currentSize = max(0, state.currentSize - box.entry.size) }
+            let entrySize = box.entry.size
+            lock.withLock { state in state.currentSize = max(0, state.currentSize - entrySize) }
         }
         metricsLock.withLock { $0.evictions += 1 }
     }
