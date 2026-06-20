@@ -1,7 +1,8 @@
 // Generated from GitHubEmojis.swift. Keep in sync with the public maps.
 extension GitHubEmojis {
     /// Fast shortcode lookup used by parser hot paths without initializing the public dictionary.
-    @inline(__always)
+    // Keep this generated switch out of caller SIL; forced inlining triggers Release WMO optimizer hangs.
+    @inline(never)
     public static func unicodeEmoji(for name: String) -> String? {
         switch name {
         case "+1": return "👍"
@@ -1945,7 +1946,8 @@ extension GitHubEmojis {
     }
 
     /// Fast bundled URL lookup used as a fallback without initializing the public URL dictionary.
-    @inline(__always)
+    // Keep this generated switch out of caller SIL; forced inlining triggers Release WMO optimizer hangs.
+    @inline(never)
     static func bundledEmojiURL(for name: String) -> String? {
         switch name {
         case "+1": return "https://github.githubassets.com/images/icons/emoji/unicode/1f44d.png?v8"
