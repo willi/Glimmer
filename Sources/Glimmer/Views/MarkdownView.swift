@@ -383,15 +383,17 @@ public struct MarkdownView: View {
 public struct MarkdownContentView: View {
     let blocks: [MarkdownParser.BlockNode]
     let configuration: MarkdownConfiguration
+    private let identifiedBlocks: [MarkdownBlockStableID.Pair]
     
     public init(blocks: [MarkdownParser.BlockNode], configuration: MarkdownConfiguration) {
         self.blocks = blocks
         self.configuration = configuration
+        self.identifiedBlocks = MarkdownBlockStableID.pairs(for: blocks)
     }
     
     public var body: some View {
         LazyVStack(alignment: .leading, spacing: 16) {
-            ForEach(MarkdownBlockStableID.pairs(for: blocks), id: \.id) { pair in
+            ForEach(identifiedBlocks, id: \.id) { pair in
                 MarkdownBlockView(block: pair.block, configuration: configuration, depth: 0)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
@@ -507,54 +509,7 @@ struct MarkdownBlockView: View {
             }
             
         case .table(let header, let rows):
-            // Calculate column widths using proper attributed string measurement
-            let columnWidths = TextMeasurement.calculateColumnWidths(
-                header: header,
-                rows: rows,
-                baseFont: configuration.baseFont
-            )
-            
-            // Determine max columns for misaligned tables
-            let maxColumns = max(header.count, rows.map { $0.count }.max() ?? 0)
-            
-            ScrollView(.horizontal, showsIndicators: false) {
-                Grid(alignment: .topLeading, horizontalSpacing: 0, verticalSpacing: 0) {
-                    // Header row
-                    GridRow {
-                        ForEach(0..<header.count, id: \.self) { index in
-                            MarkdownTableCell(
-                                cell: header[index],
-                                isHeader: true,
-                                configuration: configuration,
-                                width: index == header.count - 1 && header.count < maxColumns ? nil : (index < columnWidths.count ? columnWidths[index] : nil),
-                                isLastColumn: index == header.count - 1,
-                                isLastRow: false
-                            )
-                            .gridCellColumns(index == header.count - 1 ? maxColumns - header.count + 1 : 1)
-                        }
-                    }
-                    .background(Color.secondary.opacity(0.1))
-                    
-                    // Data rows
-                    ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
-                        GridRow {
-                            ForEach(0..<row.count, id: \.self) { cellIndex in
-                                MarkdownTableCell(
-                                    cell: row[cellIndex],
-                                    isHeader: false,
-                                    configuration: configuration,
-                                    width: cellIndex == row.count - 1 && row.count < maxColumns ? nil : (cellIndex < columnWidths.count ? columnWidths[cellIndex] : nil),
-                                    isLastColumn: cellIndex == row.count - 1,
-                                    isLastRow: rowIndex == rows.count - 1
-                                )
-                                .gridCellColumns(cellIndex == row.count - 1 ? maxColumns - row.count + 1 : 1)
-                            }
-                        }
-                    }
-                }
-                .background(Color.secondary.opacity(0.05))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-            }
+            MarkdownTableView(header: header, rows: rows, configuration: configuration)
             
         case .horizontalRule:
             Divider()
@@ -587,6 +542,102 @@ struct MarkdownBlockView: View {
     private func renderHeadingInlineNodes(_ nodes: [MarkdownParser.InlineNode], font: Font) -> AttributedString {
         let renderer = MarkdownRenderer()
         return renderer.renderInlines(nodes, configuration: configuration, baseFont: font)
+    }
+}
+
+/// View that renders markdown tables with wrapping cell widths.
+struct MarkdownTableView: View {
+    let header: [MarkdownParser.TableCell]
+    let rows: [[MarkdownParser.TableCell]]
+    let configuration: MarkdownConfiguration
+
+    @State private var availableWidth: CGFloat = 0
+    @State private var contentHeight: CGFloat = 0
+
+    var body: some View {
+        let columnWidths = resolvedColumnWidths
+        let maxColumns = max(header.count, rows.map { $0.count }.max() ?? 0)
+
+        ScrollView(.horizontal, showsIndicators: false) {
+            Grid(alignment: .topLeading, horizontalSpacing: 0, verticalSpacing: 0) {
+                GridRow {
+                    ForEach(0..<header.count, id: \.self) { index in
+                        MarkdownTableCell(
+                            cell: header[index],
+                            isHeader: true,
+                            configuration: configuration,
+                            width: cellWidth(index: index, cellCount: header.count, maxColumns: maxColumns, columnWidths: columnWidths),
+                            isLastColumn: index == header.count - 1,
+                            isLastRow: false
+                        )
+                        .gridCellColumns(index == header.count - 1 ? maxColumns - header.count + 1 : 1)
+                    }
+                }
+                .background(Color.secondary.opacity(0.1))
+
+                ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
+                    GridRow {
+                        ForEach(0..<row.count, id: \.self) { cellIndex in
+                            MarkdownTableCell(
+                                cell: row[cellIndex],
+                                isHeader: false,
+                                configuration: configuration,
+                                width: cellWidth(index: cellIndex, cellCount: row.count, maxColumns: maxColumns, columnWidths: columnWidths),
+                                isLastColumn: cellIndex == row.count - 1,
+                                isLastRow: rowIndex == rows.count - 1
+                            )
+                            .gridCellColumns(cellIndex == row.count - 1 ? maxColumns - row.count + 1 : 1)
+                        }
+                    }
+                }
+            }
+            .background(Color.secondary.opacity(0.05))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                ceil(proxy.size.height)
+            } action: { newHeight in
+                updateContentHeight(newHeight)
+            }
+        }
+        .frame(height: contentHeight > 0 ? contentHeight : nil)
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.width
+        } action: { newWidth in
+            if newWidth > 0 {
+                availableWidth = newWidth
+            }
+        }
+    }
+
+    private var resolvedColumnWidths: [CGFloat] {
+        let measuredWidths = TextMeasurement.calculateColumnWidths(
+            header: header,
+            rows: rows,
+            baseFont: configuration.baseFont
+        )
+        return TextMeasurement.constrainColumnWidthsForWrapping(
+            measuredWidths,
+            availableWidth: availableWidth
+        )
+    }
+
+    private func cellWidth(
+        index: Int,
+        cellCount: Int,
+        maxColumns: Int,
+        columnWidths: [CGFloat]
+    ) -> CGFloat? {
+        if index == cellCount - 1 && cellCount < maxColumns {
+            return nil
+        }
+        return index < columnWidths.count ? columnWidths[index] : nil
+    }
+
+    private func updateContentHeight(_ newHeight: CGFloat) {
+        guard newHeight.isFinite, newHeight > 0 else { return }
+        if abs(contentHeight - newHeight) > 0.5 {
+            contentHeight = newHeight
+        }
     }
 }
 
@@ -626,6 +677,7 @@ struct MarkdownTableCell: View {
                             baseFont: isHeader ? configuration.baseFont.bold() : configuration.baseFont
                         )
                         .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
                         .multilineTextAlignment(textAlignment(for: cell.alignment))
                     }
                 }
@@ -638,6 +690,7 @@ struct MarkdownTableCell: View {
                     baseFont: isHeader ? configuration.baseFont.bold() : configuration.baseFont
                 )
                 .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
                 .multilineTextAlignment(textAlignment(for: cell.alignment))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 4)
@@ -954,6 +1007,26 @@ struct MarkdownInlineView: View {
     }
     
     private func createAttributedString() -> AttributedString {
+        guard configuration.enableRenderCaching else {
+            return createAttributedStringUncached()
+        }
+
+        let key = MarkdownInlineAttributedCache.key(
+            nodes: nodes,
+            configuration: configuration,
+            baseFont: baseFont,
+            mode: .plain
+        )
+        if let cached = MarkdownInlineAttributedCache.value(for: key) {
+            return cached
+        }
+
+        let rendered = createAttributedStringUncached()
+        MarkdownInlineAttributedCache.insert(rendered, for: key)
+        return rendered
+    }
+
+    private func createAttributedStringUncached() -> AttributedString {
         // First, collect all text content to handle split emoji shortcodes
         if configuration.enableEmojiShortcodes {
             let fullText = nodes.compactMap { node in
@@ -1186,12 +1259,30 @@ struct InteractiveMarkdownContent: View {
     let onMentionTap: ((String) -> Void)?
     let onIssueTap: ((Int) -> Void)?
     let onFootnoteTap: ((String) -> Void)?
+    private let identifiedBlocks: [MarkdownBlockStableID.Pair]
+
+    init(
+        blocks: [MarkdownParser.BlockNode],
+        configuration: MarkdownConfiguration,
+        onLinkTap: @escaping (URL) -> Void,
+        onMentionTap: ((String) -> Void)?,
+        onIssueTap: ((Int) -> Void)?,
+        onFootnoteTap: ((String) -> Void)?
+    ) {
+        self.blocks = blocks
+        self.configuration = configuration
+        self.onLinkTap = onLinkTap
+        self.onMentionTap = onMentionTap
+        self.onIssueTap = onIssueTap
+        self.onFootnoteTap = onFootnoteTap
+        self.identifiedBlocks = MarkdownBlockStableID.pairs(for: blocks)
+    }
     
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 16) {
-            ForEach(Array(blocks.enumerated()), id: \.0) { index, block in
+            ForEach(identifiedBlocks, id: \.id) { pair in
                 InteractiveBlockView(
-                    block: block,
+                    block: pair.block,
                     configuration: configuration,
                     onLinkTap: onLinkTap,
                     onMentionTap: onMentionTap,
@@ -1353,62 +1444,15 @@ struct InteractiveBlockView: View {
             }
             
         case .table(let header, let rows):
-            // Calculate dynamic column widths
-            let columnWidths = TextMeasurement.calculateColumnWidths(
+            InteractiveMarkdownTableView(
                 header: header,
                 rows: rows,
-                baseFont: configuration.baseFont
+                configuration: configuration,
+                onLinkTap: onLinkTap,
+                onMentionTap: onMentionTap,
+                onIssueTap: onIssueTap,
+                onFootnoteTap: onFootnoteTap
             )
-            
-            // Determine max columns for misaligned tables
-            let maxColumns = max(header.count, rows.map { $0.count }.max() ?? 0)
-            
-            ScrollView(.horizontal, showsIndicators: false) {
-                Grid(alignment: .topLeading, horizontalSpacing: 0, verticalSpacing: 0) {
-                    // Header row
-                    GridRow {
-                        ForEach(0..<header.count, id: \.self) { index in
-                            InteractiveTableCell(
-                                cell: header[index],
-                                isHeader: true,
-                                configuration: configuration,
-                                width: index == header.count - 1 && header.count < maxColumns ? nil : (index < columnWidths.count ? columnWidths[index] : nil),
-                                onLinkTap: onLinkTap,
-                                onMentionTap: onMentionTap,
-                                onIssueTap: onIssueTap,
-                                onFootnoteTap: onFootnoteTap,
-                                isLastColumn: index == header.count - 1,
-                                isLastRow: false
-                            )
-                            .gridCellColumns(index == header.count - 1 ? maxColumns - header.count + 1 : 1)
-                        }
-                    }
-                    .background(Color.secondary.opacity(0.1))
-                    
-                    // Data rows
-                    ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
-                        GridRow {
-                            ForEach(0..<row.count, id: \.self) { cellIndex in
-                                InteractiveTableCell(
-                                    cell: row[cellIndex],
-                                    isHeader: false,
-                                    configuration: configuration,
-                                    width: cellIndex == row.count - 1 && row.count < maxColumns ? nil : (cellIndex < columnWidths.count ? columnWidths[cellIndex] : nil),
-                                    onLinkTap: onLinkTap,
-                                    onMentionTap: onMentionTap,
-                                    onIssueTap: onIssueTap,
-                                    onFootnoteTap: onFootnoteTap,
-                                    isLastColumn: cellIndex == row.count - 1,
-                                    isLastRow: rowIndex == rows.count - 1
-                                )
-                                .gridCellColumns(cellIndex == row.count - 1 ? maxColumns - row.count + 1 : 1)
-                            }
-                        }
-                    }
-                }
-                .background(Color.secondary.opacity(0.05))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-            }
             
         case .horizontalRule:
             Divider()
@@ -1440,6 +1484,114 @@ struct InteractiveBlockView: View {
     private func calculateHeaderWidth(index: Int, headerCount: Int, columnWidths: [CGFloat]) -> CGFloat {
         guard index < columnWidths.count else { return 100 }
         return columnWidths[index]
+    }
+}
+
+/// Interactive markdown table with wrapping cell widths.
+struct InteractiveMarkdownTableView: View {
+    let header: [MarkdownParser.TableCell]
+    let rows: [[MarkdownParser.TableCell]]
+    let configuration: MarkdownConfiguration
+    let onLinkTap: (URL) -> Void
+    let onMentionTap: ((String) -> Void)?
+    let onIssueTap: ((Int) -> Void)?
+    let onFootnoteTap: ((String) -> Void)?
+
+    @State private var availableWidth: CGFloat = 0
+    @State private var contentHeight: CGFloat = 0
+
+    var body: some View {
+        let columnWidths = resolvedColumnWidths
+        let maxColumns = max(header.count, rows.map { $0.count }.max() ?? 0)
+
+        ScrollView(.horizontal, showsIndicators: false) {
+            Grid(alignment: .topLeading, horizontalSpacing: 0, verticalSpacing: 0) {
+                GridRow {
+                    ForEach(0..<header.count, id: \.self) { index in
+                        InteractiveTableCell(
+                            cell: header[index],
+                            isHeader: true,
+                            configuration: configuration,
+                            width: cellWidth(index: index, cellCount: header.count, maxColumns: maxColumns, columnWidths: columnWidths),
+                            onLinkTap: onLinkTap,
+                            onMentionTap: onMentionTap,
+                            onIssueTap: onIssueTap,
+                            onFootnoteTap: onFootnoteTap,
+                            isLastColumn: index == header.count - 1,
+                            isLastRow: false
+                        )
+                        .gridCellColumns(index == header.count - 1 ? maxColumns - header.count + 1 : 1)
+                    }
+                }
+                .background(Color.secondary.opacity(0.1))
+
+                ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
+                    GridRow {
+                        ForEach(0..<row.count, id: \.self) { cellIndex in
+                            InteractiveTableCell(
+                                cell: row[cellIndex],
+                                isHeader: false,
+                                configuration: configuration,
+                                width: cellWidth(index: cellIndex, cellCount: row.count, maxColumns: maxColumns, columnWidths: columnWidths),
+                                onLinkTap: onLinkTap,
+                                onMentionTap: onMentionTap,
+                                onIssueTap: onIssueTap,
+                                onFootnoteTap: onFootnoteTap,
+                                isLastColumn: cellIndex == row.count - 1,
+                                isLastRow: rowIndex == rows.count - 1
+                            )
+                            .gridCellColumns(cellIndex == row.count - 1 ? maxColumns - row.count + 1 : 1)
+                        }
+                    }
+                }
+            }
+            .background(Color.secondary.opacity(0.05))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                ceil(proxy.size.height)
+            } action: { newHeight in
+                updateContentHeight(newHeight)
+            }
+        }
+        .frame(height: contentHeight > 0 ? contentHeight : nil)
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.width
+        } action: { newWidth in
+            if newWidth > 0 {
+                availableWidth = newWidth
+            }
+        }
+    }
+
+    private var resolvedColumnWidths: [CGFloat] {
+        let measuredWidths = TextMeasurement.calculateColumnWidths(
+            header: header,
+            rows: rows,
+            baseFont: configuration.baseFont
+        )
+        return TextMeasurement.constrainColumnWidthsForWrapping(
+            measuredWidths,
+            availableWidth: availableWidth
+        )
+    }
+
+    private func cellWidth(
+        index: Int,
+        cellCount: Int,
+        maxColumns: Int,
+        columnWidths: [CGFloat]
+    ) -> CGFloat? {
+        if index == cellCount - 1 && cellCount < maxColumns {
+            return nil
+        }
+        return index < columnWidths.count ? columnWidths[index] : nil
+    }
+
+    private func updateContentHeight(_ newHeight: CGFloat) {
+        guard newHeight.isFinite, newHeight > 0 else { return }
+        if abs(contentHeight - newHeight) > 0.5 {
+            contentHeight = newHeight
+        }
     }
 }
 
@@ -1502,6 +1654,7 @@ struct InteractiveTableCell: View {
                             baseFont: isHeader ? configuration.baseFont.bold() : configuration.baseFont
                         )
                         .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
                         .multilineTextAlignment(textAlignment(for: cell.alignment))
                     }
                 }
@@ -1518,11 +1671,13 @@ struct InteractiveTableCell: View {
                     baseFont: isHeader ? configuration.baseFont.bold() : configuration.baseFont
                 )
                 .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
                 .multilineTextAlignment(textAlignment(for: cell.alignment))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 4)
             }
         }
+        .frame(width: width, alignment: alignment(for: cell.alignment))
         .clipped() // Ensure content doesn't overflow bounds
         .overlay(
             GeometryReader { geometry in
@@ -1813,6 +1968,26 @@ struct InteractiveInlineView: View {
     }
     
     private func createAttributedString() -> AttributedString {
+        guard configuration.enableRenderCaching else {
+            return createAttributedStringUncached()
+        }
+
+        let key = MarkdownInlineAttributedCache.key(
+            nodes: nodes,
+            configuration: configuration,
+            baseFont: baseFont,
+            mode: .interactive
+        )
+        if let cached = MarkdownInlineAttributedCache.value(for: key) {
+            return cached
+        }
+
+        let rendered = createAttributedStringUncached()
+        MarkdownInlineAttributedCache.insert(rendered, for: key)
+        return rendered
+    }
+
+    private func createAttributedStringUncached() -> AttributedString {
         var result = AttributedString()
         
         for node in nodes {

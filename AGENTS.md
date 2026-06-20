@@ -75,8 +75,9 @@ Additional note: Keep the public API surface minimal and well-documented.
 - `CustomRenderer`: Protocol for alternative formats (HTML/PlainText).
 
 ### Streaming Reveal (`Sources/Glimmer/Reveal/`)
-- Buffer → parse (cached) → `RevealFlattener` (atoms with stable ids) → `RevealDriver` (clock-paced) → `GlimmerRevealView`.
+- Buffer → `RevealSession` for append-only reuse → parse/flatten changed tail with canonical parser fallback → `RevealDriver` (clock-paced) → `GlimmerRevealView`.
 - The reveal view is also the settled view (no engine swap); inline styling reuses `MarkdownRenderer.renderInlines` via `beginSession`.
+- `RevealSession` commits complete markdown through conservative blank-line boundaries and reparses only the current tail; replacements and unsafe edits rebuild through the canonical parser path.
 - Pure pacing/trail math in `RevealPacing.swift` is unit-tested without a clock; driver tests inject a fake `sleep`.
 
 ### Configuration
@@ -97,8 +98,10 @@ Additional note: Keep the public API surface minimal and well-documented.
 - Minimize `AttributedString` regeneration and leverage SwiftUI view diffing.
 - Use Instruments (SwiftUI template) to profile hot paths.
 - Consider fragment pools and caching for memory efficiency.
-- Benchmark harness: `ProfilingBenchmarkTests/testPhaseTimings` (per-phase timings on a complex corpus); `testProfilingLoop` with `TEST_RUNNER_GLIMMER_PROFILING=1` for Instruments attach. Benchmark in Release (`-configuration Release ENABLE_TESTABILITY=YES`).
+- Benchmark harness: `ProfilingBenchmarkTests/testPhaseTimings` (per-phase timings on a complex corpus); `testProfilingLoop` with `GLIMMER_PROFILING=1` for Instruments attach. Benchmark in Release (`-configuration Release ENABLE_TESTABILITY=YES`).
 - `maxRenderCacheEntries` (default 4096) must exceed the re-rendered document's block count or the LRU thrashes to 0% hits.
+- Incremental reveal correctness is covered by `RevealSessionTests`, including full profiling corpus and growing GitHub-enabled corpus prefix comparisons against canonical full parse/flatten output.
+- Display profiling uses `MarkdownDisplayProfilingTests/testMarkdownDisplayScrollLoop` with `TEST_RUNNER_GLIMMER_DISPLAY_PROFILING=1` under Instruments or `xcrun xctrace`.
 
 ## Common Development Tasks
 

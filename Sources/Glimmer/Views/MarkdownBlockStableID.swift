@@ -1,13 +1,18 @@
 import Foundation
 
 enum MarkdownBlockStableID {
-    static func pairs(for blocks: [MarkdownParser.BlockNode]) -> [(id: String, block: MarkdownParser.BlockNode)] {
+    struct Pair {
+        let id: String
+        let block: MarkdownParser.BlockNode
+    }
+
+    static func pairs(for blocks: [MarkdownParser.BlockNode]) -> [Pair] {
         var occurrences: [String: Int] = [:]
         return blocks.map { block in
             let baseID = make(for: block)
             let occurrence = occurrences[baseID, default: 0]
             occurrences[baseID] = occurrence + 1
-            return (id: "\(baseID)#\(occurrence)", block: block)
+            return Pair(id: "\(baseID)#\(occurrence)", block: block)
         }
     }
 

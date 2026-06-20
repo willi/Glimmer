@@ -70,8 +70,67 @@ public struct RevealModel: Sendable {
     public let blocks: [RevealBlock]
     /// Total number of countable atoms (the driver's drain target).
     public let countableCount: Int
+    /// Total atoms, including non-countable spaces and line breaks.
+    let atomCount: Int
 
-    public static let empty = RevealModel(blocks: [], countableCount: 0)
+    init(blocks: [RevealBlock], countableCount: Int, atomCount: Int) {
+        self.blocks = blocks
+        self.countableCount = countableCount
+        self.atomCount = atomCount
+    }
+
+    init(blocks: [RevealBlock], countableCount: Int) {
+        self.init(
+            blocks: blocks,
+            countableCount: countableCount,
+            atomCount: blocks.reduce(0) { total, block in
+                total + block.words.reduce(0) { $0 + $1.atoms.count }
+            }
+        )
+    }
+
+    public static let empty = RevealModel(blocks: [], countableCount: 0, atomCount: 0)
+}
+
+extension RevealModel {
+    func offsetBy(atomID atomOffset: Int, blockID blockOffset: Int, countable countableOffset: Int) -> RevealModel {
+        guard atomOffset != 0 || blockOffset != 0 || countableOffset != 0 else {
+            return self
+        }
+
+        let adjustedBlocks = blocks.map { block in
+            let adjustedWords = block.words.map { word in
+                let adjustedAtoms = word.atoms.map { atom in
+                    RevealAtom(
+                        id: atom.id + atomOffset,
+                        kind: atom.kind,
+                        isCountable: atom.isCountable,
+                        revealIndex: atom.revealIndex + countableOffset,
+                        url: atom.url
+                    )
+                }
+                return RevealWord(
+                    id: word.id + atomOffset,
+                    atoms: adjustedAtoms,
+                    isWhitespace: word.isWhitespace,
+                    isLineBreak: word.isLineBreak
+                )
+            }
+
+            let firstRevealIndex = block.firstRevealIndex == Int.max
+                ? Int.max
+                : block.firstRevealIndex + countableOffset
+            return RevealBlock(
+                id: block.id + blockOffset,
+                kind: block.kind,
+                words: adjustedWords,
+                node: block.node,
+                firstRevealIndex: firstRevealIndex
+            )
+        }
+
+        return RevealModel(blocks: adjustedBlocks, countableCount: countableCount + countableOffset)
+    }
 }
 
 public extension Glimmer {

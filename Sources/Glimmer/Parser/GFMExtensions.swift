@@ -40,13 +40,39 @@ public struct GFMExtensions {
         
         return (headers, rows, alignments)
     }
+
+    static func parseTable(
+        source: String,
+        lineRanges: [Range<String.Index>],
+        configuration: MarkdownConfiguration
+    ) -> (headers: [MarkdownParser.TableCell], rows: [[MarkdownParser.TableCell]], alignments: [MarkdownParser.TableAlignment])? {
+        guard lineRanges.count >= 2 else { return nil }
+
+        let alignments = parseTableAlignments(source: source, range: lineRanges[1])
+        guard !alignments.isEmpty else { return nil }
+
+        let headers = parseTableRow(source: source, range: lineRanges[0], alignments: alignments, configuration: configuration)
+
+        var rows: [[MarkdownParser.TableCell]] = []
+        rows.reserveCapacity(max(0, lineRanges.count - 2))
+        for range in lineRanges.dropFirst(2) {
+            rows.append(parseTableRow(source: source, range: range, alignments: alignments, configuration: configuration))
+        }
+
+        return (headers, rows, alignments)
+    }
     
     /// Parse table row into cells
     public static func parseTableRow(_ line: String, alignments: [MarkdownParser.TableAlignment]? = nil, configuration: MarkdownConfiguration) -> [MarkdownParser.TableCell] {
+        if let cells = parseASCIITableRow(line, alignments: alignments, configuration: configuration) {
+            return cells
+        }
+
         let parts = line.split(separator: "|", omittingEmptySubsequences: false)
             .map { $0.trimmingCharacters(in: .whitespaces) }
         
         var cells: [MarkdownParser.TableCell] = []
+        cells.reserveCapacity(parts.count)
         for (index, part) in parts.enumerated() {
             // Skip leading and trailing empty cells from pipe characters
             if index == 0 && part.isEmpty { continue }
@@ -60,13 +86,36 @@ public struct GFMExtensions {
         
         return cells
     }
+
+    private static func parseTableRow(
+        source: String,
+        range: Range<String.Index>,
+        alignments: [MarkdownParser.TableAlignment]?,
+        configuration: MarkdownConfiguration
+    ) -> [MarkdownParser.TableCell] {
+        if let cells = parseASCIITableRow(
+            source: source,
+            range: range,
+            alignments: alignments,
+            configuration: configuration
+        ) {
+            return cells
+        }
+
+        return parseTableRow(String(source[range]), alignments: alignments, configuration: configuration)
+    }
     
     /// Parse table alignment row
     public static func parseTableAlignments(_ line: String) -> [MarkdownParser.TableAlignment] {
+        if let alignments = parseASCIITableAlignments(line) {
+            return alignments
+        }
+
         let parts = line.split(separator: "|", omittingEmptySubsequences: false)
             .map { $0.trimmingCharacters(in: .whitespaces) }
         
         var alignments: [MarkdownParser.TableAlignment] = []
+        alignments.reserveCapacity(parts.count)
         
         for part in parts {
             if part.isEmpty { continue }
@@ -90,6 +139,357 @@ public struct GFMExtensions {
         }
         
         return alignments
+    }
+
+    private static func parseTableAlignments(
+        source: String,
+        range: Range<String.Index>
+    ) -> [MarkdownParser.TableAlignment] {
+        if let alignments = parseASCIITableAlignments(source: source, range: range) {
+            return alignments
+        }
+
+        return parseTableAlignments(String(source[range]))
+    }
+
+    private static func parseASCIITableRow(
+        _ line: String,
+        alignments: [MarkdownParser.TableAlignment]?,
+        configuration: MarkdownConfiguration
+    ) -> [MarkdownParser.TableCell]? {
+        guard let ranges = asciiTableCellRanges(in: line) else {
+            return nil
+        }
+
+        var cells: [MarkdownParser.TableCell] = []
+        cells.reserveCapacity(ranges.count)
+
+        for (partIndex, range) in ranges.enumerated() {
+            let isEmpty = range.lowerBound == range.upperBound
+            if partIndex == 0 && isEmpty { continue }
+            if partIndex == ranges.count - 1 && isEmpty { continue }
+
+            let content = InlineParser.parseInlineElements(
+                in: line,
+                from: range.lowerBound,
+                to: range.upperBound,
+                configuration: configuration,
+                asciiFastPath: true
+            )
+            let alignment = alignments?[safe: cells.count] ?? .left
+            cells.append(MarkdownParser.TableCell(content: content, alignment: alignment))
+        }
+
+        return cells
+    }
+
+    private static func parseASCIITableRow(
+        source: String,
+        range: Range<String.Index>,
+        alignments: [MarkdownParser.TableAlignment]?,
+        configuration: MarkdownConfiguration
+    ) -> [MarkdownParser.TableCell]? {
+        guard let ranges = asciiTableCellRanges(in: source, range: range) else {
+            return nil
+        }
+
+        var cells: [MarkdownParser.TableCell] = []
+        cells.reserveCapacity(ranges.count)
+
+        for (partIndex, range) in ranges.enumerated() {
+            let isEmpty = range.lowerBound == range.upperBound
+            if partIndex == 0 && isEmpty { continue }
+            if partIndex == ranges.count - 1 && isEmpty { continue }
+
+            let content = InlineParser.parseInlineElements(
+                in: source,
+                from: range.lowerBound,
+                to: range.upperBound,
+                configuration: configuration,
+                asciiFastPath: true
+            )
+            let alignment = alignments?[safe: cells.count] ?? .left
+            cells.append(MarkdownParser.TableCell(content: content, alignment: alignment))
+        }
+
+        return cells
+    }
+
+    static func parseASCIITableRowByCopyingCellsForTesting(
+        _ line: String,
+        alignments: [MarkdownParser.TableAlignment]?,
+        configuration: MarkdownConfiguration
+    ) -> [MarkdownParser.TableCell]? {
+        guard let ranges = asciiTableCellRanges(in: line) else {
+            return nil
+        }
+
+        var cells: [MarkdownParser.TableCell] = []
+        cells.reserveCapacity(ranges.count)
+
+        for (partIndex, range) in ranges.enumerated() {
+            let isEmpty = range.lowerBound == range.upperBound
+            if partIndex == 0 && isEmpty { continue }
+            if partIndex == ranges.count - 1 && isEmpty { continue }
+
+            let content = InlineParser.parseInlineOptimized(String(line[range]), configuration: configuration)
+            let alignment = alignments?[safe: cells.count] ?? .left
+            cells.append(MarkdownParser.TableCell(content: content, alignment: alignment))
+        }
+
+        return cells
+    }
+
+    private static func parseASCIITableAlignments(_ line: String) -> [MarkdownParser.TableAlignment]? {
+        guard let ranges = asciiTableCellRanges(in: line) else {
+            return nil
+        }
+
+        return parseASCIITableAlignments(line, ranges: ranges, useUTF8ByteScan: true)
+    }
+
+    static func parseASCIITableAlignmentsByCharacterScanningForTesting(
+        _ line: String
+    ) -> [MarkdownParser.TableAlignment]? {
+        guard let ranges = asciiTableCellRanges(in: line) else {
+            return nil
+        }
+
+        return parseASCIITableAlignments(line, ranges: ranges, useUTF8ByteScan: false)
+    }
+
+    private static func parseASCIITableAlignments(
+        _ line: String,
+        ranges: [Range<String.Index>],
+        useUTF8ByteScan: Bool
+    ) -> [MarkdownParser.TableAlignment] {
+        if useUTF8ByteScan {
+            return parseASCIITableAlignmentsWithBytes(in: line.utf8, ranges: ranges)
+        }
+
+        var alignments: [MarkdownParser.TableAlignment] = []
+        alignments.reserveCapacity(ranges.count)
+
+        for range in ranges {
+            if range.lowerBound == range.upperBound { continue }
+
+            var containsDash = false
+            var index = range.lowerBound
+            while index < range.upperBound {
+                if line[index] == "-" {
+                    containsDash = true
+                    break
+                }
+                index = line.index(after: index)
+            }
+
+            guard containsDash else { continue }
+
+            let startsWithColon = line[range.lowerBound] == ":"
+            let beforeEnd = line.index(before: range.upperBound)
+            let endsWithColon = line[beforeEnd] == ":"
+
+            if startsWithColon && endsWithColon {
+                alignments.append(.center)
+            } else if endsWithColon {
+                alignments.append(.right)
+            } else {
+                alignments.append(.left)
+            }
+        }
+
+        return alignments
+    }
+
+    private static func parseASCIITableAlignments(
+        source: String,
+        range: Range<String.Index>
+    ) -> [MarkdownParser.TableAlignment]? {
+        guard let ranges = asciiTableCellRanges(in: source, range: range) else {
+            return nil
+        }
+
+        return parseASCIITableAlignments(source: source, ranges: ranges, useUTF8ByteScan: true)
+    }
+
+    private static func parseASCIITableAlignments(
+        source: String,
+        ranges: [Range<String.Index>],
+        useUTF8ByteScan: Bool
+    ) -> [MarkdownParser.TableAlignment] {
+        if useUTF8ByteScan {
+            return parseASCIITableAlignmentsWithBytes(in: source.utf8, ranges: ranges)
+        }
+
+        var alignments: [MarkdownParser.TableAlignment] = []
+        alignments.reserveCapacity(ranges.count)
+
+        for range in ranges {
+            if range.lowerBound == range.upperBound { continue }
+
+            var containsDash = false
+            var index = range.lowerBound
+            while index < range.upperBound {
+                if source[index] == "-" {
+                    containsDash = true
+                    break
+                }
+                index = source.index(after: index)
+            }
+
+            guard containsDash else { continue }
+
+            let startsWithColon = source[range.lowerBound] == ":"
+            let beforeEnd = source.index(before: range.upperBound)
+            let endsWithColon = source[beforeEnd] == ":"
+
+            if startsWithColon && endsWithColon {
+                alignments.append(.center)
+            } else if endsWithColon {
+                alignments.append(.right)
+            } else {
+                alignments.append(.left)
+            }
+        }
+
+        return alignments
+    }
+
+    private static func parseASCIITableAlignmentsWithBytes(
+        in utf8: String.UTF8View,
+        ranges: [Range<String.Index>]
+    ) -> [MarkdownParser.TableAlignment] {
+        var alignments: [MarkdownParser.TableAlignment] = []
+        alignments.reserveCapacity(ranges.count)
+
+        for range in ranges {
+            guard range.lowerBound < range.upperBound else { continue }
+
+            var containsDash = false
+            var index = range.lowerBound
+            while index < range.upperBound {
+                if utf8[index] == 0x2D { // -
+                    containsDash = true
+                    break
+                }
+                index = utf8.index(after: index)
+            }
+
+            guard containsDash else { continue }
+
+            let startsWithColon = utf8[range.lowerBound] == 0x3A // :
+            let beforeEnd = utf8.index(before: range.upperBound)
+            let endsWithColon = utf8[beforeEnd] == 0x3A // :
+
+            if startsWithColon && endsWithColon {
+                alignments.append(.center)
+            } else if endsWithColon {
+                alignments.append(.right)
+            } else {
+                alignments.append(.left)
+            }
+        }
+
+        return alignments
+    }
+
+    private static func asciiTableCellRanges(in line: String) -> [Range<String.Index>]? {
+        guard let utf8Start = line.startIndex.samePosition(in: line.utf8),
+              let utf8End = line.endIndex.samePosition(in: line.utf8) else {
+            return nil
+        }
+
+        let utf8 = line.utf8
+        var ranges: [Range<String.Index>] = []
+        ranges.reserveCapacity(4)
+
+        var cellStart = utf8Start
+        var index = utf8Start
+
+        while true {
+            if index == utf8End || utf8[index] == 0x7C { // |
+                let trimmed = trimASCIITableWhitespace(in: utf8, lowerBound: cellStart, upperBound: index)
+                guard let lowerBound = String.Index(trimmed.lowerBound, within: line),
+                      let upperBound = String.Index(trimmed.upperBound, within: line) else {
+                    return nil
+                }
+                ranges.append(lowerBound..<upperBound)
+
+                if index == utf8End { break }
+                cellStart = utf8.index(after: index)
+            } else if utf8[index] >= 0x80 {
+                return nil
+            }
+
+            index = utf8.index(after: index)
+        }
+
+        return ranges
+    }
+
+    private static func asciiTableCellRanges(
+        in source: String,
+        range: Range<String.Index>
+    ) -> [Range<String.Index>]? {
+        guard let utf8Start = range.lowerBound.samePosition(in: source.utf8),
+              let utf8End = range.upperBound.samePosition(in: source.utf8) else {
+            return nil
+        }
+
+        let utf8 = source.utf8
+        var ranges: [Range<String.Index>] = []
+        ranges.reserveCapacity(4)
+
+        var cellStart = utf8Start
+        var index = utf8Start
+
+        while true {
+            if index == utf8End || utf8[index] == 0x7C { // |
+                let trimmed = trimASCIITableWhitespace(in: utf8, lowerBound: cellStart, upperBound: index)
+                guard let lowerBound = String.Index(trimmed.lowerBound, within: source),
+                      let upperBound = String.Index(trimmed.upperBound, within: source) else {
+                    return nil
+                }
+                ranges.append(lowerBound..<upperBound)
+
+                if index == utf8End { break }
+                cellStart = utf8.index(after: index)
+            } else if utf8[index] >= 0x80 {
+                return nil
+            }
+
+            index = utf8.index(after: index)
+        }
+
+        return ranges
+    }
+
+    private static func trimASCIITableWhitespace(
+        in utf8: String.UTF8View,
+        lowerBound: String.UTF8View.Index,
+        upperBound: String.UTF8View.Index
+    ) -> Range<String.UTF8View.Index> {
+        var lowerBound = lowerBound
+        var upperBound = upperBound
+
+        while lowerBound < upperBound && isASCIITableWhitespace(utf8[lowerBound]) {
+            lowerBound = utf8.index(after: lowerBound)
+        }
+
+        while lowerBound < upperBound {
+            let previous = utf8.index(before: upperBound)
+            guard isASCIITableWhitespace(utf8[previous]) else {
+                break
+            }
+            upperBound = previous
+        }
+
+        return lowerBound..<upperBound
+    }
+
+    @inline(__always)
+    private static func isASCIITableWhitespace(_ byte: UInt8) -> Bool {
+        byte == 0x20 || byte == 0x09
     }
     
     // MARK: - Autolinks

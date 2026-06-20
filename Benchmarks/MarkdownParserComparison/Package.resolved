@@ -1,0 +1,51 @@
+{
+  "originHash" : "fb7fed0f6617e10b04fda6dba69b65ce131cb3e370115f4d92e7786734575508",
+  "pins" : [
+    {
+      "identity" : "ink",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/JohnSundell/Ink.git",
+      "state" : {
+        "revision" : "bcc9f219900a62c4210e6db726035d7f03ae757b",
+        "version" : "0.6.0"
+      }
+    },
+    {
+      "identity" : "markdownkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/bmoliveira/MarkdownKit.git",
+      "state" : {
+        "revision" : "39ea7a3fc7e65bcafe55152592b834859be574a5",
+        "version" : "1.7.3"
+      }
+    },
+    {
+      "identity" : "swift-cmark",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swiftlang/swift-cmark.git",
+      "state" : {
+        "revision" : "924936d0427cb25a61169739a7660230bffa6ea6",
+        "version" : "0.8.0"
+      }
+    },
+    {
+      "identity" : "swift-markdown",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swiftlang/swift-markdown.git",
+      "state" : {
+        "revision" : "3c6f9523da3a1ec2fd829673e472d95b8097a3b8",
+        "version" : "0.8.0"
+      }
+    },
+    {
+      "identity" : "swiftymarkdown",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/SimonFairbairn/SwiftyMarkdown.git",
+      "state" : {
+        "revision" : "dde451ab4ed9b77b328e21baa471fdfa0cf61369",
+        "version" : "1.2.4"
+      }
+    }
+  ],
+  "version" : 3
+}

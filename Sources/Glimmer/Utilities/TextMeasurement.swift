@@ -1,9 +1,56 @@
+import CoreText
 import SwiftUI
 import os
 
-// Extension for precise width calculation using NSTextLayoutManager
 extension NSAttributedString {
+    private static let textKitLineFragmentPadding: CGFloat = 5
+
     func preciseWidth() -> CGFloat {
+        coreTextPreciseWidth()
+    }
+
+    func coreTextPreciseWidthForTesting() -> CGFloat {
+        coreTextPreciseWidth()
+    }
+
+    func textKitPreciseWidthForTesting() -> CGFloat {
+        textKitPreciseWidth()
+    }
+
+    private func coreTextPreciseWidth() -> CGFloat {
+        guard length > 0 else { return 0 }
+
+        let text = string
+        guard text.rangeOfCharacter(from: .newlines) != nil else {
+            return ceil(Self.measureCoreTextLine(self) + Self.textKitLineFragmentPadding)
+        }
+
+        let nsText = text as NSString
+        let fullLength = nsText.length
+        var lineStart = 0
+        var maxWidth: CGFloat = 0
+
+        while lineStart <= fullLength {
+            let searchRange = NSRange(location: lineStart, length: fullLength - lineStart)
+            let newlineRange = nsText.rangeOfCharacter(from: .newlines, options: [], range: searchRange)
+            let lineRange: NSRange
+
+            if newlineRange.location == NSNotFound {
+                lineRange = NSRange(location: lineStart, length: fullLength - lineStart)
+                lineStart = fullLength + 1
+            } else {
+                lineRange = NSRange(location: lineStart, length: newlineRange.location - lineStart)
+                lineStart = newlineRange.location + newlineRange.length
+            }
+
+            guard lineRange.length > 0 else { continue }
+            maxWidth = max(maxWidth, Self.measureCoreTextLine(attributedSubstring(from: lineRange)))
+        }
+
+        return ceil(maxWidth + Self.textKitLineFragmentPadding)
+    }
+
+    private func textKitPreciseWidth() -> CGFloat {
         let textLayoutManager = NSTextLayoutManager()
         let textContainer = NSTextContainer(size: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude))
         let textContentStorage = NSTextContentStorage()
@@ -20,6 +67,13 @@ extension NSAttributedString {
         }
         
         return ceil(width)
+    }
+
+    private static func measureCoreTextLine(_ attributedString: NSAttributedString) -> CGFloat {
+        let line = CTLineCreateWithAttributedString(attributedString)
+        let width = CTLineGetTypographicBounds(line, nil, nil, nil)
+        guard width.isFinite else { return 0 }
+        return ceil(CGFloat(width))
     }
 }
 
@@ -213,10 +267,43 @@ public struct TextMeasurement {
         return calculated
     }
 
+    static func constrainColumnWidthsForWrapping(
+        _ columnWidths: [CGFloat],
+        availableWidth: CGFloat
+    ) -> [CGFloat] {
+        guard availableWidth.isFinite, availableWidth > 0, !columnWidths.isEmpty else {
+            return columnWidths
+        }
+
+        let visibleColumnCount = CGFloat(min(max(columnWidths.count, 1), 4))
+        let minimumReadableWidth = min(120, max(72, floor(availableWidth / visibleColumnCount)))
+        let measuredMaximumWrappedWidth: CGFloat
+        if columnWidths.count == 1 {
+            measuredMaximumWrappedWidth = max(minimumReadableWidth, availableWidth)
+        } else {
+            measuredMaximumWrappedWidth = max(minimumReadableWidth, min(720, availableWidth * 0.55))
+        }
+        let maximumWrappedWidth = max(minimumReadableWidth, floor(measuredMaximumWrappedWidth))
+
+        var constrainedWidths = columnWidths.map { width -> CGFloat in
+            guard width.isFinite, width > 0 else { return minimumReadableWidth }
+            return min(max(width, minimumReadableWidth), maximumWrappedWidth)
+        }
+
+        let constrainedTotalWidth = constrainedWidths.reduce(0, +)
+        if constrainedTotalWidth < availableWidth {
+            let extraWidth = (availableWidth - constrainedTotalWidth) / CGFloat(constrainedWidths.count)
+            constrainedWidths = constrainedWidths.map { $0 + extraWidth }
+        }
+
+        return constrainedWidths.map { ceil($0) }
+    }
+
     private static func calculateColumnWidthsUncached(
         header: [MarkdownParser.TableCell],
         rows: [[MarkdownParser.TableCell]],
-        baseFont: Font
+        baseFont: Font,
+        measure: ([MarkdownParser.InlineNode], Font) -> CGFloat = measureInlineNodes
     ) -> [CGFloat] {
         // Determine the maximum number of columns (handle misaligned tables)
         let maxColumns = max(header.count, rows.map { $0.count }.max() ?? 0)
@@ -227,7 +314,7 @@ public struct TextMeasurement {
             // Headers in tables are displayed with bold base font in MarkdownTableCell
             // but the content can have its own styling (bold, italic, code, etc.)
             // We need to measure with the base bold font as the default
-            let headerWidth = measureInlineNodes(cell.content, baseFont: baseFont.bold())
+            let headerWidth = measure(cell.content, baseFont.bold())
             // Add padding: 24pt (12pt left + 12pt right) plus 2pt for borders
             columnWidths[index] = headerWidth + 26
         }
@@ -235,7 +322,7 @@ public struct TextMeasurement {
         // Measure row widths
         for row in rows {
             for (index, cell) in row.enumerated() where index < maxColumns {
-                let width = measureInlineNodes(cell.content, baseFont: baseFont)
+                let width = measure(cell.content, baseFont)
                 // Add padding: 24pt (12pt left + 12pt right) plus 2pt for borders
                 columnWidths[index] = max(columnWidths[index], width + 26)
             }
@@ -279,21 +366,44 @@ public struct TextMeasurement {
     ) -> [CGFloat] {
         calculateColumnWidthsUncached(header: header, rows: rows, baseFont: baseFont)
     }
+
+    static func calculateColumnWidthsUncachedWithTextKitForTesting(
+        header: [MarkdownParser.TableCell],
+        rows: [[MarkdownParser.TableCell]],
+        baseFont: Font
+    ) -> [CGFloat] {
+        calculateColumnWidthsUncached(
+            header: header,
+            rows: rows,
+            baseFont: baseFont,
+            measure: measureInlineNodesWithTextKitForTesting
+        )
+    }
     
     /// Measure the width of inline nodes with proper formatting
     public static func measureInlineNodes(_ nodes: [MarkdownParser.InlineNode], baseFont: Font) -> CGFloat {
-        // Create attributed string the same way MarkdownInlineView does
+        inlineAttributedString(for: nodes, baseFont: baseFont).preciseWidth()
+    }
+
+    static func measureInlineNodesWithCoreTextForTesting(_ nodes: [MarkdownParser.InlineNode], baseFont: Font) -> CGFloat {
+        inlineAttributedString(for: nodes, baseFont: baseFont).coreTextPreciseWidthForTesting()
+    }
+
+    static func measureInlineNodesWithTextKitForTesting(_ nodes: [MarkdownParser.InlineNode], baseFont: Font) -> CGFloat {
+        inlineAttributedString(for: nodes, baseFont: baseFont).textKitPreciseWidthForTesting()
+    }
+
+    private static func inlineAttributedString(
+        for nodes: [MarkdownParser.InlineNode],
+        baseFont: Font
+    ) -> NSAttributedString {
         var attributedString = AttributedString()
         
         for node in nodes {
             attributedString += renderInlineNode(node, baseFont: baseFont)
         }
         
-        // Measure the complete attributed string
-        let nsAttributedString = NSAttributedString(attributedString)
-        
-        // Use precise width calculation
-        return nsAttributedString.preciseWidth()
+        return NSAttributedString(attributedString)
     }
     
     /// Render inline node to attributed string (matching MarkdownInlineView logic)

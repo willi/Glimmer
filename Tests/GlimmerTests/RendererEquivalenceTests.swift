@@ -47,4 +47,15 @@ final class RendererEquivalenceTests: XCTestCase {
         let second = Glimmer.parseToAttributedString(markdown)
         XCTAssertEqual(first, second)
     }
+
+    func testRendererReuseClearsFootnoteDefinitionsBetweenDocuments() {
+        var renderer = MarkdownRenderer()
+        let withFootnote = MarkdownParser.parse("Body.[^1]\n\n[^1]: Footnote text", configuration: .default)
+        let withoutFootnote = MarkdownParser.parse("Plain body", configuration: .default)
+
+        _ = renderer.render(blocks: withFootnote, configuration: .default)
+        let second = renderer.render(blocks: withoutFootnote, configuration: .default)
+
+        XCTAssertFalse(String(second.characters).contains("Footnote text"))
+    }
 }

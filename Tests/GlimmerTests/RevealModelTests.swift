@@ -126,6 +126,12 @@ final class RevealModelTests: XCTestCase {
         XCTAssertEqual(m.blocks[0].kind, .paragraph)
     }
 
+    func testRevealModelPreservesASCIIWhitespaceAndUnicodeText() {
+        let m = model("One\ttwo\ncafé  世界")
+        XCTAssertEqual(m.blocks.count, 1)
+        XCTAssertEqual(joinedText(m.blocks[0]), "One\ttwo\ncafé  世界")
+    }
+
     func testHeadingTagAndCounts() {
         let m = model("# Title here\n\nBody text")
         XCTAssertEqual(m.blocks.count, 2)
@@ -143,6 +149,16 @@ final class RevealModelTests: XCTestCase {
         let m = model("one two three four five six", style: .lineSlide)
         XCTAssertEqual(m.countableCount, 2)
         XCTAssertEqual(joinedText(m.blocks[0]), "one two three four\nfive six\n")
+    }
+
+    func testRevealModelAtomCountIncludesSpacesLineBreaksAndWholeBlocks() {
+        let lineModel = model("one two three four five", style: .lineSlide)
+        XCTAssertEqual(lineModel.atomCount, allAtoms(lineModel).count)
+        XCTAssertEqual(lineModel.atomCount, 4)
+
+        let wholeBlockModel = model("Before words\n\n```swift\nlet x = 1\n```")
+        XCTAssertEqual(wholeBlockModel.atomCount, allAtoms(wholeBlockModel).count)
+        XCTAssertEqual(wholeBlockModel.atomCount, 4)
     }
 
     func testRevealIndexGatesSpacesWithPrecedingWord() {
@@ -169,29 +185,31 @@ final class RevealModelTests: XCTestCase {
         XCTAssertEqual(m.blocks.first?.kind, .wholeBlock)
     }
 
-    func testListItemsCarryMarkerAndDepth() {
+    func testListsRevealAsCanonicalWholeBlocks() {
         let m = model("- alpha\n- beta")
-        XCTAssertEqual(m.blocks.count, 2)
-        XCTAssertEqual(m.blocks[0].kind, .listItem(marker: "• ", depth: 0))
-        XCTAssertEqual(m.blocks[1].kind, .listItem(marker: "• ", depth: 0))
-        XCTAssertEqual(m.countableCount, 2)
+        XCTAssertEqual(m.blocks.count, 1)
+        XCTAssertEqual(m.blocks[0].kind, .wholeBlock)
+        XCTAssertNotNil(m.blocks[0].node)
+        XCTAssertEqual(m.countableCount, 1)
     }
 
-    func testOrderedListMarkers() {
+    func testOrderedListsRevealAsCanonicalWholeBlocks() {
         let m = model("1. first\n2. second")
-        XCTAssertEqual(m.blocks[0].kind, .listItem(marker: "1. ", depth: 0))
-        XCTAssertEqual(m.blocks[1].kind, .listItem(marker: "2. ", depth: 0))
+        XCTAssertEqual(m.blocks[0].kind, .wholeBlock)
+        XCTAssertNotNil(m.blocks[0].node)
     }
 
-    func testNestedListDepth() {
+    func testNestedListsRevealAsCanonicalWholeBlocks() {
         let m = model("- outer\n    - inner")
-        XCTAssertTrue(m.blocks.contains { $0.kind == .listItem(marker: "◦ ", depth: 1) })
+        XCTAssertEqual(m.blocks[0].kind, .wholeBlock)
+        XCTAssertNotNil(m.blocks[0].node)
     }
 
-    func testBlockquoteTagged() {
+    func testBlockquotesRevealAsCanonicalWholeBlocks() {
         let m = model("> quoted words here")
-        XCTAssertEqual(m.blocks[0].kind, .blockquote(depth: 1))
-        XCTAssertEqual(m.countableCount, 3)
+        XCTAssertEqual(m.blocks[0].kind, .wholeBlock)
+        XCTAssertNotNil(m.blocks[0].node)
+        XCTAssertEqual(m.countableCount, 1)
     }
 
     func testLinkAtomCarriesURL() {
@@ -229,6 +247,45 @@ final class RevealModelTests: XCTestCase {
         let m = model(md)
         XCTAssertEqual(joinedText(m.blocks[0]), expected,
                        "reveal atoms must reproduce the renderer's text exactly (seamless settle, R5)")
+    }
+
+    func testGitHubInlineRevealTextMatchesRendererInlineOutput() {
+        let md = "See https://example.com, @octocat, #42, apple/swift, apple/swift#123, and `code`"
+        let blocks = Glimmer.parse(md, configuration: .github)
+        guard case .paragraph(let children) = blocks[0] else { return XCTFail("expected paragraph") }
+        var renderer = MarkdownRenderer()
+        renderer.beginSession(configuration: .github)
+
+        let expected = String(
+            renderer.renderInlines(
+                children,
+                configuration: .github,
+                baseFont: MarkdownConfiguration.github.baseFont
+            ).characters
+        )
+        let actual = joinedText(Glimmer.revealModel(md, style: .wordFade, configuration: .github).blocks[0])
+
+        XCTAssertEqual(actual, expected)
+    }
+
+    func testAutolinkRevealAtomCarriesURL() {
+        let m = Glimmer.revealModel("see https://example.com now", style: .wordFade, configuration: .github)
+
+        XCTAssertTrue(allAtoms(m).contains { $0.url?.absoluteString == "https://example.com" })
+    }
+
+    func testCharacterGranularityAutolinkAtomsCarryURL() {
+        let m = Glimmer.revealModel("see https://example.com", style: .charCascade, configuration: .github)
+
+        XCTAssertTrue(allAtoms(m).contains { $0.url?.absoluteString == "https://example.com" })
+    }
+
+    func testInlineStyleBoundaryInsideWordStaysOneRevealWord() {
+        let m = model("he**ll**o world")
+        let textWords = m.blocks[0].words.filter { !$0.isWhitespace && !$0.isLineBreak }
+
+        XCTAssertEqual(textWords.count, 2)
+        XCTAssertEqual(textWords.first?.atoms.map(atomText).joined(), "hello")
     }
 
     func testEmptyInput() {

@@ -8,6 +8,9 @@ public struct MarkdownRenderer {
     private static let newline = AttributedString("\n")
     private static let doubleNewline = AttributedString("\n\n")
     private static let tableSep = AttributedString(" | ")
+    private static let unorderedListMarkers = ["• ", "◦ ", "▪ ", "▫ "]
+    private static let documentRenderCacheMinimumBlockCount = 32
+    private static let maxDocumentRenderCacheEntries = 8
     // Attribute caches for this render session (computed from configuration)
     private var cachedMentionAttrs: AttributeContainer?
     private var cachedIssueAttrs: AttributeContainer?
@@ -17,6 +20,7 @@ public struct MarkdownRenderer {
     private var cachedBlockquoteAttrs: AttributeContainer?
     private var cachedTableHeaderAttrs: AttributeContainer?
     private var cachedCodeInlineAttrs: AttributeContainer?
+    private var suppressNestedRenderCaching = false
 
     // MARK: - Render Cache
     private final class RCNode: @unchecked Sendable {
@@ -38,6 +42,7 @@ public struct MarkdownRenderer {
     }
 
     private static let renderCache = OSAllocatedUnfairLock(initialState: RCState())
+    private static let documentRenderCache = OSAllocatedUnfairLock(initialState: RCState())
     private static let stats = OSAllocatedUnfairLock(initialState: (hits: 0, misses: 0))
 
     private static func rcAppendToTail(_ state: inout RCState, _ node: RCNode) {
@@ -76,6 +81,51 @@ public struct MarkdownRenderer {
 
     public mutating func render(blocks: [MarkdownParser.BlockNode], configuration: MarkdownConfiguration) -> AttributedString {
         beginSession(configuration: configuration)
+        footnoteDefinitions.removeAll(keepingCapacity: true)
+
+        if configuration.enableRenderCaching,
+           blocks.count >= Self.documentRenderCacheMinimumBlockCount {
+            let currentStyleKey = sessionStyleKey ?? styleKey(configuration)
+            let key = documentRenderCacheKey(for: blocks, styleKey: currentStyleKey)
+            if let cached = Self.documentRenderCache.withLock({ state -> AttributedString? in
+                guard let node = state.dict[key] else { return nil }
+                Self.rcMoveToTail(&state, node)
+                return node.value
+            }) {
+                Self.stats.withLock { $0.hits += 1 }
+                return cached
+            }
+
+            let previousSuppression = suppressNestedRenderCaching
+            suppressNestedRenderCaching = true
+            let rendered = renderDocumentUncached(blocks: blocks, configuration: configuration)
+            suppressNestedRenderCaching = previousSuppression
+            Self.documentRenderCache.withLock { state in
+                if let existing = state.dict[key] {
+                    existing.value = rendered
+                    Self.rcMoveToTail(&state, existing)
+                } else {
+                    let node = RCNode(key: key, value: rendered)
+                    state.dict[key] = node
+                    Self.rcAppendToTail(&state, node)
+                }
+
+                while state.dict.count > Self.maxDocumentRenderCacheEntries, let evict = state.head {
+                    Self.rcDetach(&state, evict)
+                    state.dict.removeValue(forKey: evict.key)
+                }
+            }
+            Self.stats.withLock { $0.misses += 1 }
+            return rendered
+        }
+
+        return renderDocumentUncached(blocks: blocks, configuration: configuration)
+    }
+
+    private mutating func renderDocumentUncached(
+        blocks: [MarkdownParser.BlockNode],
+        configuration: MarkdownConfiguration
+    ) -> AttributedString {
         var result = AttributedString()
 
         // First pass: render main content and collect footnote definitions
@@ -122,7 +172,10 @@ public struct MarkdownRenderer {
     private var sessionStyleKey: String?
 
     private mutating func renderBlock(_ block: MarkdownParser.BlockNode, configuration: MarkdownConfiguration) -> AttributedString {
-        if configuration.enableRenderCaching, let key = renderCacheKey(for: block, styleKey: sessionStyleKey ?? styleKey(configuration)) {
+        if !suppressNestedRenderCaching,
+           configuration.enableRenderCaching,
+           shouldCacheRenderedBlock(block),
+           let key = renderCacheKey(for: block, styleKey: sessionStyleKey ?? styleKey(configuration)) {
             if let cached = Self.renderCache.withLock({ state -> AttributedString? in
                 guard let node = state.dict[key] else { return nil }
                 Self.rcMoveToTail(&state, node)
@@ -215,11 +268,31 @@ public struct MarkdownRenderer {
         case .table(let header, let rows):
             // Preserve inline semantics (including links and formatting), not just visible text.
             return "t|\(tableSemanticHash(header: header, rows: rows))|\(styleKey)"
+        case .blockquote(let children):
+            return "bq|\(blocksSemanticHash(children))|\(styleKey)"
+        case .list(let ordered, let tight, let items):
+            return "l|\(ordered)|\(tight)|\(listItemsSemanticHash(items))|\(styleKey)"
+        case .taskList(let items):
+            return "tl|\(taskListSemanticHash(items))|\(styleKey)"
         case .horizontalRule:
             return "hr|\(styleKey)"
         default:
-            // Skip caching for composite blocks like list/blockquote where partial invalidation is trickier
             return nil
+        }
+    }
+
+    private func documentRenderCacheKey(for blocks: [MarkdownParser.BlockNode], styleKey: String) -> String {
+        "doc|\(blocks.count)|\(blocksSemanticHash(blocks))|\(styleKey)"
+    }
+
+    private func shouldCacheRenderedBlock(_ block: MarkdownParser.BlockNode) -> Bool {
+        switch block {
+        case .heading, .paragraph, .codeBlock, .table, .blockquote, .list, .taskList:
+            return true
+        case .horizontalRule:
+            return false
+        case .html, .footnoteDefinition:
+            return false
         }
     }
 
@@ -262,9 +335,96 @@ public struct MarkdownRenderer {
         return hasher.finalize()
     }
 
+    private func blocksSemanticHash(_ blocks: [MarkdownParser.BlockNode]) -> Int {
+        var hasher = Hasher()
+        hashBlocks(blocks, into: &hasher)
+        return hasher.finalize()
+    }
+
+    private func listItemsSemanticHash(_ items: [MarkdownParser.ListItem]) -> Int {
+        var hasher = Hasher()
+        hasher.combine(items.count)
+        for item in items {
+            hashListItem(item, into: &hasher)
+        }
+        return hasher.finalize()
+    }
+
+    private func taskListSemanticHash(_ items: [MarkdownParser.TaskListItem]) -> Int {
+        var hasher = Hasher()
+        hasher.combine(items.count)
+        for item in items {
+            hasher.combine(item.isChecked)
+            hashInlines(item.content, into: &hasher)
+        }
+        return hasher.finalize()
+    }
+
     private func hashTableCell(_ cell: MarkdownParser.TableCell, into hasher: inout Hasher) {
         hasher.combine(tableAlignmentCode(cell.alignment))
         hashInlines(cell.content, into: &hasher)
+    }
+
+    private func hashBlocks(_ blocks: [MarkdownParser.BlockNode], into hasher: inout Hasher) {
+        hasher.combine(blocks.count)
+        for block in blocks {
+            hashBlock(block, into: &hasher)
+        }
+    }
+
+    private func hashBlock(_ block: MarkdownParser.BlockNode, into hasher: inout Hasher) {
+        switch block {
+        case .heading(let level, let children, let id):
+            hasher.combine(0)
+            hasher.combine(level)
+            hashInlines(children, into: &hasher)
+            hasher.combine(id ?? "")
+        case .paragraph(let children):
+            hasher.combine(1)
+            hashInlines(children, into: &hasher)
+        case .blockquote(let children):
+            hasher.combine(2)
+            hashBlocks(children, into: &hasher)
+        case .codeBlock(let language, let content):
+            hasher.combine(3)
+            hasher.combine(language ?? "")
+            hasher.combine(content)
+        case .list(let ordered, let tight, let items):
+            hasher.combine(4)
+            hasher.combine(ordered)
+            hasher.combine(tight)
+            hasher.combine(items.count)
+            for item in items {
+                hashListItem(item, into: &hasher)
+            }
+        case .taskList(let items):
+            hasher.combine(5)
+            hasher.combine(items.count)
+            for item in items {
+                hasher.combine(item.isChecked)
+                hashInlines(item.content, into: &hasher)
+            }
+        case .table(let header, let rows):
+            hasher.combine(6)
+            hasher.combine(tableSemanticHash(header: header, rows: rows))
+        case .horizontalRule:
+            hasher.combine(7)
+        case .html(let content):
+            hasher.combine(8)
+            hasher.combine(content)
+        case .footnoteDefinition(let label, let children):
+            hasher.combine(9)
+            hasher.combine(label)
+            hashBlocks(children, into: &hasher)
+        }
+    }
+
+    private func hashListItem(_ item: MarkdownParser.ListItem, into hasher: inout Hasher) {
+        hasher.combine(item.marker)
+        hasher.combine(item.isTask)
+        hasher.combine(item.isChecked ?? false)
+        hasher.combine(item.isChecked == nil)
+        hashBlocks(item.content, into: &hasher)
     }
 
     private func tableAlignmentCode(_ alignment: MarkdownParser.TableAlignment) -> Int {
@@ -361,6 +521,11 @@ public struct MarkdownRenderer {
             state.head = nil
             state.tail = nil
         }
+        documentRenderCache.withLock { state in
+            state.dict.removeAll()
+            state.head = nil
+            state.tail = nil
+        }
         stats.withLock { $0.hits = 0; $0.misses = 0 }
     }
 
@@ -370,7 +535,7 @@ public struct MarkdownRenderer {
     
     private func renderHeading(level: Int, children: [MarkdownParser.InlineNode], configuration: MarkdownConfiguration) -> AttributedString {
         let headingFont = level - 1 < configuration.headingFonts.count ? configuration.headingFonts[level - 1] : .headline
-        var heading = renderInlines(children, configuration: configuration, baseFont: headingFont)
+        var heading = renderInlines(children, configuration: configuration)
         heading.mergeAttributes(headingAttributes(font: headingFont))
         return heading
     }
@@ -379,13 +544,15 @@ public struct MarkdownRenderer {
         let baseFont: Font?
         let forcedFont: Font?
         let isStrikethrough: Bool
+        let linkAttributes: AttributeContainer?
 
         func withEmphasis() -> InlineRenderContext {
             guard forcedFont == nil else { return self }
             return InlineRenderContext(
                 baseFont: baseFont,
                 forcedFont: (baseFont ?? .body).italic(),
-                isStrikethrough: isStrikethrough
+                isStrikethrough: isStrikethrough,
+                linkAttributes: linkAttributes
             )
         }
 
@@ -394,7 +561,8 @@ public struct MarkdownRenderer {
             return InlineRenderContext(
                 baseFont: baseFont,
                 forcedFont: (baseFont ?? .body).bold(),
-                isStrikethrough: isStrikethrough
+                isStrikethrough: isStrikethrough,
+                linkAttributes: linkAttributes
             )
         }
 
@@ -402,16 +570,351 @@ public struct MarkdownRenderer {
             InlineRenderContext(
                 baseFont: baseFont,
                 forcedFont: forcedFont ?? baseFont,
-                isStrikethrough: true
+                isStrikethrough: true,
+                linkAttributes: linkAttributes
+            )
+        }
+
+        func withLink(_ url: URL, configuration: MarkdownConfiguration) -> InlineRenderContext {
+            guard linkAttributes == nil else { return self }
+            var container = AttributeContainer()
+            container.link = url
+            container.foregroundColor = configuration.linkColor
+            container.underlineStyle = .single
+            return InlineRenderContext(
+                baseFont: baseFont,
+                forcedFont: forcedFont,
+                isStrikethrough: isStrikethrough,
+                linkAttributes: container
             )
         }
     }
 
-    public func renderInlines(_ nodes: [MarkdownParser.InlineNode], configuration: MarkdownConfiguration, baseFont: Font? = nil) -> AttributedString {
+    private enum InlineSegmentStyle {
+        case plainText
+        case code
+        case autolink(URL)
+        case mention
+        case issue
+        case commit
+        case repository
+        case pullRequest
+        case footnote(label: String)
+        case inlineContextOnly
+    }
+
+    private struct InlineRenderSegment {
+        let characterCount: Int
+        let style: InlineSegmentStyle
+        let context: InlineRenderContext
+    }
+
+    public func renderInlines(
+        _ nodes: [MarkdownParser.InlineNode],
+        configuration: MarkdownConfiguration,
+        baseFont: Font? = nil
+    ) -> AttributedString {
+        guard !suppressNestedRenderCaching,
+              configuration.enableRenderCaching,
+              sessionStyleKey != nil else {
+            return renderInlinesUncached(nodes, configuration: configuration, baseFont: baseFont)
+        }
+
+        let key = MarkdownInlineAttributedCache.key(
+            nodes: nodes,
+            configuration: configuration,
+            baseFont: baseFont,
+            mode: .plain
+        )
+        if let cached = MarkdownInlineAttributedCache.value(for: key) {
+            return cached
+        }
+
+        let rendered = renderInlinesUncached(nodes, configuration: configuration, baseFont: baseFont)
+        MarkdownInlineAttributedCache.insert(rendered, for: key)
+        return rendered
+    }
+
+    private func renderInlinesUncached(
+        _ nodes: [MarkdownParser.InlineNode],
+        configuration: MarkdownConfiguration,
+        baseFont: Font? = nil
+    ) -> AttributedString {
+        if nodes.count == 1,
+           case .text(let text) = nodes[0] {
+            return renderPlainTextInline(text, configuration: configuration, baseFont: baseFont)
+        }
+
+        if let coalesced = renderInlinesCoalesced(nodes, configuration: configuration, baseFont: baseFont) {
+            return coalesced
+        }
+
         var result = AttributedString()
-        let context = InlineRenderContext(baseFont: baseFont, forcedFont: nil, isStrikethrough: false)
+        let context = InlineRenderContext(
+            baseFont: baseFont,
+            forcedFont: nil,
+            isStrikethrough: false,
+            linkAttributes: nil
+        )
         appendInlines(nodes, to: &result, configuration: configuration, context: context)
         return result
+    }
+
+    private func renderPlainTextInline(
+        _ text: String,
+        configuration: MarkdownConfiguration,
+        baseFont: Font?
+    ) -> AttributedString {
+        var value = AttributedString(text)
+        if let baseFont {
+            value.font = baseFont
+        }
+        applyPlainTextColor(&value, configuration: configuration)
+        return value
+    }
+
+    private func renderInlinesCoalesced(
+        _ nodes: [MarkdownParser.InlineNode],
+        configuration: MarkdownConfiguration,
+        baseFont: Font?
+    ) -> AttributedString? {
+        var text = ""
+        var segments: [InlineRenderSegment] = []
+        segments.reserveCapacity(nodes.count)
+
+        let context = InlineRenderContext(
+            baseFont: baseFont,
+            forcedFont: nil,
+            isStrikethrough: false,
+            linkAttributes: nil
+        )
+        guard appendInlinesToPlan(
+            nodes,
+            text: &text,
+            segments: &segments,
+            configuration: configuration,
+            context: context
+        ) else {
+            return nil
+        }
+
+        var result = AttributedString(text)
+        var index = result.startIndex
+        for segment in segments where segment.characterCount > 0 {
+            let next = result.characters.index(index, offsetBy: segment.characterCount)
+            let range = index..<next
+            applySegment(segment, to: &result, range: range, configuration: configuration)
+            index = next
+        }
+        return result
+    }
+
+    private func appendInlinesToPlan(
+        _ nodes: [MarkdownParser.InlineNode],
+        text: inout String,
+        segments: inout [InlineRenderSegment],
+        configuration: MarkdownConfiguration,
+        context: InlineRenderContext
+    ) -> Bool {
+        for node in nodes {
+            guard appendInlineToPlan(
+                node,
+                text: &text,
+                segments: &segments,
+                configuration: configuration,
+                context: context
+            ) else {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func appendInlineToPlan(
+        _ node: MarkdownParser.InlineNode,
+        text: inout String,
+        segments: inout [InlineRenderSegment],
+        configuration: MarkdownConfiguration,
+        context: InlineRenderContext
+    ) -> Bool {
+        switch node {
+        case .text(let value):
+            appendTextSegment(value, style: .plainText, context: context, text: &text, segments: &segments)
+
+        case .emphasis(let children):
+            return appendInlinesToPlan(
+                children,
+                text: &text,
+                segments: &segments,
+                configuration: configuration,
+                context: context.withEmphasis()
+            )
+
+        case .strong(let children):
+            return appendInlinesToPlan(
+                children,
+                text: &text,
+                segments: &segments,
+                configuration: configuration,
+                context: context.withStrong()
+            )
+
+        case .strikethrough(let children):
+            return appendInlinesToPlan(
+                children,
+                text: &text,
+                segments: &segments,
+                configuration: configuration,
+                context: context.withStrikethrough()
+            )
+
+        case .code(let code):
+            appendTextSegment(code, style: .code, context: context, text: &text, segments: &segments)
+
+        case .link(let url, _, let children):
+            return appendInlinesToPlan(
+                children,
+                text: &text,
+                segments: &segments,
+                configuration: configuration,
+                context: context.withLink(url, configuration: configuration)
+            )
+
+        case .image(let url, let alt, _):
+            appendTextSegment(
+                "[Image: \(alt.isEmpty ? url.absoluteString : alt)]",
+                style: .inlineContextOnly,
+                context: context,
+                text: &text,
+                segments: &segments
+            )
+
+        case .autolink(let url, _, let originalText):
+            appendTextSegment(originalText, style: .autolink(url), context: context, text: &text, segments: &segments)
+
+        case .mention(let username):
+            appendTextSegment("@\(username)", style: .mention, context: context, text: &text, segments: &segments)
+
+        case .issueReference(let number):
+            appendTextSegment("#\(number)", style: .issue, context: context, text: &text, segments: &segments)
+
+        case .commitSHA(_, let short):
+            appendTextSegment(short, style: .commit, context: context, text: &text, segments: &segments)
+
+        case .repositoryReference(let owner, let repo):
+            appendTextSegment("\(owner)/\(repo)", style: .repository, context: context, text: &text, segments: &segments)
+
+        case .pullRequestReference(let owner, let repo, let number):
+            appendTextSegment(
+                "\(owner)/\(repo)#\(number)",
+                style: .pullRequest,
+                context: context,
+                text: &text,
+                segments: &segments
+            )
+
+        case .lineBreak, .softBreak:
+            appendTextSegment("\n", style: .inlineContextOnly, context: context, text: &text, segments: &segments)
+
+        case .html(let tag):
+            let lowercased = tag.lowercased()
+            if lowercased == "<br>" || lowercased == "<br/>" || lowercased == "<br />" {
+                appendTextSegment("\n", style: .inlineContextOnly, context: context, text: &text, segments: &segments)
+            } else {
+                appendTextSegment(tag, style: .inlineContextOnly, context: context, text: &text, segments: &segments)
+            }
+
+        case .footnoteReference(let label):
+            let displayLabel = label.starts(with: "inline-") ? "*" : label
+            appendTextSegment(
+                "[\(displayLabel)]",
+                style: .footnote(label: label),
+                context: context,
+                text: &text,
+                segments: &segments
+            )
+
+        case .extensionInline:
+            return false
+        }
+
+        return true
+    }
+
+    private func appendTextSegment(
+        _ value: String,
+        style: InlineSegmentStyle,
+        context: InlineRenderContext,
+        text: inout String,
+        segments: inout [InlineRenderSegment]
+    ) {
+        guard !value.isEmpty else { return }
+        text.append(value)
+        segments.append(InlineRenderSegment(characterCount: value.count, style: style, context: context))
+    }
+
+    private func applySegment(
+        _ segment: InlineRenderSegment,
+        to result: inout AttributedString,
+        range: Range<AttributedString.Index>,
+        configuration: MarkdownConfiguration
+    ) {
+        switch segment.style {
+        case .plainText:
+            if let forcedFont = segment.context.forcedFont {
+                result[range].font = forcedFont
+            } else if let baseFont = segment.context.baseFont {
+                result[range].font = baseFont
+            }
+            if configuration.textColor != .primary {
+                result[range].foregroundColor = configuration.textColor
+            }
+
+        case .code:
+            if let attrs = cachedCodeInlineAttrs { result[range].mergeAttributes(attrs) }
+
+        case .autolink(let url):
+            result[range].mergeAttributes(linkAttributes(url: url, configuration: configuration))
+
+        case .mention:
+            if let attrs = cachedMentionAttrs { result[range].mergeAttributes(attrs) }
+
+        case .issue:
+            if let attrs = cachedIssueAttrs { result[range].mergeAttributes(attrs) }
+
+        case .commit:
+            if let attrs = cachedCommitAttrs { result[range].mergeAttributes(attrs) }
+
+        case .repository:
+            if let attrs = cachedRepoAttrs { result[range].mergeAttributes(attrs) }
+
+        case .pullRequest:
+            if let attrs = cachedPRAttrs { result[range].mergeAttributes(attrs) }
+
+        case .footnote(let label):
+            result[range].mergeAttributes(footnoteRefAttributes(label: label, configuration: configuration))
+
+        case .inlineContextOnly:
+            break
+        }
+
+        if let linkAttributes = segment.context.linkAttributes {
+            result[range].mergeAttributes(linkAttributes)
+        }
+        applyInlineContext(to: &result, range: range, context: segment.context)
+    }
+
+    private func applyInlineContext(
+        to result: inout AttributedString,
+        range: Range<AttributedString.Index>,
+        context: InlineRenderContext
+    ) {
+        if let forcedFont = context.forcedFont {
+            result[range].font = forcedFont
+        }
+        if context.isStrikethrough {
+            result[range].strikethroughStyle = .single
+        }
     }
 
     private func appendInlines(
@@ -439,7 +942,8 @@ public struct MarkdownRenderer {
             } else if let baseFont = context.baseFont {
                 value.font = baseFont
             }
-            value.foregroundColor = configuration.textColor
+            applyPlainTextColor(&value, configuration: configuration)
+            applyLinkContext(&value, context: context, configuration: configuration)
             if context.isStrikethrough {
                 value.strikethroughStyle = .single
             }
@@ -457,68 +961,80 @@ public struct MarkdownRenderer {
         case .code(let code):
             var codeText = AttributedString(code)
             if let attrs = cachedCodeInlineAttrs { codeText.mergeAttributes(attrs) }
+            applyLinkContext(&codeText, context: context, configuration: configuration)
             applyInlineContext(&codeText, context: context)
             result.append(codeText)
 
         case .link(let url, _, let children):
-            var content = AttributedString()
-            appendInlines(children, to: &content, configuration: configuration, context: context)
-            var linked = styledLink(content, url: url, configuration: configuration)
-            applyInlineContext(&linked, context: context)
-            result.append(linked)
+            appendInlines(
+                children,
+                to: &result,
+                configuration: configuration,
+                context: context.withLink(url, configuration: configuration)
+            )
 
         case .image(let url, let alt, _):
             var image = AttributedString("[Image: \(alt.isEmpty ? url.absoluteString : alt)]")
+            applyLinkContext(&image, context: context, configuration: configuration)
             applyInlineContext(&image, context: context)
             result.append(image)
 
         case .autolink(let url, _, let originalText):
             var autolink = styledLink(AttributedString(originalText), url: url, configuration: configuration)
+            applyLinkContext(&autolink, context: context, configuration: configuration)
             applyInlineContext(&autolink, context: context)
             result.append(autolink)
 
         case .mention(let username):
             var mention = AttributedString("@\(username)")
             if let attrs = cachedMentionAttrs { mention.mergeAttributes(attrs) }
+            applyLinkContext(&mention, context: context, configuration: configuration)
             applyInlineContext(&mention, context: context)
             result.append(mention)
 
         case .issueReference(let number):
             var issue = AttributedString("#\(number)")
             if let attrs = cachedIssueAttrs { issue.mergeAttributes(attrs) }
+            applyLinkContext(&issue, context: context, configuration: configuration)
             applyInlineContext(&issue, context: context)
             result.append(issue)
 
         case .commitSHA(_, let short):
             var commit = AttributedString(short)
             if let attrs = cachedCommitAttrs { commit.mergeAttributes(attrs) }
+            applyLinkContext(&commit, context: context, configuration: configuration)
             applyInlineContext(&commit, context: context)
             result.append(commit)
 
         case .repositoryReference(let owner, let repo):
             var repository = AttributedString("\(owner)/\(repo)")
             if let attrs = cachedRepoAttrs { repository.mergeAttributes(attrs) }
+            applyLinkContext(&repository, context: context, configuration: configuration)
             applyInlineContext(&repository, context: context)
             result.append(repository)
 
         case .pullRequestReference(let owner, let repo, let number):
             var pullRequest = AttributedString("\(owner)/\(repo)#\(number)")
             if let attrs = cachedPRAttrs { pullRequest.mergeAttributes(attrs) }
+            applyLinkContext(&pullRequest, context: context, configuration: configuration)
             applyInlineContext(&pullRequest, context: context)
             result.append(pullRequest)
 
         case .lineBreak, .softBreak:
             var lineBreak = AttributedString("\n")
+            applyLinkContext(&lineBreak, context: context, configuration: configuration)
             applyInlineContext(&lineBreak, context: context)
             result.append(lineBreak)
 
         case .html(let tag):
             if tag.lowercased() == "<br>" || tag.lowercased() == "<br/>" || tag.lowercased() == "<br />" {
                 var lineBreak = AttributedString("\n")
+                applyLinkContext(&lineBreak, context: context, configuration: configuration)
                 applyInlineContext(&lineBreak, context: context)
                 result.append(lineBreak)
             } else {
                 var html = AttributedString(tag)
+                applyLinkContext(&html, context: context, configuration: configuration)
                 applyInlineContext(&html, context: context)
                 result.append(html)
             }
@@ -527,11 +1043,13 @@ public struct MarkdownRenderer {
             let displayLabel = label.starts(with: "inline-") ? "*" : label
             var ref = AttributedString("[\(displayLabel)]")
             ref.mergeAttributes(footnoteRefAttributes(label: label, configuration: configuration))
+            applyLinkContext(&ref, context: context, configuration: configuration)
             applyInlineContext(&ref, context: context)
             result.append(ref)
 
         case .extensionInline(let node):
             if var rendered = renderExtensionInline(node, configuration: configuration) {
+                applyLinkContext(&rendered, context: context, configuration: configuration)
                 applyInlineContext(&rendered, context: context)
                 result.append(rendered)
             } else {
@@ -541,7 +1059,8 @@ public struct MarkdownRenderer {
                 } else if let baseFont = context.baseFont {
                     literal.font = baseFont
                 }
-                literal.foregroundColor = configuration.textColor
+                applyPlainTextColor(&literal, configuration: configuration)
+                applyLinkContext(&literal, context: context, configuration: configuration)
                 if context.isStrikethrough {
                     literal.strikethroughStyle = .single
                 }
@@ -569,6 +1088,20 @@ public struct MarkdownRenderer {
         if context.isStrikethrough {
             value.strikethroughStyle = .single
         }
+    }
+
+    private func applyLinkContext(
+        _ value: inout AttributedString,
+        context: InlineRenderContext,
+        configuration: MarkdownConfiguration
+    ) {
+        guard let linkAttributes = context.linkAttributes else { return }
+        value.mergeAttributes(linkAttributes)
+    }
+
+    private func applyPlainTextColor(_ value: inout AttributedString, configuration: MarkdownConfiguration) {
+        guard configuration.textColor != .primary else { return }
+        value.foregroundColor = configuration.textColor
     }
 
     // MARK: - Style Helpers
@@ -685,20 +1218,21 @@ public struct MarkdownRenderer {
     
     private mutating func renderList(ordered: Bool, items: [MarkdownParser.ListItem], depth: Int = 0, configuration: MarkdownConfiguration) -> AttributedString {
         var result = AttributedString()
-        
-        // Different bullet styles for different nesting levels
-        let unorderedMarkers = ["• ", "◦ ", "▪ ", "▫ "]
+        let indentation = depth > 0 ? AttributedString(String(repeating: "    ", count: depth)) : nil
+        let continuationIndentation = AttributedString(String(repeating: "    ", count: depth + 1))
+        let unorderedMarker = AttributedString(Self.unorderedListMarkers[min(depth, Self.unorderedListMarkers.count - 1)])
         
         for (index, item) in items.enumerated() {
-            if index > 0 { result += Self.newline }
+            if index > 0 { result.append(Self.newline) }
             
             // Add indentation based on depth
-            let indentation = String(repeating: "    ", count: depth)
-            result += AttributedString(indentation)
+            if let indentation {
+                result.append(indentation)
+            }
             
             // Choose appropriate marker based on depth
-            let marker: String
             if ordered {
+                let marker: String
                 switch depth % 4 {
                 case 0:
                     marker = "\(index + 1). "
@@ -709,10 +1243,10 @@ public struct MarkdownRenderer {
                 default:
                     marker = "\(index + 1)) "
                 }
+                result.append(AttributedString(marker))
             } else {
-                marker = unorderedMarkers[min(depth, unorderedMarkers.count - 1)]
+                result.append(unorderedMarker)
             }
-            result += AttributedString(marker)
             
             // Render item content
             var isFirstBlock = true
@@ -721,26 +1255,26 @@ public struct MarkdownRenderer {
                 case .paragraph(let children):
                     // For the first paragraph, render inline with the marker
                     if isFirstBlock {
-                        result += renderInlines(children, configuration: configuration)
+                        result.append(renderInlines(children, configuration: configuration))
                     } else {
                         // For subsequent paragraphs, add proper indentation
-                        result += Self.newline
-                        result += AttributedString(String(repeating: "    ", count: depth + 1))
-                        result += renderInlines(children, configuration: configuration)
+                        result.append(Self.newline)
+                        result.append(continuationIndentation)
+                        result.append(renderInlines(children, configuration: configuration))
                     }
                     
                 case .list(let nestedOrdered, _, let nestedItems):
                     // Always put nested lists on a new line
-                    result += Self.newline
-                    result += renderList(ordered: nestedOrdered, items: nestedItems, depth: depth + 1, configuration: configuration)
+                    result.append(Self.newline)
+                    result.append(renderList(ordered: nestedOrdered, items: nestedItems, depth: depth + 1, configuration: configuration))
                     
                 default:
                     // For other blocks, add newline and indentation
                     if !isFirstBlock {
-                        result += Self.newline
-                        result += AttributedString(String(repeating: "    ", count: depth + 1))
+                        result.append(Self.newline)
+                        result.append(continuationIndentation)
                     }
-                    result += renderBlock(block, configuration: configuration)
+                    result.append(renderBlock(block, configuration: configuration))
                 }
                 
                 isFirstBlock = false

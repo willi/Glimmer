@@ -155,7 +155,9 @@ public enum BlockKindTag: Sendable, Equatable {
     case heading(level: Int)
     case listItem(marker: String, depth: Int)
     case blockquote(depth: Int)
-    /// Code block, table, task list, thematic break, raw HTML, or image
-    /// paragraph — revealed as one unit via the existing block view.
+    /// Structural markdown that must keep canonical layout — lists,
+    /// blockquotes, code blocks, tables, task lists, thematic breaks, raw
+    /// HTML, or image paragraphs — revealed as one unit via the existing block
+    /// view.
     case wholeBlock
 }

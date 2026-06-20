@@ -3920,7 +3920,7 @@ public enum GitHubEmojis {
             
             let shortcode = String(text[shortcodeRange])
             
-            if let unicodeEmoji = emojiMap[shortcode], !unicodeEmoji.hasPrefix(":") {
+            if let unicodeEmoji = unicodeEmoji(for: shortcode), !unicodeEmoji.hasPrefix(":") {
                 // Replace with Unicode emoji if available (and not just a shortcode repeat)
                 result.replaceSubrange(matchRange, with: unicodeEmoji)
             } else if let imageUrl = emojiURL(for: shortcode) {
@@ -3945,11 +3945,9 @@ public enum GitHubEmojis {
             if let map = emojiURLMapLazy() {
                 if let u = map[name] { return u }
             }
-            // Fallback to static
-            return emojiUrls[name]
-        } else {
-            return emojiUrls[name]
         }
+
+        return bundledEmojiURL(for: name)
     }
 
     /// Returns the active URL map, loading the JSON resource once when enabled.
@@ -3985,12 +3983,8 @@ public enum GitHubEmojis {
             do {
                 let data = try Data(contentsOf: url)
                 if let raw = try JSONSerialization.jsonObject(with: data) as? [String: String] {
-                    // Merge JSON (overrides) with static fallback to ensure full coverage
-                    var merged = emojiUrls
-                    for (k, v) in raw { merged[k] = v }
-                    let mergedMap = merged
-                    lazyMapState.withLock { $0.cachedEmojiURLMap = mergedMap }
-                    return mergedMap
+                    lazyMapState.withLock { $0.cachedEmojiURLMap = raw }
+                    return raw
                 }
             } catch {
                 #if DEBUG

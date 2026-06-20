@@ -78,9 +78,10 @@ Markdown Text → Parser (AST) → AttributedString → SwiftUI Views
 - `CustomRenderer`: Protocol for alternative formats (HTML/PlainText)
 
 **Streaming Reveal** (`Sources/Glimmer/Reveal/`)
-- Pipeline: buffer → parse (cached) → `RevealFlattener` (AST → `RevealAtom`s with stable ordinal ids) → `RevealDriver` (clock-paced `revealedCount` with adaptive catch-up) → `GlimmerRevealView` (renders visible atoms, newest animate in)
+- Pipeline: buffer → `RevealSession` for append-only reuse → parse/flatten changed tail with canonical parser fallback → `RevealDriver` (clock-paced `revealedCount` with adaptive catch-up) → `GlimmerRevealView` (renders visible atoms, newest animate in)
 - `RevealStyle`/`RevealTreatment`/`RevealConfiguration`: the 11 styles, their granularities (char/word/line), cadences, and entrance treatments (`RevealTypes.swift`)
 - `RevealProgressStore`: monotonic per-`revealID` progress so re-mounted views resume instead of replaying
+- `RevealSession`: commits complete markdown through conservative blank-line boundaries and reparses only the current tail for append-only streams; replacements fall back to rebuilding from the canonical parser
 - `RevealPacing`/`RevealTrail`: pure, unit-tested pacing and trail-opacity math
 - Settle strategy A: the reveal view IS the settled view — no engine swap, no layout pop; styling reuses `MarkdownRenderer.renderInlines` via `beginSession`
 
@@ -129,8 +130,10 @@ Markdown Text → Parser (AST) → AttributedString → SwiftUI Views
 - Parallel parsing threshold: 10KB documents
 - Measure performance with large inputs to avoid regressions
 - Performance-sensitive code in parsers/renderers requires careful testing
-- **Benchmark harness**: `ProfilingBenchmarkTests/testPhaseTimings` prints per-phase timings over a ~0.5MB complex corpus; `testProfilingLoop` (opt-in: `TEST_RUNNER_GLIMMER_PROFILING=1`) runs a long loop for attaching Instruments. Benchmark in Release: add `-configuration Release ENABLE_TESTABILITY=YES` (Debug roughly doubles parse times)
+- **Benchmark harness**: `ProfilingBenchmarkTests/testPhaseTimings` prints per-phase timings over a ~0.5MB complex corpus; `testProfilingLoop` (opt-in: `GLIMMER_PROFILING=1`) runs a long loop for attaching Instruments. Benchmark in Release: add `-configuration Release ENABLE_TESTABILITY=YES` (Debug roughly doubles parse times)
 - **Render cache sizing**: `maxRenderCacheEntries` (default 4096) must exceed the block count of documents being re-rendered, or the LRU thrashes to a 0% hit rate on sequential renders
+- **Incremental reveal validation**: `RevealSessionTests` compares session output against full canonical `Glimmer.revealModel` on representative cases, the full profiling corpus, and growing GitHub-enabled corpus prefixes
+- **Display profiling**: `MarkdownDisplayProfilingTests/testMarkdownDisplayScrollLoop` is opt-in with `TEST_RUNNER_GLIMMER_DISPLAY_PROFILING=1` and is intended for Instruments or `xcrun xctrace` scroll/layout captures
 - Profiling-verified hot paths: `AttributedString` rope operations and grapheme walking dominate render/flatten; prefer fewer, larger AttributedString operations over many small slices (a run-based tokenizer rewrite measured *slower* than rope sub-slicing — see `RevealTokenization.swift`)
 
 ## Common Development Tasks

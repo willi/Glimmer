@@ -351,7 +351,7 @@ GlimmerRevealView.demo("# Hello **world**", style: .shimmer, durationCap: 6)
 
 **Styles** (`RevealStyle`): `typewriter` (blinking caret), `llmTokens`, `wordFade`, `blurIn`, `lineSlide`, `charCascade`, `shimmer`, `tracking`, `diffusion` (scramble→lock), `waveGlow`, and `trailFade` (a soft opacity gradient trailing the cursor, like Gemini's reveal). Use `.none` to opt out entirely.
 
-The reveal cadence is clock-driven and decoupled from how fast text arrives; rich elements (code blocks, tables, images, blockquotes) reveal as whole units, links stay tappable, VoiceOver reads the full text, and Reduce Motion downgrades to a plain progressive reveal. Try every style in the demo app under **Advanced Demos → Streaming Reveal**.
+The reveal cadence is clock-driven and decoupled from how fast text arrives; rich elements (code blocks, tables, images, blockquotes) reveal as whole units, links stay tappable, VoiceOver reads the full text, and Reduce Motion downgrades to a plain progressive reveal. For append-only streams, `GlimmerRevealView` uses an internal `RevealSession` that reuses completed parsed/flattened blocks and reparses only the current tail, falling back to the canonical full parse path for replacements or unsafe boundaries. Try every style in the demo app under **Advanced Demos → Streaming Reveal**.
 
 ## Custom Renderers
 
@@ -433,6 +433,7 @@ Sources/Glimmer/
 │   ├── CachedMarkdownParser.swift
 │   ├── CancellableParallelOperation.swift
 │   ├── GFMExtensions.swift
+│   ├── GitHubEmojiLookup.swift
 │   ├── GitHubEmojis.swift
 │   ├── InlineParser.swift
 │   ├── MarkdownParser.swift
@@ -451,12 +452,15 @@ Sources/Glimmer/
 │   ├── RevealFlowLayout.swift
 │   ├── RevealPacing.swift
 │   ├── RevealProgressStore.swift
+│   ├── RevealSession.swift
 │   ├── RevealTokenization.swift
 │   ├── RevealTreatments.swift
 │   └── RevealTypes.swift
 ├── Views/
 │   ├── AttributedTextView.swift
 │   ├── FootnoteDetailView.swift
+│   ├── MarkdownBlockStableID.swift
+│   ├── MarkdownInlineAttributedCache.swift
 │   ├── MarkdownText.swift
 │   ├── MarkdownTextWithAsyncImages.swift
 │   ├── MarkdownView.swift
@@ -535,7 +539,18 @@ Advanced toggles for experimentation:
 - `InlineParser.useUTF8FastPath = true` to enable a UTF‑8 byte-scanning fast path for some ASCII patterns
 - `GitHubEmojis.useLazyEmojiURLMap = true` to load a small JSON override map and fall back to the static full map
 
-For CLI profiling, `Tests/GlimmerTests/ProfilingBenchmarkTests.swift` prints per-phase timings (parse, render, cache warm/cold, reveal flatten) over a ~0.5MB complex corpus, and its `testProfilingLoop` (opt-in via the `GLIMMER_PROFILING=1` environment variable, pass with `TEST_RUNNER_GLIMMER_PROFILING=1` through xcodebuild) runs a long loop for attaching Instruments.
+For CLI profiling, `Tests/GlimmerTests/ProfilingBenchmarkTests.swift` prints per-phase timings (parse, render, cache warm/cold, reveal flatten, and incremental reveal-session growth) over a ~0.5MB complex corpus, and its `testProfilingLoop` (opt in with `GLIMMER_PROFILING=1`) runs a long loop for attaching Instruments. Benchmark in Release when comparing numbers:
+
+```bash
+xcodebuild -scheme Glimmer -configuration Release ENABLE_TESTABILITY=YES -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test -only-testing:GlimmerTests/ProfilingBenchmarkTests/testPhaseTimings
+```
+
+`Tests/GlimmerTests/MarkdownDisplayProfilingTests.swift` provides an opt-in SwiftUI scroll/layout loop for display profiling. Run it under Instruments or `xcrun xctrace` with:
+
+```bash
+TEST_RUNNER_GLIMMER_DISPLAY_PROFILING=1 TEST_RUNNER_GLIMMER_DISPLAY_PROFILE_SECONDS=8 \
+xcodebuild -scheme Glimmer -configuration Release ENABLE_TESTABILITY=YES -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test -only-testing:GlimmerTests/MarkdownDisplayProfilingTests/testMarkdownDisplayScrollLoop
+```
 
 ### Benchmark Results
 - **Large documents**: Optimized for fast parsing
@@ -543,6 +558,7 @@ For CLI profiling, `Tests/GlimmerTests/ProfilingBenchmarkTests.swift` prints per
 - **Cache hit rate**: 95%+ for repeated parsing
 - **Parallel speedup**: 3.2x on 4-core systems
 - **Streaming**: Handles 100MB+ documents efficiently
+- **Streaming reveal**: Append-only growth reuses completed reveal blocks via `RevealSession` instead of reparsing and flattening the whole buffer on every token update
 
 ### Advanced Caching
 ```swift
@@ -561,7 +577,7 @@ let config = MarkdownConfiguration.builder()
 // - Thread-safe operations
 ```
 
-The per-block render cache (`maxRenderCacheEntries`, default 4096) must comfortably exceed the block count of the largest documents you re-render — an LRU smaller than the working set thrashes on sequential renders and hits 0%. The `.performance` preset uses 8192.
+The per-block render cache (`maxRenderCacheEntries`, default 4096) must comfortably exceed the block count of the largest documents you re-render — an LRU smaller than the working set thrashes on sequential renders and hits 0%. The `.performance` preset uses 8192. Repeated inline SwiftUI display rendering also uses `MarkdownInlineAttributedCache`, keyed by inline AST semantics and render mode.
 
 ### Performance Metrics
 Use the benchmark harnesses for timing and the cache APIs for hit/miss counters:

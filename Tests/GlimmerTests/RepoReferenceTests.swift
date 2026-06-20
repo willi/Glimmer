@@ -26,6 +26,20 @@ final class RepoReferenceTests: XCTestCase {
         XCTAssertFalse(children.contains { if case .commitSHA = $0 { return true } else { return false } })
     }
 
+    func testHexLikeRepoOwnerPreferredOverSHA() {
+        let md = "Check abcdef1/repo now"
+        let blocks = MarkdownParser.parse(md, configuration: .github)
+        guard case let .paragraph(children) = blocks.first else { return XCTFail("Expected paragraph") }
+
+        XCTAssertTrue(children.contains {
+            if case .repositoryReference(let owner, let repo) = $0 {
+                return owner == "abcdef1" && repo == "repo"
+            }
+            return false
+        })
+        XCTAssertFalse(children.contains { if case .commitSHA = $0 { return true } else { return false } })
+    }
+
     func testCommitSHABoundaryRequired() {
         let md = "Commit deadbeef now"
         let blocks = MarkdownParser.parse(md, configuration: .github)
@@ -38,6 +52,19 @@ final class RepoReferenceTests: XCTestCase {
         let blocks = MarkdownParser.parse(md, configuration: .github)
         guard case let .paragraph(children) = blocks.first else { return XCTFail("Expected paragraph") }
         XCTAssertFalse(children.contains { if case .commitSHA = $0 { return true } else { return false } })
+    }
+
+    func testOverflowIssueReferenceRemainsText() {
+        let hugeNumber = String(repeating: "9", count: 40)
+        let md = "Fix #\(hugeNumber)x now"
+        let blocks = MarkdownParser.parse(md, configuration: .github)
+        guard case let .paragraph(children) = blocks.first else { return XCTFail("Expected paragraph") }
+
+        XCTAssertFalse(children.contains { if case .issueReference = $0 { return true } else { return false } })
+        XCTAssertEqual(children.compactMap { inline -> String? in
+            if case .text(let text) = inline { return text }
+            return nil
+        }.joined(), md)
     }
 
     func testRepoNotParsedAfterAtContext() {
@@ -56,4 +83,3 @@ final class RepoReferenceTests: XCTestCase {
         XCTAssertFalse(children.contains { if case .repositoryReference = $0 { return true } else { return false } })
     }
 }
-

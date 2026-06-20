@@ -102,6 +102,27 @@ final class ParserFeatureToggleTests: XCTestCase {
         XCTAssertTrue(flatten(inlines).contains("[^1]"))
     }
 
+    func testDispatchFeaturesParseWithoutRepositoryAutolinkOrSHAScanners() {
+        var config = MarkdownConfiguration.default
+        config.enableMentions = true
+        config.enableIssueReferences = true
+        config.enableEmojiShortcodes = true
+        config.enableRepositoryReferences = false
+        config.enableAutolinks = false
+        config.enableCommitSHAs = false
+
+        let blocks = MarkdownParser.parse("Ship @alice #42 :rocket: owner/repo deadbeef", configuration: config)
+        guard case .paragraph(let inlines) = blocks.first else {
+            return XCTFail("Expected paragraph")
+        }
+
+        XCTAssertTrue(inlines.contains { if case .mention("alice") = $0 { return true } else { return false } })
+        XCTAssertTrue(inlines.contains { if case .issueReference(42) = $0 { return true } else { return false } })
+        XCTAssertTrue(flatten(inlines).contains("🚀"))
+        XCTAssertFalse(inlines.contains { if case .repositoryReference = $0 { return true } else { return false } })
+        XCTAssertFalse(inlines.contains { if case .commitSHA = $0 { return true } else { return false } })
+    }
+
     private func flatten(_ inlines: [MarkdownParser.InlineNode]) -> String {
         inlines.map { inline in
             switch inline {

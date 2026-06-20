@@ -58,7 +58,11 @@ public final class CancellableParallelOperation: @unchecked Sendable {
 
     // MARK: - Internal Execution
 
-    private struct LocalParseChunk: Sendable { let index: Int; let text: String; let startOffset: Int }
+    private struct LocalParseChunk: Sendable {
+        let index: Int
+        let range: Range<String.Index>
+        let startOffset: Int
+    }
     private struct LocalParseResult: Sendable { let index: Int; let blocks: [MarkdownParser.BlockNode] }
 
     public func start() {
@@ -92,8 +96,15 @@ public final class CancellableParallelOperation: @unchecked Sendable {
         let totalChunks = chunks.count
         let semaphore = DispatchSemaphore(value: parallelConfig.concurrency)
         let dispatchGroup = group
-        struct ResultsState: Sendable { var completed: Int = 0; var results: [LocalParseResult] = [] }
-        let resultsLock = OSAllocatedUnfairLock(initialState: ResultsState())
+        let preserveOrder = parallelConfig.preserveOrder
+        struct ResultsState: Sendable {
+            var completed: Int = 0
+            var orderedResults: [LocalParseResult?]
+            var unorderedResults: [LocalParseResult] = []
+        }
+        let resultsLock = OSAllocatedUnfairLock(initialState: ResultsState(
+            orderedResults: preserveOrder ? Array(repeating: nil, count: totalChunks) : []
+        ))
 
         for chunk in chunks {
             if isCancelled { break }
@@ -111,11 +122,17 @@ public final class CancellableParallelOperation: @unchecked Sendable {
 
                 if self.isCancelled { return }
 
-                var state = ParserState(text: chunk.text)
+                let chunkText = String(self.markdown[chunk.range])
+                var state = ParserState(text: chunkText)
                 let blocks = BlockParser.parseBlocks(&state, configuration: self.markdownConfig)
 
                 let progressValue: Double = resultsLock.withLock { state in
-                    state.results.append(LocalParseResult(index: chunk.index, blocks: blocks))
+                    let result = LocalParseResult(index: chunk.index, blocks: blocks)
+                    if preserveOrder, chunk.index < state.orderedResults.count {
+                        state.orderedResults[chunk.index] = result
+                    } else {
+                        state.unorderedResults.append(result)
+                    }
                     state.completed += 1
                     return Double(state.completed) / Double(totalChunks)
                 }
@@ -139,7 +156,12 @@ public final class CancellableParallelOperation: @unchecked Sendable {
             guard let self = self else { return }
             if self.isCancelled { self.finish(with: []) }
             else {
-                let combined = resultsLock.withLock { self.combineResults($0.results) }
+                let combined = resultsLock.withLock { state in
+                    if preserveOrder {
+                        return state.orderedResults.compactMap { $0 }.flatMap { $0.blocks }
+                    }
+                    return self.combineResults(state.unorderedResults)
+                }
                 self.finish(with: combined)
             }
         }
@@ -151,69 +173,12 @@ public final class CancellableParallelOperation: @unchecked Sendable {
         DispatchQueue.main.async { handler?(blocks) }
     }
 
-    // MARK: - Helpers (duplicated from ParallelMarkdownParser to avoid tighter coupling)
+    // MARK: - Helpers
 
     private func splitIntoChunks(_ markdown: String) -> [LocalParseChunk] {
-        var chunks: [LocalParseChunk] = []
-        let lines = markdown.split(separator: "\n", omittingEmptySubsequences: false)
-
-        var currentChunk = ""
-        var currentStartOffset = 0
-        var chunkIndex = 0
-        var inCodeBlock = false
-        var inTable = false
-        var inBlockquote = false
-        var inList = false
-        var lastLineNonEmpty = false
-
-        for (lineIndex, line) in lines.enumerated() {
-            let lineStr = String(line)
-
-            if lineStr.hasPrefix("```") || lineStr.hasPrefix("~~~") { inCodeBlock.toggle() }
-
-            if !inCodeBlock && lineStr.contains("|") { inTable = true }
-            else if !inCodeBlock && lineStr.isEmpty { inTable = false }
-
-            if !inCodeBlock {
-                if lineStr.hasPrefix(">") { inBlockquote = true }
-                else if lineStr.isEmpty { inBlockquote = false }
-            }
-
-            if !inCodeBlock {
-                let trimmedList = lineStr.trimmingCharacters(in: .whitespaces)
-                if trimmedList.hasPrefix("- ") || trimmedList.hasPrefix("* ") || trimmedList.hasPrefix("+ ") {
-                    inList = true
-                } else if let first = trimmedList.first, first.isNumber, trimmedList.drop(while: { $0.isNumber }).first == "." {
-                    inList = true
-                } else if trimmedList.isEmpty {
-                    inList = false
-                }
-            }
-
-            currentChunk += lineStr + "\n"
-
-            let trimmed = lineStr.trimmingCharacters(in: .whitespaces)
-            let isSetextUnderline = !trimmed.isEmpty && trimmed.allSatisfy { $0 == "-" || $0 == "=" }
-            let avoidSetextSplit = lastLineNonEmpty && isSetextUnderline
-            let shouldSplit = currentChunk.count >= parallelConfig.chunkSize &&
-                              !inCodeBlock && !inTable && !inBlockquote && !inList &&
-                              !avoidSetextSplit &&
-                              (lineStr.isEmpty || lineIndex == lines.count - 1)
-
-            if shouldSplit || lineIndex == lines.count - 1 {
-                chunks.append(LocalParseChunk(index: chunkIndex, text: currentChunk, startOffset: currentStartOffset))
-                currentStartOffset += currentChunk.count
-                currentChunk = ""
-                chunkIndex += 1
-            }
-            lastLineNonEmpty = !lineStr.isEmpty
-        }
-
-        if !currentChunk.isEmpty {
-            chunks.append(LocalParseChunk(index: chunkIndex, text: currentChunk, startOffset: currentStartOffset))
-        }
-
-        return chunks
+        ParallelChunkSplitter
+            .splitRanges(markdown: markdown, chunkSize: parallelConfig.chunkSize)
+            .map { LocalParseChunk(index: $0.index, range: $0.range, startOffset: $0.startOffset) }
     }
 
     private func combineResults(_ results: [LocalParseResult]) -> [MarkdownParser.BlockNode] {

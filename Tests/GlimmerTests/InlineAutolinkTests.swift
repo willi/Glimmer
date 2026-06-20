@@ -37,6 +37,21 @@ final class InlineAutolinkTests: XCTestCase {
         }
     }
 
+    func testMailtoAutolinkDisplayDropsScheme() {
+        let md = "Email mailto:user@example.com"
+        let blocks = MarkdownParser.parse(md, configuration: .github)
+        guard case let .paragraph(children) = blocks.first else { return XCTFail("Expected paragraph") }
+
+        XCTAssertTrue(children.contains { node in
+            if case let .autolink(url, type, original) = node {
+                return url.absoluteString == "mailto:user@example.com" &&
+                    type == .email &&
+                    original == "user@example.com"
+            }
+            return false
+        })
+    }
+
     func testTrimTrailingPunctuation() {
         let md = "See http://example.com, now."
         let blocks = MarkdownParser.parse(md, configuration: .github)
@@ -85,6 +100,18 @@ final class InlineAutolinkTests: XCTestCase {
         XCTAssertTrue(children.contains { node in
             if case let .autolink(url, _, original) = node {
                 return url.absoluteString == "http://www.site.com" && original == "www.site.com"
+            }
+            return false
+        })
+    }
+
+    func testFTPAutolinkAfterHexLikePrefix() {
+        let md = "See ffffftp://example.com"
+        let blocks = MarkdownParser.parse(md, configuration: .github)
+        guard case let .paragraph(children) = blocks.first else { return XCTFail("Expected paragraph") }
+        XCTAssertTrue(children.contains { node in
+            if case let .autolink(url, _, original) = node {
+                return url.absoluteString == "ftp://example.com" && original == "ftp://example.com"
             }
             return false
         })

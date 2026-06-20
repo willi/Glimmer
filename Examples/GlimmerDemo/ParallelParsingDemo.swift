@@ -11,7 +11,7 @@ struct ParallelParsingDemo: View {
     @State private var showMetrics = false
     @State private var parserRef: ParallelMarkdownParser? = nil
     
-    struct ParseResults {
+    struct ParseResults: Sendable {
         let blocks: [MarkdownParser.BlockNode]
         let parseTime: TimeInterval
         let strategy: String
@@ -164,9 +164,10 @@ struct ParallelParsingDemo: View {
         let startTime = CFAbsoluteTimeGetCurrent()
         
         if useParallel {
+            let selectedConcurrency = concurrency
             // Parallel parsing
             let config = ParallelMarkdownParser.ParallelConfiguration(
-                concurrency: concurrency,
+                concurrency: selectedConcurrency,
                 minimumSizeThreshold: 1000,
                 chunkSize: 5000
             )
@@ -179,18 +180,22 @@ struct ParallelParsingDemo: View {
             parserRef = parser
             
             parser.parseAsync(markdown, progress: { prog in
-                progress = prog
+                Task { @MainActor in
+                    progress = prog
+                }
             }, completion: { blocks in
                 let endTime = CFAbsoluteTimeGetCurrent()
                 
-                parseResults = ParseResults(
-                    blocks: blocks,
-                    parseTime: endTime - startTime,
-                    strategy: "Parallel (\(concurrency) threads)"
-                )
-                isParsing = false
-                // Release retained parser
-                parserRef = nil
+                Task { @MainActor in
+                    parseResults = ParseResults(
+                        blocks: blocks,
+                        parseTime: endTime - startTime,
+                        strategy: "Parallel (\(selectedConcurrency) threads)"
+                    )
+                    isParsing = false
+                    // Release retained parser
+                    parserRef = nil
+                }
             })
         } else {
             // Sequential parsing

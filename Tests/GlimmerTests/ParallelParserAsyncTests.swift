@@ -44,6 +44,36 @@ final class ParallelParserAsyncTests: XCTestCase {
         wait(for: [done], timeout: 3.0)
     }
 
+    func testParseAsyncMatchesSerialParserForBoundaryCorpus() {
+        let markdown = ParserBoundaryCorpus.parallelChunkBoundary(repetitions: 12)
+        let serial = MarkdownParser.parse(markdown, configuration: .github)
+
+        for concurrency in [1, 3] {
+            let cfg = ParallelMarkdownParser.ParallelConfiguration(
+                concurrency: concurrency,
+                minimumSizeThreshold: 0,
+                chunkSize: 257,
+                preserveOrder: true
+            )
+            let parser = ParallelMarkdownParser(parallelConfig: cfg, markdownConfig: .github)
+            let done = expectation(description: "completion called for concurrency \(concurrency)")
+
+            parser.parseAsync(markdown, progress: { _ in }, completion: { blocks in
+                ParserCanonicalSnapshot.assertSemanticallyEqual(
+                    blocks,
+                    serial,
+                    "Async parallel parsing must match serial parser semantics for concurrency \(concurrency)"
+                )
+                done.fulfill()
+            })
+
+            wait(
+                for: [done],
+                timeout: 5.0
+            )
+        }
+    }
+
     func testParseAsyncSmallInputReportsOneAndCompletes() {
         // Use default threshold so small input goes through fallback path
         let parser = ParallelMarkdownParser(parallelConfig: .init(), markdownConfig: .default)

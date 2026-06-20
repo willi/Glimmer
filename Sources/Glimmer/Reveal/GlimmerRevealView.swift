@@ -12,8 +12,10 @@ public struct GlimmerRevealView: View {
 
     @State private var model: RevealModel = .empty
     @State private var driver: RevealDriver
+    @State private var revealSession: RevealSession
     @State private var fullPlainText: String = ""
     @State private var didComplete = false
+    @State private var hasBuiltModel = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.openURL) private var openURL
 
@@ -36,24 +38,37 @@ public struct GlimmerRevealView: View {
         self.onLinkTap = onLinkTap
         self.onComplete = onComplete
         _driver = State(initialValue: RevealDriver(configuration: reveal))
+        _revealSession = State(initialValue: RevealSession(
+            granularity: reveal.style.granularity,
+            configuration: configuration
+        ))
     }
 
     public var body: some View {
-        if reveal.style == .none {
-            // Opt-out: settled rendering with no reveal machinery (spec R12).
-            // Non-scrolling content so hosts control their own scroll container.
-            InteractiveMarkdownContent(
-                blocks: Glimmer.parse(markdown, configuration: configuration),
-                configuration: configuration,
-                onLinkTap: handleLink,
-                onMentionTap: nil,
-                onIssueTap: nil,
-                onFootnoteTap: nil
-            )
+        if shouldRenderSettledContent {
+            settledContent
             .onAppear { fireCompletionOnce() }
         } else {
             revealBody
         }
+    }
+
+    private var shouldRenderSettledContent: Bool {
+        reveal.style == .none
+            || (!reveal.isStreaming && hasBuiltModel && driver.revealedCount >= model.countableCount)
+    }
+
+    private var settledContent: some View {
+        // Opt-out/settled rendering uses Glimmer's canonical interactive block
+        // tree so the final animated state is identical to normal markdown.
+        InteractiveMarkdownContent(
+            blocks: Glimmer.parse(markdown, configuration: configuration),
+            configuration: configuration,
+            onLinkTap: handleLink,
+            onMentionTap: nil,
+            onIssueTap: nil,
+            onFootnoteTap: nil
+        )
     }
 
     private var effectiveTreatment: RevealTreatment {
@@ -105,11 +120,10 @@ public struct GlimmerRevealView: View {
 
     private func rebuild(_ markdown: String) {
         // Parse once per buffer change (spec R10); advancing the counter never
-        // re-parses. Glimmer.parse goes through the shared LRU parse cache.
-        let blocks = Glimmer.parse(markdown, configuration: configuration)
-        model = RevealFlattener.flatten(
-            blocks, granularity: reveal.style.granularity, configuration: configuration
-        )
+        // re-parses. Append-only streams reuse previously flattened blocks
+        // when the last buffer ended at a conservative block boundary.
+        model = revealSession.update(markdown)
+        hasBuiltModel = true
         driver.update(totalCountable: model.countableCount, isStreaming: reveal.isStreaming)
         // Cache VoiceOver text so it isn't recomputed on every body evaluation (Fix 6).
         fullPlainText = model.blocks.flatMap(\.words).flatMap(\.atoms).reduce(into: "") { acc, atom in
@@ -172,6 +186,21 @@ struct RevealBlockView: View {
     let onLinkTap: (URL) -> Void
 
     var body: some View {
+        if isFullyRevealed, let node = block.node {
+            InteractiveBlockView(
+                block: node,
+                configuration: configuration,
+                onLinkTap: onLinkTap,
+                onMentionTap: nil,
+                onIssueTap: nil,
+                onFootnoteTap: nil
+            )
+        } else {
+            revealContent
+        }
+    }
+
+    @ViewBuilder private var revealContent: some View {
         switch block.kind {
         case .paragraph, .heading:
             inlineContent
@@ -191,10 +220,25 @@ struct RevealBlockView: View {
             .padding(.leading, CGFloat(max(0, depth - 1)) * 16)
         case .wholeBlock:
             if let node = block.node {
-                // Whole-unit blocks render via Glimmer's existing block view,
-                // entering with a block-level fade when revealed (spec 4.6).
-                MarkdownBlockView(block: node, configuration: configuration, depth: 0)
+                // Whole-unit blocks use the same renderer as settled markdown,
+                // entering with a block-level fade when revealed.
+                InteractiveBlockView(
+                    block: node,
+                    configuration: configuration,
+                    onLinkTap: onLinkTap,
+                    onMentionTap: nil,
+                    onIssueTap: nil,
+                    onFootnoteTap: nil
+                )
                     .transition(.opacity)
+            }
+        }
+    }
+
+    private var isFullyRevealed: Bool {
+        !block.words.contains { word in
+            word.atoms.contains { atom in
+                atom.isCountable && atom.revealIndex > revealedCount
             }
         }
     }

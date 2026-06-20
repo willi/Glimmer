@@ -150,6 +150,20 @@ final class ProfilingBenchmarkTests: XCTestCase {
                 _ = RevealFlattener.flatten(b, granularity: .word, configuration: growingConfig)
             }
         }
+
+        time("chat-sized growth x100 (incremental reveal session)") {
+            var growingConfig = MarkdownConfiguration.default
+            growingConfig.enableRenderCaching = true
+            let session = RevealSession(granularity: .word, configuration: growingConfig)
+            var idx = chat.startIndex
+            for _ in 0..<100 {
+                idx = chat.index(idx, offsetBy: chat.count / 100, limitedBy: chat.endIndex) ?? chat.endIndex
+                let buffer = String(chat[..<idx])
+                _ = session.update(buffer)
+            }
+            let stats = session.stats
+            print("[BENCH] incremental reveal session: full=\(stats.fullRebuilds) incremental=\(stats.incrementalUpdates)")
+        }
     }
 
     /// Long-running loop for attaching Instruments (Time Profiler).

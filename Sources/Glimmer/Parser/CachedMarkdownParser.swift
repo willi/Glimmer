@@ -7,9 +7,41 @@ public final class CachedMarkdownParser: NSObject, @unchecked Sendable, NSCacheD
     
     /// Cache key combining markdown and configuration
     struct CacheKey: Hashable, Sendable {
+        struct ContentDigest: Hashable, Sendable {
+            let word0: UInt64
+            let word1: UInt64
+            let word2: UInt64
+            let word3: UInt64
+
+            init(_ digest: SHA256.Digest) {
+                var word0: UInt64 = 0
+                var word1: UInt64 = 0
+                var word2: UInt64 = 0
+                var word3: UInt64 = 0
+
+                for (offset, byte) in digest.enumerated() {
+                    switch offset {
+                    case 0..<8:
+                        word0 = (word0 << 8) | UInt64(byte)
+                    case 8..<16:
+                        word1 = (word1 << 8) | UInt64(byte)
+                    case 16..<24:
+                        word2 = (word2 << 8) | UInt64(byte)
+                    default:
+                        word3 = (word3 << 8) | UInt64(byte)
+                    }
+                }
+
+                self.word0 = word0
+                self.word1 = word1
+                self.word2 = word2
+                self.word3 = word3
+            }
+        }
+
         enum MarkdownKey: Hashable, Sendable {
             case inline(String)           // small content uses full text
-            case hashed(length: Int, sha256: String) // large content uses hash
+            case hashed(length: Int, digest: ContentDigest) // large content uses hash
         }
         let markdownKey: MarkdownKey
         let configuration: MarkdownConfiguration
@@ -72,18 +104,22 @@ public final class CachedMarkdownParser: NSObject, @unchecked Sendable, NSCacheD
     }
     
     private static let largeContentHashThreshold = 50_000 // chars
+
+    static func cacheKey(for markdown: String, configuration: MarkdownConfiguration) -> CacheKey {
+        if markdown.count > largeContentHashThreshold {
+            let data = Data(markdown.utf8)
+            let digest = SHA256.hash(data: data)
+            return CacheKey(
+                markdownKey: .hashed(length: markdown.count, digest: CacheKey.ContentDigest(digest)),
+                configuration: configuration
+            )
+        }
+
+        return CacheKey(markdownKey: .inline(markdown), configuration: configuration)
+    }
     
     public func parse(_ markdown: String, configuration: MarkdownConfiguration) -> [MarkdownParser.BlockNode] {
-        let key: CacheKey = {
-            if markdown.count > Self.largeContentHashThreshold {
-                let data = Data(markdown.utf8)
-                let digest = SHA256.hash(data: data)
-                let hash = digest.compactMap { String(format: "%02x", $0) }.joined()
-                return CacheKey(markdownKey: .hashed(length: markdown.count, sha256: hash), configuration: configuration)
-            } else {
-                return CacheKey(markdownKey: .inline(markdown), configuration: configuration)
-            }
-        }()
+        let key = Self.cacheKey(for: markdown, configuration: configuration)
         
         // Check cache
         var didMiss = false

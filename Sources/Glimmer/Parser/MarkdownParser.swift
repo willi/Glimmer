@@ -13,7 +13,7 @@ public struct MarkdownParser {
         let (processedMarkdown, inlineFootnoteDefinitions) = preprocessInlineFootnotes(markdown, configuration: configuration)
         
         // Regular preprocessing
-        let preprocessedMarkdown = preprocess(processedMarkdown, configuration: configuration)
+        let preprocessedMarkdown = preprocessForParsing(processedMarkdown, configuration: configuration)
 
         // Parse blocks in a single pass using the shared state
         var state = PublicParserState(text: preprocessedMarkdown)
@@ -29,7 +29,7 @@ public struct MarkdownParser {
     public static func parseWithLocations(_ markdown: String, configuration: MarkdownConfiguration) -> [LocatedBlock] {
         // Handle inline footnotes & preprocessing same as parse()
         let (processedMarkdown, inlineFootnoteDefinitions) = preprocessInlineFootnotes(markdown, configuration: configuration)
-        let preprocessedMarkdown = preprocess(processedMarkdown, configuration: configuration)
+        let preprocessedMarkdown = preprocessForParsing(processedMarkdown, configuration: configuration)
 
         var state = PublicParserState(text: preprocessedMarkdown)
         let located = BlockParser.parseBlocksLocated(&state, configuration: configuration)
@@ -42,59 +42,116 @@ public struct MarkdownParser {
         guard configuration.enableFootnotes else {
             return (markdown, [])
         }
-        var processed = markdown
-        var definitions: [BlockNode] = []
-        var counter = 1
         
-        // Find all inline footnotes ^[content]
-        let regex = inlineFootnoteRegex
-        
-        let matches = regex.matches(in: markdown, options: [], range: NSRange(location: 0, length: markdown.utf16.count))
-        
-        // Process matches in reverse order to maintain string indices
-        for match in matches.reversed() {
-            guard let range = Range(match.range, in: markdown),
-                  let contentRange = Range(match.range(at: 1), in: markdown) else {
-                continue
-            }
-            
-            let content = String(markdown[contentRange])
-            let label = "inline-\(counter)"
-            counter += 1
-            
-            // Replace ^[content] with [^inline-N]
-            processed.replaceSubrange(range, with: "[^\(label)]")
-            
-            // Create footnote definition
-            // Convert to public ParserState for InlineParser
-            var publicState = PublicParserState(text: content)
-            let inlineNodes = InlineParser.parseInlineElements(&publicState, configuration: configuration)
-            definitions.append(.footnoteDefinition(label: label, children: [.paragraph(children: inlineNodes)]))
+        let matches = inlineFootnoteMatches(in: markdown)
+        guard !matches.isEmpty else {
+            return (markdown, [])
         }
-        
-        return (processed, definitions)
+
+        var processed = ""
+        processed.reserveCapacity(markdown.count)
+        var definitions = Array<BlockNode?>(repeating: nil, count: matches.count)
+        var currentIndex = markdown.startIndex
+
+        for (index, match) in matches.enumerated() {
+            processed.append(contentsOf: markdown[currentIndex..<match.range.lowerBound])
+            let label = "inline-\(matches.count - index)"
+            processed.append("[^\(label)]")
+            currentIndex = match.range.upperBound
+
+            let inlineNodes = InlineParser.parseInlineElements(
+                in: markdown,
+                from: match.contentRange.lowerBound,
+                to: match.contentRange.upperBound,
+                configuration: configuration
+            )
+            definitions[matches.count - index - 1] = .footnoteDefinition(
+                label: label,
+                children: [.paragraph(children: inlineNodes)]
+            )
+        }
+
+        processed.append(contentsOf: markdown[currentIndex...])
+        return (processed, definitions.compactMap { $0 })
     }
 
-    // Precompiled regex for inline footnotes to avoid recompilation overhead
-    private static let inlineFootnoteRegex: NSRegularExpression = {
-        try! NSRegularExpression(pattern: #"\^\[([^\]]+)\]"#, options: [])
-    }()
+    private struct InlineFootnoteMatch {
+        let range: Range<String.Index>
+        let contentRange: Range<String.Index>
+    }
+
+    private static func inlineFootnoteMatches(in markdown: String) -> [InlineFootnoteMatch] {
+        var matches: [InlineFootnoteMatch] = []
+        let utf8 = markdown.utf8
+        var index = utf8.startIndex
+
+        while let caret = utf8[index...].firstIndex(of: 0x5E) { // ^
+            index = caret
+
+            let openBracket = utf8.index(after: index)
+            guard openBracket < utf8.endIndex, utf8[openBracket] == 0x5B else { // [
+                index = openBracket
+                continue
+            }
+
+            let contentStart = utf8.index(after: openBracket)
+            var closeBracket = contentStart
+            while closeBracket < utf8.endIndex, utf8[closeBracket] != 0x5D { // ]
+                closeBracket = utf8.index(after: closeBracket)
+            }
+
+            guard closeBracket < utf8.endIndex, closeBracket > contentStart,
+                  let matchStart = String.Index(index, within: markdown),
+                  let contentLower = String.Index(contentStart, within: markdown),
+                  let contentUpper = String.Index(closeBracket, within: markdown) else {
+                index = contentStart
+                continue
+            }
+
+            let afterClose = utf8.index(after: closeBracket)
+            guard let matchEnd = String.Index(afterClose, within: markdown) else {
+                break
+            }
+
+            matches.append(InlineFootnoteMatch(
+                range: matchStart..<matchEnd,
+                contentRange: contentLower..<contentUpper
+            ))
+            index = afterClose
+        }
+
+        return matches
+    }
 
     public static func parse(_ markdown: String) -> [BlockNode] {
         return parse(markdown, configuration: .default)
     }
     
     public static func preprocess(_ markdown: String, configuration: MarkdownConfiguration = .default) -> String {
+        var processedMarkdown = preprocessExtensions(markdown, configuration: configuration)
+
+        if configuration.enableEmojiShortcodes {
+            processedMarkdown = GitHubEmojis.processEmojiShortcodes(processedMarkdown)
+        }
+
+        return processedMarkdown
+    }
+
+    private static func preprocessForParsing(
+        _ markdown: String,
+        configuration: MarkdownConfiguration
+    ) -> String {
+        preprocessExtensions(markdown, configuration: configuration)
+    }
+
+    private static func preprocessExtensions(
+        _ markdown: String,
+        configuration: MarkdownConfiguration
+    ) -> String {
         var processedMarkdown = markdown
 
         for markdownExtension in configuration.markdownExtensions {
             processedMarkdown = markdownExtension.preprocess(processedMarkdown)
-        }
-        
-        // Process emoji shortcodes if enabled.
-        // A pre-scan guard (e.g. contains(":")) is slower than the regex no-match fast path.
-        if configuration.enableEmojiShortcodes {
-            processedMarkdown = GitHubEmojis.processEmojiShortcodes(processedMarkdown)
         }
         
         return processedMarkdown
