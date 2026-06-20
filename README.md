@@ -38,10 +38,18 @@ A high-performance, SwiftUI-native Markdown parser and renderer with full GitHub
 Add Glimmer to your project through Xcode:
 
 1. File → Add Package Dependencies
-2. Add the package URL or local path
+2. Add `https://github.com/willi/Glimmer.git`
 3. Select "Glimmer" product
 
 Or add to your `Package.swift`:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/willi/Glimmer.git", from: "0.1.0")
+]
+```
+
+For local development against a checkout, use a path dependency instead:
 
 ```swift
 dependencies: [
