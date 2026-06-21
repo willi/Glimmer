@@ -44,7 +44,7 @@ GLIMMER_COMPARE_CONFIGURATION=Release
 GLIMMER_COMPARE_MARKDOWN_SECTIONS=80
 GLIMMER_COMPARE_MARKDOWN_REPEATS=7
 GLIMMER_COMPARE_MARKDOWN_WARMUPS=2
-GLIMMER_COMPARE_MARKDOWN_CORPORA=plain,inline,titles,gfm,tables,setext,code,mixed
+GLIMMER_COMPARE_MARKDOWN_CORPORA=plain,inline,titles,gfm,tables,setext,code,mixed,progit,commonmark-samples
 ```
 
 Corpus profiles:
@@ -57,6 +57,23 @@ Corpus profiles:
 - `setext`: repeated setext headings with paragraph and inline parsing.
 - `code`: fenced code blocks and literal-heavy content.
 - `mixed`: combined stress corpus similar to real README/chat output.
+- `progit`: generated long-form technical-document corpus modeled after Pro Git-style chapters, with headings,
+  prose, command transcripts, nested lists, tables, links, images, footnotes, and reference definitions.
+- `commonmark-samples`: generated hotspot corpus modeled after the markdown-it/commonmark.js/cmark sample suites,
+  including nested containers, reference-definition lists, worst-case emphasis delimiters, nested links, entities,
+  escapes, HTML, raw tabs, and code fences.
+
+To run only the externally inspired corpus shapes:
+
+```sh
+GLIMMER_COMPARE_MARKDOWN_CORPORA=progit,commonmark-samples \
+  sh Benchmarks/run-markdown-parser-comparison.sh
+```
+
+The generated `progit` corpus avoids vendoring external book text while preserving the large technical-document shape
+used by cmark and swift-cmark benchmarks. The generated `commonmark-samples` corpus is intentionally capped so slow
+third-party comparators can finish; it is intended for parser hotspot and regression checks, not as an average-document
+performance claim.
 
 To run manually, create the `/tmp` opt-in flag first. `xcodebuild` does not reliably pass shell environment variables through to the simulator XCTest process for generated SwiftPM schemes, so the tests also read `/tmp` flag/config files.
 

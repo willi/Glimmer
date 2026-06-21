@@ -983,6 +983,143 @@ final class PerformanceOptimizationTests: XCTestCase {
         )
     }
 
+    func testOptimization108_ASCIITableRowsBuildCellsInSinglePass() throws {
+        let representativeRows = [
+            "| a | b | c |",
+            "a|b|c",
+            "| | middle | |",
+            "| **bold** | [link](https://example.com) | `code` |",
+            "| leading | trailing   |",
+            "",
+            "|"
+        ]
+        let alignments: [MarkdownParser.TableAlignment] = [.left, .center, .right]
+
+        for row in representativeRows {
+            let materialized = try XCTUnwrap(
+                GFMExtensions.parseASCIITableRowByMaterializingRangesForTesting(
+                    row,
+                    alignments: alignments,
+                    configuration: .github
+                ),
+                row
+            )
+            let singlePass = GFMExtensions.parseTableRow(row, alignments: alignments, configuration: .github)
+            XCTAssertEqual(singlePass, materialized, "Single-pass ASCII table rows must preserve semantics for \(row)")
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let rows = makeASCIITableRowsForSinglePassBenchmark(rowCount: 90_000)
+
+        let materialized = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for row in rows {
+                    let cells = GFMExtensions.parseASCIITableRowByMaterializingRangesForTesting(
+                        row,
+                        alignments: alignments,
+                        configuration: .github
+                    ) ?? []
+                    checksum &+= cells.reduce(0) { $0 + tableCellBenchmarkChecksum($1) }
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let singlePass = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for row in rows {
+                    let cells = GFMExtensions.parseTableRow(row, alignments: alignments, configuration: .github)
+                    checksum &+= cells.reduce(0) { $0 + tableCellBenchmarkChecksum($1) }
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] ascii table row materialized ranges: \(formatMilliseconds(materialized)) ms " +
+            "single pass: \(formatMilliseconds(singlePass)) ms " +
+            "speedup: \(formatRatio(materialized / max(singlePass, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            singlePass,
+            materialized,
+            "ASCII table row parsing should build cells while scanning instead of materializing cell ranges first."
+        )
+        #endif
+    }
+
+    func testOptimization132_ASCIITableRowsBypassInlineParserForPlainCells() throws {
+        let representativeRows = [
+            "| alpha | beta 123 | gamma |",
+            "| **bold** | [link](https://example.com) | `code` |",
+            "| @octo | #42 | :rocket: |",
+            "| owner/repo | apple/swift#123 | deadbeefdeadbeefdeadbeefdeadbeefdeadbeef |",
+            "| https://example.com | www.example.com | mailto:octo@example.com |",
+            "| escaped \\*literal\\* | ![alt](image.png) | <span>html</span> |",
+            "| café | plain | ✅ |"
+        ]
+        let alignments: [MarkdownParser.TableAlignment] = [.left, .center, .right]
+
+        for row in representativeRows {
+            let fullInline = GFMExtensions.parseASCIITableRowByParsingPlainCellsForTesting(
+                row,
+                alignments: alignments,
+                configuration: .github
+            ) ?? GFMExtensions.parseTableRow(row, alignments: alignments, configuration: .github)
+            let fastPlainCells = GFMExtensions.parseTableRow(row, alignments: alignments, configuration: .github)
+            XCTAssertEqual(fastPlainCells, fullInline, "Plain table-cell fast path must preserve semantics for \(row)")
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let rows = makeASCIITableRowsForSinglePassBenchmark(rowCount: 90_000)
+
+        let fullInline = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for row in rows {
+                    let cells = GFMExtensions.parseASCIITableRowByParsingPlainCellsForTesting(
+                        row,
+                        alignments: alignments,
+                        configuration: .github
+                    ) ?? []
+                    checksum &+= cells.reduce(0) { $0 + tableCellBenchmarkChecksum($1) }
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let fastPlainCells = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for row in rows {
+                    let cells = GFMExtensions.parseTableRow(row, alignments: alignments, configuration: .github)
+                    checksum &+= cells.reduce(0) { $0 + tableCellBenchmarkChecksum($1) }
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] ascii table plain cells full inline: \(formatMilliseconds(fullInline)) ms " +
+            "direct text: \(formatMilliseconds(fastPlainCells)) ms " +
+            "speedup: \(formatRatio(fullInline / max(fastPlainCells, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            fastPlainCells,
+            fullInline,
+            "ASCII table row parsing should bypass the inline parser for cells that are proven plain text."
+        )
+        #endif
+    }
+
     func testOptimization51_ASCIITableAlignmentsScanBytes() throws {
         let representativeLines = [
             "| --- | :---: | ---: |",
@@ -1039,6 +1176,69 @@ final class PerformanceOptimizationTests: XCTestCase {
             characterScan,
             "ASCII table alignment parsing should check dashes and colons with UTF-8 bytes."
         )
+    }
+
+    func testOptimization115_ASCIITableAlignmentsAvoidMaterializedRanges() throws {
+        let representativeLines = [
+            "| --- | :---: | ---: |",
+            "--- | :--- | ---:",
+            "| - | :-: | -: |",
+            "| x | --- |",
+            "|   |   |",
+            "",
+            "| café | --- |",
+            "|   ---   |   :---:   |   ---:   |"
+        ]
+
+        for line in representativeLines {
+            let materialized = GFMExtensions.parseASCIITableAlignmentsByMaterializingRangesForTesting(line) ??
+                GFMExtensions.parseTableAlignments(line)
+            XCTAssertEqual(
+                GFMExtensions.parseTableAlignments(line),
+                materialized,
+                "Single-pass ASCII table alignment scan must preserve materialized-range semantics for \(line)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let lines = makeASCIITableAlignmentBenchmark(count: 260_000)
+
+        let materialized = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for line in lines {
+                    let alignments = GFMExtensions.parseASCIITableAlignmentsByMaterializingRangesForTesting(line) ?? []
+                    checksum += tableAlignmentChecksum(alignments)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let singlePass = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for line in lines {
+                    let alignments = GFMExtensions.parseTableAlignments(line)
+                    checksum += tableAlignmentChecksum(alignments)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] ascii table alignment materialized ranges: \(formatMilliseconds(materialized)) ms " +
+            "single pass: \(formatMilliseconds(singlePass)) ms " +
+            "speedup: \(formatRatio(materialized / max(singlePass, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            singlePass,
+            materialized,
+            "ASCII table alignment parsing should classify cells while scanning instead of materializing ranges first."
+        )
+        #endif
     }
 
     func testOptimization18_RangeBackedTableBlocksAvoidLineStringCopies() throws {
@@ -1360,6 +1560,483 @@ final class PerformanceOptimizationTests: XCTestCase {
         )
     }
 
+    func testOptimization92_ListItemSingleRangeReuseAvoidsDuplicateTrim() throws {
+        let representativeInputs = [
+            "- nested list item",
+            "1. ordered nested item",
+            "> nested quote",
+            "---",
+            "```swift",
+            "# literal heading in list item",
+            "Unicode café paragraph"
+        ]
+
+        for input in representativeInputs {
+            let recomputed = parseSingleLineListItemRangeReuseForBenchmark(input, reuseSingleTrimmedRange: false)
+            let reused = parseSingleLineListItemRangeReuseForBenchmark(input, reuseSingleTrimmedRange: true)
+            XCTAssertEqual(reused.marker, recomputed.marker, input)
+            XCTAssertEqual(reused.isTask, recomputed.isTask, input)
+            XCTAssertEqual(reused.isChecked, recomputed.isChecked, input)
+            ParserCanonicalSnapshot.assertSemanticallyEqual(
+                reused.content,
+                recomputed.content,
+                "Reused single list-item trim range must preserve semantics for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeSingleLineNestedListItemContentBenchmark(count: 160_000)
+
+        let recomputed = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    let item = parseSingleLineListItemRangeReuseForBenchmark(
+                        input,
+                        reuseSingleTrimmedRange: false
+                    )
+                    checksum += listItemBenchmarkChecksum(item)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let reused = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    let item = parseSingleLineListItemRangeReuseForBenchmark(
+                        input,
+                        reuseSingleTrimmedRange: true
+                    )
+                    checksum += listItemBenchmarkChecksum(item)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] single-line list item trim recomputed: \(formatMilliseconds(recomputed)) ms " +
+            "reused: \(formatMilliseconds(reused)) ms " +
+            "speedup: \(formatRatio(recomputed / max(reused, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            reused,
+            recomputed,
+            "Single-line nested list items should reuse the trimmed source range between parse branches."
+        )
+        #endif
+    }
+
+    func testOptimization106_TaskMarkersUseUTF8BytePeek() throws {
+        let representativeInputs = [
+            "[x] completed task with `code`",
+            "[X] uppercase task",
+            "[ ] pending task with [link](https://example.com)",
+            "[o] malformed task marker",
+            "[x]missing trailing space",
+            "[ ] café after marker",
+            "plain [x] marker later",
+            "[ ] "
+        ]
+
+        for input in representativeInputs {
+            let peeking = parseTaskMarkerListItemForBenchmark(input, utf8TaskMarker: false)
+            let bytePeek = parseTaskMarkerListItemForBenchmark(input, utf8TaskMarker: true)
+            XCTAssertEqual(bytePeek.item.marker, peeking.item.marker, input)
+            XCTAssertEqual(bytePeek.item.isTask, peeking.item.isTask, input)
+            XCTAssertEqual(bytePeek.item.isChecked, peeking.item.isChecked, input)
+            XCTAssertEqual(bytePeek.offset, peeking.offset, input)
+            XCTAssertEqual(bytePeek.line, peeking.line, input)
+            XCTAssertEqual(bytePeek.column, peeking.column, input)
+            ParserCanonicalSnapshot.assertSemanticallyEqual(
+                bytePeek.item.content,
+                peeking.item.content,
+                "Task marker byte peek must preserve list item content semantics for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeTaskMarkerBytePeekBenchmark(count: 220_000)
+
+        let peeking = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    let parsed = parseTaskMarkerListItemForBenchmark(input, utf8TaskMarker: false)
+                    checksum &+= listItemBenchmarkChecksum(parsed.item)
+                    checksum &+= parsed.offset &+ parsed.line &+ parsed.column
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let bytePeek = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    let parsed = parseTaskMarkerListItemForBenchmark(input, utf8TaskMarker: true)
+                    checksum &+= listItemBenchmarkChecksum(parsed.item)
+                    checksum &+= parsed.offset &+ parsed.line &+ parsed.column
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] task marker character peeks: \(formatMilliseconds(peeking)) ms " +
+            "UTF-8 byte peek: \(formatMilliseconds(bytePeek)) ms " +
+            "speedup: \(formatRatio(peeking / max(bytePeek, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            bytePeek,
+            peeking,
+            "Task marker parsing should avoid repeated Character peeks."
+        )
+        #endif
+    }
+
+    func testOptimization116_ListItemContinuationPrefixesUseUTF8Scan() throws {
+        let representativeInputs = [
+            "first line\n  continuation line",
+            "[x] completed task\n  continuation with `code`",
+            "first line\n- sibling list item",
+            "first line\n  - nested list item",
+            "first line\n  1. ordered nested item",
+            "first line\n    over-indented continuation",
+            "first line\r\n  continuation after CRLF",
+            "first line\n  ١. unicode digit marker"
+        ]
+
+        for input in representativeInputs {
+            let character = parseListItemContinuationPrefixForBenchmark(input, utf8Prefix: false)
+            let utf8 = parseListItemContinuationPrefixForBenchmark(input, utf8Prefix: true)
+            XCTAssertEqual(utf8.item.marker, character.item.marker, input)
+            XCTAssertEqual(utf8.item.isTask, character.item.isTask, input)
+            XCTAssertEqual(utf8.item.isChecked, character.item.isChecked, input)
+            XCTAssertEqual(utf8.offset, character.offset, input)
+            XCTAssertEqual(utf8.line, character.line, input)
+            XCTAssertEqual(utf8.column, character.column, input)
+            ParserCanonicalSnapshot.assertSemanticallyEqual(
+                utf8.item.content,
+                character.item.content,
+                "UTF-8 list continuation prefix scan must preserve semantics for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeListItemContinuationPrefixBenchmark(count: 95_000)
+
+        let character = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    let parsed = parseListItemContinuationPrefixForBenchmark(input, utf8Prefix: false)
+                    checksum &+= listItemBenchmarkChecksum(parsed.item)
+                    checksum &+= parsed.offset &+ parsed.line &+ parsed.column
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let utf8 = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    let parsed = parseListItemContinuationPrefixForBenchmark(input, utf8Prefix: true)
+                    checksum &+= listItemBenchmarkChecksum(parsed.item)
+                    checksum &+= parsed.offset &+ parsed.line &+ parsed.column
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] list continuation prefix character scan: \(formatMilliseconds(character)) ms " +
+            "UTF-8 scan: \(formatMilliseconds(utf8)) ms " +
+            "speedup: \(formatRatio(character / max(utf8, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            utf8,
+            character,
+            "List item continuation prefixes should avoid repeated Character scans and offset recomputation."
+        )
+        #endif
+    }
+
+    func testOptimization133_FootnoteContinuationPrefixesUseUTF8Scan() throws {
+        let representativeInputs = [
+            "[^note]: first line\n    continuation line",
+            "[^tab]: first line\n\tcontinuation with `code`",
+            "[^mixed-tab]: first line\n   \tcontinuation after spaces and tab",
+            "[^short]: first line\n   not a continuation\nnext paragraph",
+            "[^blank]: first line\n    \n    - nested item",
+            "[^unicode]: café\n    continuation with こんにちは",
+            "[^crlf]: first line\r\n    continuation after CRLF\r\n"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parseFootnoteContinuationPrefixSignatureForBenchmark(input, utf8Prefix: true),
+                parseFootnoteContinuationPrefixSignatureForBenchmark(input, utf8Prefix: false),
+                "UTF-8 footnote continuation prefix scan must preserve semantics for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeFootnoteContinuationPrefixBenchmark(count: 95_000)
+
+        let character = median((0..<5).map { _ in
+            timed {
+                XCTAssertGreaterThan(
+                    footnoteContinuationPrefixChecksum(inputs, utf8Prefix: false),
+                    0
+                )
+            }
+        })
+
+        let utf8 = median((0..<5).map { _ in
+            timed {
+                XCTAssertGreaterThan(
+                    footnoteContinuationPrefixChecksum(inputs, utf8Prefix: true),
+                    0
+                )
+            }
+        })
+
+        print(
+            "[BENCH] footnote continuation prefix character scan: \(formatMilliseconds(character)) ms " +
+            "UTF-8 scan: \(formatMilliseconds(utf8)) ms " +
+            "speedup: \(formatRatio(character / max(utf8, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            utf8,
+            character,
+            "Footnote continuation prefixes should avoid Character scans for ASCII indentation."
+        )
+        #endif
+    }
+
+    func testOptimization117_InvalidInlineURLsValidateBeforeLabelMaterialization() throws {
+        let representativeInputs: [(markdown: String, image: Bool)] = [
+            ("[**bold** and [nested] text](http://[)", false),
+            ("[`code label` and escaped \\[ bracket](http://%)", false),
+            ("[valid **bold** link](https://example.com/docs)", false),
+            ("![alt **text** and [nested] text](http://exa<mple.com)", true),
+            ("![escaped \\[ alt text](http://{)", true),
+            ("![valid alt text](https://example.com/image.png)", true)
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parseInlineURLValidationCanonicalForBenchmark(
+                    input.markdown,
+                    image: input.image,
+                    earlyValidation: true
+                ),
+                parseInlineURLValidationCanonicalForBenchmark(
+                    input.markdown,
+                    image: input.image,
+                    earlyValidation: false
+                ),
+                "Early URL validation must preserve parsed output and parser position for \(input.markdown)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeInvalidInlineURLValidationBenchmark(count: 45_000)
+
+        let labelFirst = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum &+= parseInlineURLValidationChecksumForBenchmark(
+                        input.link,
+                        image: false,
+                        earlyValidation: false
+                    )
+                    checksum &+= parseInlineURLValidationChecksumForBenchmark(
+                        input.image,
+                        image: true,
+                        earlyValidation: false
+                    )
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let urlFirst = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum &+= parseInlineURLValidationChecksumForBenchmark(
+                        input.link,
+                        image: false,
+                        earlyValidation: true
+                    )
+                    checksum &+= parseInlineURLValidationChecksumForBenchmark(
+                        input.image,
+                        image: true,
+                        earlyValidation: true
+                    )
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] invalid inline URL label-first validation: \(formatMilliseconds(labelFirst)) ms " +
+            "URL-first validation: \(formatMilliseconds(urlFirst)) ms " +
+            "speedup: \(formatRatio(labelFirst / max(urlFirst, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            urlFirst,
+            labelFirst,
+            "Invalid inline links and images should reject bad URLs before materializing label or alt text."
+        )
+        #endif
+    }
+
+    func testOptimization118_InlineFootnoteScanUsesContiguousUTF8Storage() throws {
+        let representativeInputs: [(markdown: String, configuration: MarkdownConfiguration)] = [
+            ("Plain ASCII paragraph with **bold** and [link](https://example.com).", .default),
+            ("Plain carets ^ and ^^ without bracket markers.", .default),
+            ("Inline note ^[footnote **bold** text] after paragraph.", .default),
+            ("Two notes ^[first] and ^[second] with #123 in GitHub mode.", .github),
+            ("Unicode outside footnote cafe\u{301} and ^[ascii note].", .default),
+            ("Unicode only inside footnote ^[cafe\u{301} note] after ASCII text.", .default),
+            ("Empty inline note ^[] stays literal.", .default),
+            ("Malformed inline ^[unclosed note with cafe\u{301}", .default),
+            ("Broken then valid ^[unclosed and ^[valid] end", .default)
+        ]
+
+        for input in representativeInputs {
+            ParserCanonicalSnapshot.assertSemanticallyEqual(
+                MarkdownParser.parse(input.markdown, configuration: input.configuration),
+                MarkdownParser.parseByUTF8IndexInlineFootnoteScanForTesting(
+                    input.markdown,
+                    configuration: input.configuration
+                ),
+                "Contiguous UTF-8 inline-footnote scanning must preserve parser semantics."
+            )
+
+            XCTAssertEqual(
+                MarkdownParser.inlineFootnoteScanSourceASCIIChecksumForTesting(
+                    input.markdown,
+                    reuseScanASCII: true,
+                    useContiguousStorage: true
+                ),
+                MarkdownParser.inlineFootnoteScanSourceASCIIChecksumForTesting(
+                    input.markdown,
+                    reuseScanASCII: true,
+                    useContiguousStorage: false
+                ),
+                "Contiguous UTF-8 scanning must preserve match and source-ASCII results."
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeInlineFootnoteContiguousStorageBenchmark()
+
+        let utf8IndexLoop = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    for _ in 0..<80 {
+                        checksum &+= MarkdownParser.inlineFootnoteScanSourceASCIIChecksumForTesting(
+                            input,
+                            reuseScanASCII: true,
+                            useContiguousStorage: false
+                        )
+                    }
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let contiguous = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    for _ in 0..<80 {
+                        checksum &+= MarkdownParser.inlineFootnoteScanSourceASCIIChecksumForTesting(
+                            input,
+                            reuseScanASCII: true,
+                            useContiguousStorage: true
+                        )
+                    }
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] inline footnote UTF-8 index scan: \(formatMilliseconds(utf8IndexLoop)) ms " +
+            "contiguous storage scan: \(formatMilliseconds(contiguous)) ms " +
+            "speedup: \(formatRatio(utf8IndexLoop / max(contiguous, 0.0001)))x"
+        )
+
+        let parseInputs = Array(inputs.prefix(3))
+        let utf8IndexParse = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in parseInputs {
+                    for _ in 0..<3 {
+                        checksum &+= blockArrayBenchmarkChecksum(
+                            MarkdownParser.parseByUTF8IndexInlineFootnoteScanForTesting(
+                                input,
+                                configuration: .github
+                            )
+                        )
+                    }
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let contiguousParse = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in parseInputs {
+                    for _ in 0..<3 {
+                        checksum &+= blockArrayBenchmarkChecksum(MarkdownParser.parse(input, configuration: .github))
+                    }
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] inline footnote parse with UTF-8 index scan: \(formatMilliseconds(utf8IndexParse)) ms " +
+            "contiguous storage scan: \(formatMilliseconds(contiguousParse)) ms " +
+            "speedup: \(formatRatio(utf8IndexParse / max(contiguousParse, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            contiguousParse,
+            utf8IndexParse,
+            "Full parsing should benefit from the contiguous inline-footnote scan on footnote-heavy documents."
+        )
+        #endif
+    }
+
     func testOptimization16_RangeBackedLinksAvoidLabelAndDestinationCopies() throws {
         let links = makeASCIILinksForParsingBenchmark(linkCount: 3_600)
 
@@ -1519,6 +2196,192 @@ final class PerformanceOptimizationTests: XCTestCase {
         )
     }
 
+    func testOptimization95_SimpleLinkResourceCarriesScannedByteCount() throws {
+        let representativeInputs = [
+            "[label](https://example.com/path)",
+            "[spaced](   https://example.com/path)",
+            "[title](https://example.com/docs \"Title\")",
+            "[single](https://example.com/docs 'Title')",
+            "[empty title gap](https://example.com/docs    )",
+            #"[fallback](https://example.com/a\)b)"#,
+            "[unicode](https://example.com/café)"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parseLinkResourceByteCountCanonicalForBenchmark(input, countedByteCount: true),
+                parseLinkResourceByteCountCanonicalForBenchmark(input, countedByteCount: false),
+                "Counted simple link resource bytes must preserve semantics and parser position for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let links = makeASCIILinksForParsingBenchmark(linkCount: 8_000)
+
+        let recounting = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for link in links {
+                    checksum &+= parseLinkResourceByteCountChecksumForBenchmark(link, countedByteCount: false)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let counted = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for link in links {
+                    checksum &+= parseLinkResourceByteCountChecksumForBenchmark(link, countedByteCount: true)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] simple link resource byte count recounting: \(formatMilliseconds(recounting)) ms " +
+            "counted: \(formatMilliseconds(counted)) ms " +
+            "speedup: \(formatRatio(recounting / max(counted, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            counted,
+            recounting,
+            "Simple link resource parsing should reuse the scanned byte count instead of recounting UTF-8 distance."
+        )
+        #endif
+    }
+
+    func testOptimization112_UnicodeSimpleLinkResourcesStayOnUTF8FastPath() throws {
+        let representativeResources = [
+            "https://example.com/café)",
+            "https://example.com/こんにちは)",
+            "https://example.com/docs \"Café title\")",
+            "https://example.com/docs 'Résumé title')",
+            "https://example.com/docs \"こんにちは ✅\")",
+            "   https://example.com/café   )"
+        ]
+
+        for resource in representativeResources {
+            let balanced = try XCTUnwrap(parseInlineLinkResourceForBenchmark(resource, fastPath: false))
+            let fast = try XCTUnwrap(parseInlineLinkResourceForBenchmark(resource, fastPath: true))
+            assertEqualInlineLinkResource(fast, balanced, source: resource)
+            XCTAssertNil(fast.asciiByteCount, "Unicode resources must not expose ASCII cursor counts for \(resource)")
+        }
+
+        let fallbackResources = [
+            #"https://example.com/a(b)café)"#,
+            #"https://example.com/a\)café)"#
+        ]
+
+        for resource in fallbackResources {
+            let balanced = try XCTUnwrap(parseInlineLinkResourceForBenchmark(resource, fastPath: false))
+            let fast = try XCTUnwrap(parseInlineLinkResourceForBenchmark(resource, fastPath: true))
+            assertEqualInlineLinkResource(fast, balanced, source: resource)
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let resources = makeUnicodeSimpleLinkResourcesForParsingBenchmark(resourceCount: 36_000)
+
+        let balanced = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for resource in resources {
+                    if let parsed = parseInlineLinkResourceForBenchmark(resource, fastPath: false) {
+                        checksum += inlineLinkResourceBenchmarkChecksum(parsed, in: resource)
+                    }
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let fast = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for resource in resources {
+                    if let parsed = parseInlineLinkResourceForBenchmark(resource, fastPath: true) {
+                        checksum += inlineLinkResourceBenchmarkChecksum(parsed, in: resource)
+                    }
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] unicode simple link resource balanced scan: \(formatMilliseconds(balanced)) ms " +
+            "utf8 fast path: \(formatMilliseconds(fast)) ms " +
+            "speedup: \(formatRatio(balanced / max(fast, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            fast,
+            balanced,
+            "Unicode simple link resources should stay on the UTF-8 fast path instead of balanced scanning."
+        )
+        #endif
+    }
+
+    func testOptimization93_SimpleBracketedLinkTextUsesCountedASCIIMove() throws {
+        let representativeInputs = [
+            "[plain label](https://example.com/path)",
+            "[**Guide** and *topic*](https://example.com/docs \"Title\")",
+            "[a \\[b\\]](http://example.com)",
+            "[outer [inner]](http://example.com)",
+            "[multi\nline](https://example.com)",
+            "[unicode café](https://example.com/cafe)"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parseLinkBracketedTextMoveCanonicalForBenchmark(input, countedMove: true),
+                parseLinkBracketedTextMoveCanonicalForBenchmark(input, countedMove: false),
+                "Counted bracketed link-text move must preserve parse result and parser position for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let links = makeASCIILinksForBracketedTextMoveBenchmark(linkCount: 120_000)
+
+        let recounting = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for link in links {
+                    checksum &+= parseLinkBracketedTextMoveChecksumForBenchmark(link, countedMove: false)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let counted = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for link in links {
+                    checksum &+= parseLinkBracketedTextMoveChecksumForBenchmark(link, countedMove: true)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] simple bracketed link text move recounting: \(formatMilliseconds(recounting)) ms " +
+            "counted: \(formatMilliseconds(counted)) ms " +
+            "speedup: \(formatRatio(recounting / max(counted, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            counted,
+            recounting,
+            "Simple ASCII bracketed link text should move with the byte count already discovered by scanning."
+        )
+        #endif
+    }
+
     func testOptimization46_ASCIIAutolinksUseASCIICursorMove() {
         let representativeInputs = [
             "https://example.com/path",
@@ -1572,6 +2435,309 @@ final class PerformanceOptimizationTests: XCTestCase {
             characterMove,
             "ASCII autolink parsing should advance with byte offsets instead of character walking."
         )
+    }
+
+    func testOptimization102_ASCIIAutolinksUseCountedCursorMove() throws {
+        let representativeInputs = [
+            "https://example.com/path",
+            "https://example.com/path,",
+            "https://example.com/path...",
+            "http://example.com/a(b))",
+            "https://example.com/path]]",
+            "www.example.com/path",
+            "mailto:octocat@example.com",
+            "ftp://example.com/file.txt",
+            "<https://example.com/a(b)>",
+            "<octocat@example.com>"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parseAutolinkCountedMoveCanonicalForBenchmark(input, countedMove: true),
+                parseAutolinkCountedMoveCanonicalForBenchmark(input, countedMove: false),
+                "Counted ASCII autolink cursor move must preserve parse result and parser position for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeASCIIAutolinksForMoveBenchmark(count: 100_000)
+
+        let recounting = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += parseAutolinkCountedMoveChecksumForBenchmark(input, countedMove: false)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let counted = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += parseAutolinkCountedMoveChecksumForBenchmark(input, countedMove: true)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] ascii autolink recounting move: \(formatMilliseconds(recounting)) ms " +
+            "counted move: \(formatMilliseconds(counted)) ms " +
+            "speedup: \(formatRatio(recounting / max(counted, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            counted,
+            recounting,
+            "ASCII autolink parsing should move with the byte count already discovered by scanning."
+        )
+        #endif
+    }
+
+    func testOptimization107_ASCIIAutolinksTrimTailWithBytes() throws {
+        let representativeInputs = [
+            "https://example.com/path",
+            "https://example.com/path.",
+            "https://example.com/path.,;:?!",
+            "https://example.com/path...",
+            "http://example.com/a(b))",
+            "www.example.com/a[b]]",
+            "(https://example.com/a(b))",
+            "mailto:octocat@example.com;",
+            "<https://example.com/path.>",
+            "https://example.com/café."
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parseAutolinkTailTrimCanonicalForBenchmark(input, byteTrim: true),
+                parseAutolinkTailTrimCanonicalForBenchmark(input, byteTrim: false),
+                "ASCII autolink byte tail trim must preserve parse result and parser position for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeASCIIAutolinksForTailTrimBenchmark(count: 120_000)
+
+        let characterTrim = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum &+= parseAutolinkTailTrimChecksumForBenchmark(input, byteTrim: false)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let byteTrim = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum &+= parseAutolinkTailTrimChecksumForBenchmark(input, byteTrim: true)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] ascii autolink character tail trim: \(formatMilliseconds(characterTrim)) ms " +
+            "byte tail trim: \(formatMilliseconds(byteTrim)) ms " +
+            "speedup: \(formatRatio(characterTrim / max(byteTrim, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            byteTrim,
+            characterTrim,
+            "ASCII autolink tail validation should inspect trailing punctuation with UTF-8 bytes."
+        )
+        #endif
+    }
+
+    func testOptimization134_AngleAutolinksRejectHTMLWithoutCopying() throws {
+        let representativeInputs = [
+            "<span>",
+            "</span>",
+            "<br>",
+            "<custom-tag>",
+            "<h1>",
+            "<em>",
+            "<img/>",
+            "<https://example.com/path>",
+            "<octocat@example.com>",
+            "<mailto:octocat@example.com>",
+            "<1invalid:example>",
+            "<invalid scheme>"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parseAngleAutolinkCopyCanonicalForBenchmark(input, deferRejectedCopy: true),
+                parseAngleAutolinkCopyCanonicalForBenchmark(input, deferRejectedCopy: false),
+                "Deferred rejected angle autolink copy must preserve parse result and parser position for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeRejectedAngleAutolinksForCopyBenchmark(count: 160_000)
+
+        let copyBeforeReject = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum &+= parseAngleAutolinkCopyChecksumForBenchmark(input, deferRejectedCopy: false)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let copyAfterReject = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum &+= parseAngleAutolinkCopyChecksumForBenchmark(input, deferRejectedCopy: true)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] angle autolink copy-before-reject: \(formatMilliseconds(copyBeforeReject)) ms " +
+            "copy-after-reject: \(formatMilliseconds(copyAfterReject)) ms " +
+            "speedup: \(formatRatio(copyBeforeReject / max(copyAfterReject, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            copyAfterReject,
+            copyBeforeReject,
+            "HTML-looking angle text should reject before materializing autolink content."
+        )
+        #endif
+    }
+
+    func testOptimization103_InlineFootnoteReferencesUseCountedASCIIMove() throws {
+        let representativeInputs = [
+            "[^1]",
+            "[^long-ascii-label-123]",
+            "[^label_with_underscore]",
+            "[^]",
+            "[^unclosed",
+            "[^line\n]",
+            "[^unicode-café]"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parseFootnoteReferenceMoveCanonicalForBenchmark(input, countedMove: true),
+                parseFootnoteReferenceMoveCanonicalForBenchmark(input, countedMove: false),
+                "Counted ASCII footnote reference move must preserve parse result and parser position for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeInlineFootnoteReferenceMoveBenchmark(count: 140_000)
+
+        let recounting = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += parseFootnoteReferenceMoveChecksumForBenchmark(input, countedMove: false)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let counted = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += parseFootnoteReferenceMoveChecksumForBenchmark(input, countedMove: true)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] inline footnote reference recounting move: \(formatMilliseconds(recounting)) ms " +
+            "counted move: \(formatMilliseconds(counted)) ms " +
+            "speedup: \(formatRatio(recounting / max(counted, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            counted,
+            recounting,
+            "Inline footnote references should move with the byte count already discovered by scanning."
+        )
+        #endif
+    }
+
+    func testOptimization104_MentionUsernamesCopyAfterDomainRejection() throws {
+        let representativeInputs = [
+            "@octocat opened #42",
+            "Contact user@example.com please",
+            "Contact @example.com please",
+            "Multiple @example.com and @valid mentions",
+            "prefix@skip then (@alice)",
+            "@",
+            "Unicode café @example.com and @valid"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parseInlineForMentionUsernameCopyCanonicalForBenchmark(input, deferredCopy: true),
+                parseInlineForMentionUsernameCopyCanonicalForBenchmark(input, deferredCopy: false),
+                "Deferred mention username copy must preserve inline semantics and parser position for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeMentionUsernameCopyBenchmark(count: 40_000)
+
+        let copyBeforeReject = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    let inlines = parseInlineForMentionUsernameCopyBenchmark(input, deferredCopy: false)
+                    checksum &+= inlineNodesBenchmarkChecksum(inlines)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let copyAfterReject = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    let inlines = parseInlineForMentionUsernameCopyBenchmark(input, deferredCopy: true)
+                    checksum &+= inlineNodesBenchmarkChecksum(inlines)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] mention username copy-before-reject: \(formatMilliseconds(copyBeforeReject)) ms " +
+            "copy-after-reject: \(formatMilliseconds(copyAfterReject)) ms " +
+            "speedup: \(formatRatio(copyBeforeReject / max(copyAfterReject, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            copyAfterReject,
+            copyBeforeReject,
+            "Domain-like mention rejects should avoid materializing usernames before restoring parser state."
+        )
+        #endif
     }
 
     func testOptimization47_ASCIIAutolinksDetectSchemeWithBytes() {
@@ -1686,6 +2852,74 @@ final class PerformanceOptimizationTests: XCTestCase {
             copiedTrim,
             "ASCII inline code parsing should trim code span ranges before copying content."
         )
+    }
+
+    func testOptimization119_FailedASCIIInlineCodeSpansReuseBacktickScans() throws {
+        let representativeInputs: [(markdown: String, configuration: MarkdownConfiguration)] = [
+            ("`unclosed", .default),
+            ("``unclosed", .default),
+            ("` ``", .default),
+            ("` `` ``", .default),
+            ("`closed` then `unclosed", .default),
+            ("``code ` nested`` and ```tail", .default),
+            ("before `unclosed\nnext `line`", .default),
+            ("@octocat saw `unclosed and #42", .github),
+            ("repo/name has ``unclosed and https://example.com", .github)
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parseInlineForFailedCodeSpanCanonicalForBenchmark(
+                    input.markdown,
+                    configuration: input.configuration,
+                    cachedFailures: true
+                ),
+                parseInlineForFailedCodeSpanCanonicalForBenchmark(
+                    input.markdown,
+                    configuration: input.configuration,
+                    cachedFailures: false
+                ),
+                "Failed inline-code scan caching must preserve parsed output and parser position for \(input.markdown)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeFailedASCIIInlineCodeSpanBenchmark(documentCount: 120, runCount: 90)
+
+        let reprobing = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum &+= parseInlineFailedCodeSpanChecksumForBenchmark(input, cachedFailures: false)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let cached = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum &+= parseInlineFailedCodeSpanChecksumForBenchmark(input, cachedFailures: true)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] failed ascii inline code reprobing: \(formatMilliseconds(reprobing)) ms " +
+            "cached scan: \(formatMilliseconds(cached)) ms " +
+            "speedup: \(formatRatio(reprobing / max(cached, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            cached,
+            reprobing,
+            "Failed ASCII inline-code spans should reuse suffix scan facts instead of rescanning each opener."
+        )
+        #endif
     }
 
     func testOptimization17_OnePassASCIIEmphasisAvoidsDelimiterRetryScans() throws {
@@ -1961,6 +3195,576 @@ final class PerformanceOptimizationTests: XCTestCase {
         #endif
     }
 
+    func testOptimization96_GFMCandidateValidationSkipsImpossibleStartBytes() throws {
+        let representativeInputs = [
+            "Zyzz qrst uvxy before https://example.com/path and owner/repo",
+            "Plain qrst uvxyz before deadbeefcafebabe and swiftlang/swift-markdown#42",
+            "No candidate here, only qrst yz uvxy punctuation.",
+            "ffffftp://example.com remains text while owner/repo parses",
+            "abcdef1/repo stays a repository reference instead of a SHA prefix"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parseInlineForGFMCandidateValidationGateCanonicalForBenchmark(input, gated: true),
+                parseInlineForGFMCandidateValidationGateCanonicalForBenchmark(input, gated: false),
+                "Gated GFM candidate validation must preserve inline semantics and parser position for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeGFMCandidateValidationGateBenchmark(count: 14_000)
+
+        let ungated = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    let inlines = parseInlineForGFMCandidateValidationGateBenchmark(input, gated: false)
+                    checksum &+= inlineNodesBenchmarkChecksum(inlines)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let gated = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    let inlines = parseInlineForGFMCandidateValidationGateBenchmark(input, gated: true)
+                    checksum &+= inlineNodesBenchmarkChecksum(inlines)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] gfm candidate validation ungated: \(formatMilliseconds(ungated)) ms " +
+            "gated: \(formatMilliseconds(gated)) ms " +
+            "speedup: \(formatRatio(ungated / max(gated, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            gated,
+            ungated,
+            "GFM candidate validation should skip bytes that cannot start any enabled candidate."
+        )
+        #endif
+    }
+
+    func testOptimization94_GFMLeafParsersUseCountedASCIIMove() throws {
+        let representativeInputs = [
+            "@octocat fixed #42 with :rocket: in owner/repo",
+            "swiftlang/swift-markdown#512 references deadbeefcafebabe",
+            "Email test@example.com and :unknown_shortcode: should preserve fallback text",
+            "#999999999999999999999999999999999999999999 overflows back to text",
+            "prefixdeadbeefcafebabe is not a commit SHA",
+            "deadbeefcafebabeX is not a commit SHA"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parseInlineForGFMLeafMoveCanonicalForBenchmark(input, countedMove: true),
+                parseInlineForGFMLeafMoveCanonicalForBenchmark(input, countedMove: false),
+                "Counted GFM leaf moves must preserve inline semantics and parser position for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeGFMLeafMoveBenchmark(count: 16_000)
+
+        let recounting = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    let inlines = parseInlineForGFMLeafMoveBenchmark(input, countedMove: false)
+                    checksum &+= inlineNodesBenchmarkChecksum(inlines)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let counted = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    let inlines = parseInlineForGFMLeafMoveBenchmark(input, countedMove: true)
+                    checksum &+= inlineNodesBenchmarkChecksum(inlines)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] gfm leaf parser moves recounting: \(formatMilliseconds(recounting)) ms " +
+            "counted: \(formatMilliseconds(counted)) ms " +
+            "speedup: \(formatRatio(recounting / max(counted, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            counted,
+            recounting,
+            "GFM leaf parsers should move with byte counts already discovered by their UTF-8 scanners."
+        )
+        #endif
+    }
+
+    func testOptimization97_GFMLeafBoundaryChecksUseASCIIBytes() throws {
+        let representativeInputs = [
+            "@octocat fixed #42 with :rocket: in owner/repo and deadbeefcafebabe",
+            "Email test@example.com keeps text while @valid remains a mention",
+            "prefix@no abc#42 xdeadbeefcafebabe deadbeefcafebabeX",
+            "owner/repo#123 and owner/repo#not and @owner/repo",
+            "/owner/repo :owner/repo https://github.com/owner/repo",
+            "Upper ABCDEF1234567890 then swiftlang/swift-markdown#512"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parseInlineForGFMLeafBoundaryCanonicalForBenchmark(input, asciiBytes: true),
+                parseInlineForGFMLeafBoundaryCanonicalForBenchmark(input, asciiBytes: false),
+                "ASCII-byte GFM leaf boundary checks must preserve inline semantics and parser position for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeGFMLeafBoundaryBenchmark(count: 20_000)
+
+        let characterBoundaries = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    let inlines = parseInlineForGFMLeafBoundaryBenchmark(input, asciiBytes: false)
+                    checksum &+= inlineNodesBenchmarkChecksum(inlines)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let asciiByteBoundaries = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    let inlines = parseInlineForGFMLeafBoundaryBenchmark(input, asciiBytes: true)
+                    checksum &+= inlineNodesBenchmarkChecksum(inlines)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] gfm leaf boundary checks character: \(formatMilliseconds(characterBoundaries)) ms " +
+            "ascii bytes: \(formatMilliseconds(asciiByteBoundaries)) ms " +
+            "speedup: \(formatRatio(characterBoundaries / max(asciiByteBoundaries, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            asciiByteBoundaries,
+            characterBoundaries,
+            "GFM leaf parsers should reuse ASCII-byte boundary checks when the inline parser has proved ASCII input."
+        )
+        #endif
+    }
+
+    func testOptimization98_ASCIIInlineDispatchUsesByteSwitch() throws {
+        let representativeInputs: [(markdown: String, configuration: MarkdownConfiguration)] = [
+            ("Prefix before **bold** and _italic_ then `code`.", .default),
+            ("[link](https://example.com) and ![alt](https://example.com/image.png)", .default),
+            ("~~gone~~ <https://example.com> <span class=\"x\">html</span>", .github),
+            ("@octocat closed #42 with :rocket: in owner/repo#123.", .github),
+            ("https://example.com/path and www.example.com then deadbeefcafebabe.", .github),
+            ("Failed *marker and [link plus ! image and <not closed", .github),
+            ("Backslash \\*escape\\* and newline\nnext line stays conservative.", .github)
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parseInlineForASCIIByteDispatchCanonicalForBenchmark(
+                    input.markdown,
+                    configuration: input.configuration,
+                    byteDispatch: true
+                ),
+                parseInlineForASCIIByteDispatchCanonicalForBenchmark(
+                    input.markdown,
+                    configuration: input.configuration,
+                    byteDispatch: false
+                ),
+                "ASCII byte inline dispatch must preserve inline semantics and parser position for \(input.markdown)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeASCIIInlineByteDispatchBenchmark(count: 18_000)
+
+        let characterDispatch = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    let inlines = parseInlineForASCIIByteDispatchBenchmark(input, byteDispatch: false)
+                    checksum &+= inlineNodesBenchmarkChecksum(inlines)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let byteDispatch = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    let inlines = parseInlineForASCIIByteDispatchBenchmark(input, byteDispatch: true)
+                    checksum &+= inlineNodesBenchmarkChecksum(inlines)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] ascii inline character dispatch: \(formatMilliseconds(characterDispatch)) ms " +
+            "byte dispatch: \(formatMilliseconds(byteDispatch)) ms " +
+            "speedup: \(formatRatio(characterDispatch / max(byteDispatch, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            byteDispatch,
+            characterDispatch,
+            "ASCII inline dispatch should switch on the current byte instead of materializing a Character."
+        )
+        #endif
+    }
+
+    func testOptimization99_ASCIIBackslashEscapesUseByteDispatch() throws {
+        let representativeInputs: [(markdown: String, configuration: MarkdownConfiguration)] = [
+            ("Escaped \\*marker\\* and \\[bracket\\] stay text.", .default),
+            ("Escaped \\#42 \\@octocat \\:rocket: with github features.", .github),
+            ("Escaped \\! image and \\<tag> before owner/repo.", .github),
+            ("Escaped \\é should stay on the character path.", .default),
+            ("Trailing backslash at end \\", .default),
+            ("Backslash before newline \\\nnext line uses conservative path.", .github)
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parseInlineForASCIIEscapeDispatchCanonicalForBenchmark(
+                    input.markdown,
+                    configuration: input.configuration,
+                    byteEscapes: true
+                ),
+                parseInlineForASCIIEscapeDispatchCanonicalForBenchmark(
+                    input.markdown,
+                    configuration: input.configuration,
+                    byteEscapes: false
+                ),
+                "ASCII byte backslash dispatch must preserve inline semantics and parser position for \(input.markdown)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeASCIIBackslashEscapeDispatchBenchmark(count: 28_000)
+
+        let characterEscapes = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    let inlines = parseInlineForASCIIEscapeDispatchBenchmark(input, byteEscapes: false)
+                    checksum &+= inlineNodesBenchmarkChecksum(inlines)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let byteEscapes = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    let inlines = parseInlineForASCIIEscapeDispatchBenchmark(input, byteEscapes: true)
+                    checksum &+= inlineNodesBenchmarkChecksum(inlines)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] ascii backslash escapes character: \(formatMilliseconds(characterEscapes)) ms " +
+            "byte dispatch: \(formatMilliseconds(byteEscapes)) ms " +
+            "speedup: \(formatRatio(characterEscapes / max(byteEscapes, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            byteEscapes,
+            characterEscapes,
+            "ASCII backslash escapes should avoid Character dispatch after the inline byte scanner stops on a backslash."
+        )
+        #endif
+    }
+
+    func testOptimization100_SourceASCIIEligibilityIsReusedForInlineRanges() throws {
+        let representativeInputs: [(markdown: String, configuration: MarkdownConfiguration)] = [
+            (makeSourceASCIIInlineRangeBenchmark(sectionCount: 8), .github),
+            ("# Cafe\u{0301}\n\nParagraph with emoji \u{1F680} and **bold**.", .default),
+            ("## Heading\r\n\r\nParagraph with [link](https://example.com) and `code`.\r\n", .github),
+            ("> quoted **bold** line\n> [link](https://example.com)\n", .default),
+            ("- item with **bold**\n  continuation with [link](https://example.com)\n", .github)
+        ]
+
+        for input in representativeInputs {
+            ParserCanonicalSnapshot.assertSemanticallyEqual(
+                MarkdownParser.parse(input.markdown, configuration: input.configuration),
+                MarkdownParser.parseByScanningInlineRangeASCIIForTesting(
+                    input.markdown,
+                    configuration: input.configuration
+                ),
+                "Source ASCII inline-range reuse must preserve parser semantics."
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let markdown = makeSourceASCIIInlineRangeBenchmark(sectionCount: 900)
+
+        let perRangeScan = median((0..<5).map { _ in
+            timed {
+                let blocks = MarkdownParser.parseByScanningInlineRangeASCIIForTesting(
+                    markdown,
+                    configuration: .github
+                )
+                XCTAssertGreaterThan(blockArrayBenchmarkChecksum(blocks), 0)
+            }
+        })
+
+        let sourceASCIIReuse = median((0..<5).map { _ in
+            timed {
+                let blocks = MarkdownParser.parse(markdown, configuration: .github)
+                XCTAssertGreaterThan(blockArrayBenchmarkChecksum(blocks), 0)
+            }
+        })
+
+        print(
+            "[BENCH] source ascii inline ranges per-range scan: \(formatMilliseconds(perRangeScan)) ms " +
+            "source reuse: \(formatMilliseconds(sourceASCIIReuse)) ms " +
+            "speedup: \(formatRatio(perRangeScan / max(sourceASCIIReuse, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            sourceASCIIReuse,
+            perRangeScan,
+            "ASCII source parsing should reuse full-source eligibility for range-backed inline parses."
+        )
+        #endif
+    }
+
+    func testOptimization110_InlineFootnoteScanReusesSourceASCIIEligibility() throws {
+        let unicodePreprocess = MarkdownExtension(
+            id: "test.unicode-preprocess",
+            version: 1,
+            preprocess: { source in source.replacingOccurrences(of: "ASCII_EXTENSION_TOKEN", with: "cafe\u{301}") }
+        )
+        let extensionConfiguration = MarkdownConfiguration.default.addingExtension(unicodePreprocess)
+
+        let representativeInputs: [(markdown: String, configuration: MarkdownConfiguration)] = [
+            ("Plain ASCII paragraph with **bold** and [link](https://example.com).", .default),
+            ("Inline note ^[footnote **bold** text] after paragraph.", .default),
+            ("Two notes ^[first] and ^[second] with #123 in GitHub mode.", .github),
+            ("Unicode outside footnote cafe\u{301} and ^[ascii note].", .default),
+            ("Unicode only inside footnote ^[cafe\u{301} note] after ASCII text.", .default),
+            ("Malformed inline ^[unclosed note with cafe\u{301}", .default),
+            ("ASCII_EXTENSION_TOKEN in extension-controlled preprocessing.", extensionConfiguration)
+        ]
+
+        for input in representativeInputs {
+            ParserCanonicalSnapshot.assertSemanticallyEqual(
+                MarkdownParser.parse(input.markdown, configuration: input.configuration),
+                MarkdownParser.parseByRescanningSourceASCIIAfterInlineFootnotePreprocessForTesting(
+                    input.markdown,
+                    configuration: input.configuration
+                ),
+                "Reusing source ASCII from inline-footnote scanning must preserve parser semantics."
+            )
+
+            XCTAssertEqual(
+                MarkdownParser.inlineFootnoteScanSourceASCIIChecksumForTesting(
+                    input.markdown,
+                    reuseScanASCII: true
+                ),
+                MarkdownParser.inlineFootnoteScanSourceASCIIChecksumForTesting(
+                    input.markdown,
+                    reuseScanASCII: false
+                ),
+                "Inline-footnote source ASCII collection must match the separate source ASCII scan."
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeInlineFootnoteSourceASCIIBenchmark(count: 180_000)
+
+        let rescanned = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += MarkdownParser.inlineFootnoteScanSourceASCIIChecksumForTesting(
+                        input,
+                        reuseScanASCII: false
+                    )
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let reused = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += MarkdownParser.inlineFootnoteScanSourceASCIIChecksumForTesting(
+                        input,
+                        reuseScanASCII: true
+                    )
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] inline footnote scan plus source ascii rescan: \(formatMilliseconds(rescanned)) ms " +
+            "scan-carried ascii: \(formatMilliseconds(reused)) ms " +
+            "speedup: \(formatRatio(rescanned / max(reused, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            reused,
+            rescanned,
+            "Inline-footnote scanning should carry source ASCII eligibility instead of rescanning the source."
+        )
+        #endif
+    }
+
+    func testOptimization113_UnicodeSimpleBracketedLinkTextUsesUTF8Scan() throws {
+        let representativeInputs = [
+            "[café label](https://example.com/path)",
+            "[こんにちは ✅](https://example.com/path \"Title\")",
+            "[Résumé parser guide](https://example.com/docs)",
+            "[plain ASCII](https://example.com/path)",
+            "[outer [inner]](https://example.com/path)",
+            #"[escaped \] label](https://example.com/path)"#,
+            "[multi\nline](https://example.com/path)"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parseLinkBracketedTextScanCanonicalForBenchmark(input, optimized: true),
+                parseLinkBracketedTextScanCanonicalForBenchmark(input, optimized: false),
+                "UTF-8 simple bracketed link-text scan must preserve parse result and parser position for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let links = makeUnicodeSimpleBracketedLinksForParsingBenchmark(linkCount: 48_000)
+
+        let character = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for link in links {
+                    checksum &+= parseLinkBracketedTextScanChecksumForBenchmark(link, optimized: false)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let utf8 = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for link in links {
+                    checksum &+= parseLinkBracketedTextScanChecksumForBenchmark(link, optimized: true)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] unicode simple bracketed link text character scan: \(formatMilliseconds(character)) ms " +
+            "utf8 scan: \(formatMilliseconds(utf8)) ms " +
+            "speedup: \(formatRatio(character / max(utf8, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            utf8,
+            character,
+            "Unicode simple bracketed link text should scan ASCII delimiters with UTF-8 indices."
+        )
+        #endif
+    }
+
+    func testOptimization114_UnresolvedReferenceLinksSkipReferenceLabelScan() throws {
+        let representativeInputs = [
+            "[label][reference]",
+            "[label][]",
+            "[label][reference with spaces]",
+            "[outer [inner]][reference]",
+            "[label][unterminated",
+            "[label][reference] trailing",
+            "[label](https://example.com/path)",
+            "[café](https://example.com/path)"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parseLinkReferenceLabelScanCanonicalForBenchmark(input, optimized: true),
+                parseLinkReferenceLabelScanCanonicalForBenchmark(input, optimized: false),
+                "Skipping unresolved reference-style link label scan must preserve parse result and parser position for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let links = makeUnresolvedReferenceLinksForParsingBenchmark(linkCount: 120_000)
+
+        let scanned = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for link in links {
+                    checksum &+= parseLinkReferenceLabelScanChecksumForBenchmark(link, optimized: false)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let skipped = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for link in links {
+                    checksum &+= parseLinkReferenceLabelScanChecksumForBenchmark(link, optimized: true)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] unresolved reference link label scan: \(formatMilliseconds(scanned)) ms " +
+            "immediate restore: \(formatMilliseconds(skipped)) ms " +
+            "speedup: \(formatRatio(scanned / max(skipped, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            skipped,
+            scanned,
+            "Unsupported reference-style links should restore immediately instead of scanning an unused reference label."
+        )
+        #endif
+    }
+
     func testOptimization67_ASCIIListMarkerParsingAvoidsCharacterCursorLoop() throws {
         let representativeDocuments = [
             "- item\n- second\n",
@@ -2039,6 +3843,178 @@ final class PerformanceOptimizationTests: XCTestCase {
             ascii,
             character,
             "ASCII list marker parsing should avoid Character cursor scans for common list markers."
+        )
+        #endif
+    }
+
+    func testOptimization126_ASCIIListIndentScanAvoidsCharacterCursorLoop() throws {
+        let representativeDocuments = [
+            "- item\n- second\n",
+            " - item\n - second\n",
+            "  - item\n  - second\n",
+            "   - item\n   - second\n",
+            "    - four spaces is not a list marker here\n",
+            "  1. first\n  2) second\n",
+            "  ١. unicode fallback\n  ٢. second\n",
+            "\t- tab is not leading list indentation\n"
+        ]
+
+        for input in representativeDocuments {
+            let character = parseListIndentForBenchmark(input, utf8Indent: false)
+            let ascii = parseListIndentForBenchmark(input, utf8Indent: true)
+            let characterDescription = character.map { ParserCanonicalSnapshot.canonicalDescription(for: [$0]) } ?? "nil"
+            let asciiDescription = ascii.map { ParserCanonicalSnapshot.canonicalDescription(for: [$0]) } ?? "nil"
+            XCTAssertEqual(
+                asciiDescription,
+                characterDescription,
+                "ASCII list indentation scan must preserve list semantics for \(input)"
+            )
+        }
+
+        let representativeMarkers = [
+            "- item",
+            " - item",
+            "  * item",
+            "   + item",
+            "    - too deep",
+            "  123. ordered",
+            "\t- tab is not leading list indentation"
+        ]
+
+        for input in representativeMarkers {
+            XCTAssertEqual(
+                parseIndentedListMarkerSignatureForBenchmark(input, utf8Indent: true),
+                parseIndentedListMarkerSignatureForBenchmark(input, utf8Indent: false),
+                "ASCII list indentation scan must preserve marker semantics for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeASCIIListMarkerIndentBenchmark(count: 320_000)
+
+        let character = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += parseIndentedListMarkerSignatureForBenchmark(
+                        input,
+                        utf8Indent: false
+                    )?.utf8.count ?? 1
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let ascii = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += parseIndentedListMarkerSignatureForBenchmark(
+                        input,
+                        utf8Indent: true
+                    )?.utf8.count ?? 1
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] list marker indent character scan: \(formatMilliseconds(character)) ms " +
+            "utf8 scan: \(formatMilliseconds(ascii)) ms " +
+            "speedup: \(formatRatio(character / max(ascii, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            ascii,
+            character,
+            "ASCII list indentation scan should avoid Character cursor scans before common list markers."
+        )
+        #endif
+    }
+
+    func testOptimization127_ASCIIListMarkerMoveReusesScannedByteCount() throws {
+        let representativeDocuments = [
+            "- item\n- second\n",
+            "+ item\n+ second\n",
+            "1. first\n2) second\n",
+            "123456789. wide ordered marker\n123456790. next\n",
+            "   - indented\n   - next\n",
+            "١. unicode fallback\n٢. second\n",
+            "-not a list\n",
+            "1.not ordered\n"
+        ]
+
+        for input in representativeDocuments {
+            XCTAssertEqual(
+                parseListMarkerMoveCanonicalForBenchmark(input, countedMove: true),
+                parseListMarkerMoveCanonicalForBenchmark(input, countedMove: false),
+                "Counted ASCII list marker moves must preserve full list semantics and parser position for \(input)"
+            )
+        }
+
+        let representativeMarkers = [
+            "- item",
+            "* item",
+            "+ item",
+            "1. ordered",
+            "123456789. ordered",
+            "123456789) ordered",
+            "١. unicode fallback",
+            "-not a list",
+            "1.not ordered"
+        ]
+
+        for input in representativeMarkers {
+            XCTAssertEqual(
+                parseListMarkerMoveSignatureForBenchmark(input, countedMove: true),
+                parseListMarkerMoveSignatureForBenchmark(input, countedMove: false),
+                "Counted ASCII list marker moves must preserve marker semantics for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeASCIIListMarkerMoveBenchmark(count: 420_000)
+
+        let rescanned = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += parseListMarkerMoveSignatureForBenchmark(
+                        input,
+                        countedMove: false
+                    )?.utf8.count ?? 1
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let counted = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += parseListMarkerMoveSignatureForBenchmark(
+                        input,
+                        countedMove: true
+                    )?.utf8.count ?? 1
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] ascii list marker move rescanned: \(formatMilliseconds(rescanned)) ms " +
+            "counted: \(formatMilliseconds(counted)) ms " +
+            "speedup: \(formatRatio(rescanned / max(counted, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            counted,
+            rescanned,
+            "ASCII list marker parsing should reuse the scanned byte count instead of rescanning marker bytes."
         )
         #endif
     }
@@ -2609,6 +4585,84 @@ final class PerformanceOptimizationTests: XCTestCase {
         #endif
     }
 
+    func testOptimization105_JoinedTrimmedContentAvoidsMaterializedRangeArray() throws {
+        let representativeInputs = [
+            "   \n  first line\nmiddle line\nlast line   \n   ",
+            "single line",
+            "   ",
+            "\n\n  first\n\nsecond  \n\n",
+            "  **bold** text\n  [link](https://example.com)\n  trailing   "
+        ]
+
+        for source in representativeInputs {
+            let ranges = lineRangesExcludingTrailingNewlines(in: source)
+            let reservedUTF8Count = reservedUTF8CountForRanges(ranges, in: source)
+            XCTAssertEqual(
+                joinedTrimmedContentForBenchmark(
+                    source: source,
+                    ranges: ranges,
+                    reservedUTF8Count: reservedUTF8Count,
+                    materializeRanges: false
+                ),
+                joinedTrimmedContentForBenchmark(
+                    source: source,
+                    ranges: ranges,
+                    reservedUTF8Count: reservedUTF8Count,
+                    materializeRanges: true
+                ),
+                "Single-pass trimmed content join must preserve materialized-range semantics for \(source)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let (source, ranges, reservedUTF8Count) = makeJoinedTrimmedContentBenchmark(lineCount: 6_000)
+
+        let materialized = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for _ in 0..<60 {
+                    checksum &+= joinedTrimmedContentChecksumForBenchmark(
+                        source: source,
+                        ranges: ranges,
+                        reservedUTF8Count: reservedUTF8Count,
+                        materializeRanges: true
+                    )
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let singlePass = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for _ in 0..<60 {
+                    checksum &+= joinedTrimmedContentChecksumForBenchmark(
+                        source: source,
+                        ranges: ranges,
+                        reservedUTF8Count: reservedUTF8Count,
+                        materializeRanges: false
+                    )
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] joined trimmed content materialized ranges: \(formatMilliseconds(materialized)) ms " +
+            "single pass: \(formatMilliseconds(singlePass)) ms " +
+            "speedup: \(formatRatio(materialized / max(singlePass, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            singlePass,
+            materialized,
+            "Trimmed content joining should avoid building a temporary range array."
+        )
+        #endif
+    }
+
     func testOptimization78_ContentLineFastPathCombinesBlankAndCandidateScans() {
         let representativeInputs = [
             "",
@@ -2749,6 +4803,67 @@ final class PerformanceOptimizationTests: XCTestCase {
             recursive,
             "Paragraph-only blockquotes should avoid recursive block parsing and outperform the range-backed recursive path."
         )
+    }
+
+    func testOptimization91_BlockquoteLineScanCombinesClassification() throws {
+        let representativeInputs = [
+            "> Quote line 1\n> Quote line 2\n",
+            "> first paragraph\nlazy continuation line\n",
+            "> first paragraph\n>\n> second paragraph\n",
+            "> tabbed quote\n\t# lazy text after tab stays in quote\n",
+            "> first paragraph\n\u{0B}\n= lazy paragraph after ASCII whitespace\n",
+            "> quoted paragraph\noutside | table candidate\n",
+            "> quoted paragraph\n- outside list candidate\n",
+            "> café quoted\ncontinued 世界\n"
+        ]
+
+        for input in representativeInputs {
+            let separate = try XCTUnwrap(
+                parseBlockquoteForBenchmark(input, mode: .paragraphFastPathSeparateLineClassification),
+                input
+            )
+            let combined = try XCTUnwrap(parseBlockquoteForBenchmark(input, mode: .paragraphFastPath), input)
+            ParserCanonicalSnapshot.assertSemanticallyEqual(
+                [combined],
+                [separate],
+                "Combined blockquote line scan must preserve semantics for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let markdown = makeLazyASCIIBlockquoteLineScanBenchmark(lineCount: 8_000)
+
+        let separate = median((0..<5).map { _ in
+            timed {
+                let parsed = parseBlockquoteForBenchmark(
+                    markdown,
+                    mode: .paragraphFastPathSeparateLineClassification
+                )
+                XCTAssertGreaterThan(blockBenchmarkChecksum(parsed), 0)
+            }
+        })
+
+        let combined = median((0..<5).map { _ in
+            timed {
+                let parsed = parseBlockquoteForBenchmark(markdown, mode: .paragraphFastPath)
+                XCTAssertGreaterThan(blockBenchmarkChecksum(parsed), 0)
+            }
+        })
+
+        print(
+            "[BENCH] blockquote separate line scans: \(formatMilliseconds(separate)) ms " +
+            "combined line scan: \(formatMilliseconds(combined)) ms " +
+            "speedup: \(formatRatio(separate / max(combined, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            combined,
+            separate,
+            "Blockquote parsing should classify ASCII content lines while scanning to line end."
+        )
+        #endif
     }
 
     func testOptimization44_SingleLineBlockquoteParsesInlineFromSourceRange() throws {
@@ -3761,6 +5876,70 @@ final class PerformanceOptimizationTests: XCTestCase {
         )
     }
 
+    func testOptimization120_TableStartProbeReusesSeparatorAlignments() throws {
+        let representativeInputs = [
+            "| A | B | C |\n| --- | :---: | ---: |\n| 1 | 2 | 3 |",
+            "A | B\n--- | ---:\n1 | 2",
+            "| Name | Value |\n|\t---\t|\t---:\t|\n| key | value |",
+            "| Name | Value |\n| café- | ---: |\n| key | value |",
+            "| A | B |\n| x | y |",
+            "| A |\r\n| - |",
+            "plain paragraph\n| --- | --- |"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                tableSeparatorAlignmentParseCanonicalForBenchmark(input, reusedAlignments: true),
+                tableSeparatorAlignmentParseCanonicalForBenchmark(input, reusedAlignments: false),
+                "Reused table separator alignments must preserve parse result and parser position for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeTableSeparatorAlignmentReuseBenchmark(count: 90_000)
+
+        let reparsed = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum &+= tableSeparatorAlignmentParseChecksumForBenchmark(
+                        input,
+                        reusedAlignments: false
+                    )
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let reused = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum &+= tableSeparatorAlignmentParseChecksumForBenchmark(
+                        input,
+                        reusedAlignments: true
+                    )
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] table separator alignment reparse: \(formatMilliseconds(reparsed)) ms " +
+            "reused probe alignment: \(formatMilliseconds(reused)) ms " +
+            "speedup: \(formatRatio(reparsed / max(reused, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            reused,
+            reparsed,
+            "Table parsing should reuse separator alignments carried by the start probe."
+        )
+        #endif
+    }
+
     func testOptimization41_SetextProbeReuseAvoidsHeadingUnderlineRescan() {
         let representativeInputs = [
             "Heading\n===",
@@ -3990,6 +6169,125 @@ final class PerformanceOptimizationTests: XCTestCase {
         )
     }
 
+    func testOptimization109_FencedCodeUTF8ScanCarriesStateCounts() throws {
+        let representativeInputs = [
+            "```swift\nprint(\"hello\")\n```",
+            "````swift\n```nested literal\nlet value = 1\n````\nafter",
+            "~~~text\nalpha\nbeta\n~~~\nnext",
+            "```\nalpha\nbeta",
+            "```\nalpha\n",
+            "```",
+            "``\nnot a fence",
+            "```swift\nlet greeting = \"こんにちは\"\nprint(\"✅\")\n```",
+            "```\n```\n",
+            "```swift\nline one\nline two\n```\n"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                fencedCodeStateMoveCanonicalForBenchmark(input, countedMove: true),
+                fencedCodeStateMoveCanonicalForBenchmark(input, countedMove: false),
+                "Counted fenced-code state movement must preserve parse result and parser position for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeFencedCodeStateMoveBenchmark(count: 36_000)
+
+        let rescanned = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += fencedCodeStateMoveChecksumForBenchmark(input, countedMove: false)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let counted = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += fencedCodeStateMoveChecksumForBenchmark(input, countedMove: true)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] fenced code utf8 state rescan: \(formatMilliseconds(rescanned)) ms " +
+            "counted move: \(formatMilliseconds(counted)) ms " +
+            "speedup: \(formatRatio(rescanned / max(counted, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            counted,
+            rescanned,
+            "Fenced code parsing should carry state movement counts from the UTF-8 scan."
+        )
+        #endif
+    }
+
+    func testOptimization111_UnicodeFencedCodeParsingStaysOnUTF8Scan() throws {
+        let representativeInputs = [
+            "```swift\nlet greeting = \"こんにちは\"\nprint(\"✅\")\n```",
+            "```café\nalpha\n```",
+            "~~~text\ncafé résumé\nnaïve jalapeño\n~~~\nnext",
+            "```\nalpha\ncafé",
+            "```\nalpha café\n",
+            "```\ncode\n``` cierre",
+            "``\nnot a fence café"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                fencedCodeParseCanonicalForBenchmark(input, optimized: true),
+                fencedCodeParseCanonicalForBenchmark(input, optimized: false),
+                "Unicode fenced code UTF-8 scan must preserve parse result and parser position for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeUnicodeFencedCodeParseBenchmark(count: 48_000)
+
+        let characterScan = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += unicodeFencedCodeParseChecksumForBenchmark(input, optimized: false)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let utf8Scan = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += unicodeFencedCodeParseChecksumForBenchmark(input, optimized: true)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] unicode fenced code character parse: \(formatMilliseconds(characterScan)) ms " +
+            "utf8 parse: \(formatMilliseconds(utf8Scan)) ms " +
+            "speedup: \(formatRatio(characterScan / max(utf8Scan, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            utf8Scan,
+            characterScan,
+            "Unicode fenced code parsing should stay on the UTF-8 scanner instead of falling back to character scanning."
+        )
+        #endif
+    }
+
     func testOptimization58_ASCIIHorizontalRuleParsingAvoidsCharacterCursorLoop() {
         let representativeInputs = [
             "---",
@@ -4047,6 +6345,67 @@ final class PerformanceOptimizationTests: XCTestCase {
         )
     }
 
+    func testOptimization130_HorizontalRuleUTF8ScanCarriesStateCounts() throws {
+        let representativeInputs = [
+            "---",
+            " ---\nnext",
+            "   ***   \nnext",
+            "_ _ _",
+            "- - - - -",
+            "--",
+            "----x",
+            "    ---",
+            "---\r",
+            "***"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                horizontalRuleStateMoveCanonicalForBenchmark(input, countedStateMove: true),
+                horizontalRuleStateMoveCanonicalForBenchmark(input, countedStateMove: false),
+                "Counted horizontal-rule state move must preserve parse result and parser position for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeHorizontalRuleStateMoveBenchmark(count: 320_000)
+
+        let rescanned = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += horizontalRuleStateMoveChecksumForBenchmark(input, countedStateMove: false)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let counted = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += horizontalRuleStateMoveChecksumForBenchmark(input, countedStateMove: true)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] horizontal rule utf8 state rescan: \(formatMilliseconds(rescanned)) ms " +
+            "counted: \(formatMilliseconds(counted)) ms " +
+            "speedup: \(formatRatio(rescanned / max(counted, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            counted,
+            rescanned,
+            "Horizontal rule parsing should reuse state counts collected by its UTF-8 scan."
+        )
+        #endif
+    }
+
     func testOptimization59_ASCIIIndentedCodeParsingAvoidsCharacterCursorLoop() {
         let representativeInputs = [
             "    let x = 1\n    print(x)",
@@ -4100,6 +6459,67 @@ final class PerformanceOptimizationTests: XCTestCase {
             characterScan,
             "Indented code parsing should scan ASCII lines with UTF-8 indices."
         )
+    }
+
+    func testOptimization129_IndentedCodeUTF8ScanCarriesStateCounts() throws {
+        let representativeInputs = [
+            "    let x = 1\n    print(x)",
+            "    alpha\n        beta\n\n    gamma\nnext",
+            "    ",
+            "   not enough",
+            "    café",
+            "    line\r\n    next",
+            "        deeply indented\n    back",
+            "    alpha\n  paragraph",
+            "    first\n   \n    after blank",
+            "    first\n     \n    spaces-after-four"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                indentedCodeStateMoveCanonicalForBenchmark(input, countedStateMove: true),
+                indentedCodeStateMoveCanonicalForBenchmark(input, countedStateMove: false),
+                "Counted indented-code state move must preserve parse result and parser position for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeIndentedCodeParseBenchmark(count: 110_000)
+
+        let rescanned = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += indentedCodeStateMoveChecksumForBenchmark(input, countedStateMove: false)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let counted = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += indentedCodeStateMoveChecksumForBenchmark(input, countedStateMove: true)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] indented code utf8 state rescan: \(formatMilliseconds(rescanned)) ms " +
+            "counted: \(formatMilliseconds(counted)) ms " +
+            "speedup: \(formatRatio(rescanned / max(counted, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            counted,
+            rescanned,
+            "Indented code parsing should reuse state counts collected by its UTF-8 scan."
+        )
+        #endif
     }
 
     func testOptimization60_NonASCIIInlineRangesSkipRepeatedASCIIEligibilityScan() {
@@ -4392,6 +6812,1168 @@ final class PerformanceOptimizationTests: XCTestCase {
         #endif
     }
 
+    func testOptimization131_TableRowScanDefersFailedRowStateMove() throws {
+        let representativeTables = [
+            "| A | B |\n| - | - |\nplain paragraph",
+            "A | B\n--- | ---\nrow | cell\nplain continuation",
+            "| Name | Value |\n| --- | ---: |\n| row | code |\nemoji 😀 paragraph",
+            "| A | B |\n| - | - |\ncafe\u{301} paragraph",
+            "| A | B |\n| - | - |\ntabs\twithout\tpipe",
+            "| A | B |\n| - | - |\n",
+            "| A | B |\n| - | - |",
+            "| A | B |\n| - | - |\n| 1 | 2 |\n| 3 | 4 |\nplain"
+        ]
+
+        for input in representativeTables {
+            XCTAssertEqual(
+                tableFailedRowStateMoveCanonicalForBenchmark(input, deferred: true),
+                tableFailedRowStateMoveCanonicalForBenchmark(input, deferred: false),
+                "Deferred failed table row state movement must preserve parse result and parser position for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeTableFailedRowStateMoveBenchmark(count: 120_000)
+
+        let eagerMove = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += tableFailedRowStateMoveChecksumForBenchmark(input, deferred: false)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let deferredMove = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += tableFailedRowStateMoveChecksumForBenchmark(input, deferred: true)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] table failed row eager state move: \(formatMilliseconds(eagerMove)) ms " +
+            "deferred: \(formatMilliseconds(deferredMove)) ms " +
+            "speedup: \(formatRatio(eagerMove / max(deferredMove, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            deferredMove,
+            eagerMove,
+            "Table row collection should not advance and rewind parser state for the first non-table row."
+        )
+        #endif
+    }
+
+    func testOptimization81_InlineFootnoteMatcherUsesSingleByteLoop() throws {
+        let representativeInputs = [
+            "Plain text with no inline footnotes.",
+            "Plain carets ^ and ^^ without bracket markers.",
+            "Inline note ^[footnote here] end.",
+            "First ^[one] and second ^[two].",
+            "Unicode inline ^[cafe\u{301} and 😀] note.",
+            "Empty inline note ^[] stays literal.",
+            "Unclosed inline note ^[literal text",
+            "Broken then valid ^[unclosed and ^[valid] end"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                inlineFootnoteMatcherParseCanonicalForBenchmark(input, singlePass: true),
+                inlineFootnoteMatcherParseCanonicalForBenchmark(input, singlePass: false),
+                "Single-pass inline footnote matcher must preserve preprocessing semantics for \(input)"
+            )
+            XCTAssertEqual(
+                MarkdownParser.inlineFootnoteMatchCountForTesting(input, singlePass: true),
+                MarkdownParser.inlineFootnoteMatchCountForTesting(input, singlePass: false),
+                "Single-pass inline footnote matcher must find the same match count for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeInlineFootnoteMatcherBenchmark(count: 120_000)
+
+        let caretSearch = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += inlineFootnoteMatcherMatchChecksumForBenchmark(input, singlePass: false)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let singlePass = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += inlineFootnoteMatcherMatchChecksumForBenchmark(input, singlePass: true)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] inline footnote caret-search matcher: \(formatMilliseconds(caretSearch)) ms " +
+            "single byte loop: \(formatMilliseconds(singlePass)) ms " +
+            "speedup: \(formatRatio(caretSearch / max(singlePass, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            singlePass,
+            caretSearch,
+            "Inline footnote matching should scan once with a byte loop instead of repeated caret searches."
+        )
+        #endif
+    }
+
+    func testOptimization82_InlineLiteralRunAppendReusesScannedByteCount() throws {
+        let representativeInputs: [(String, MarkdownConfiguration)] = [
+            (
+                "Plain words before **bold** and after",
+                .default
+            ),
+            (
+                "Prefix before [link](https://example.com) suffix",
+                .default
+            ),
+            (
+                "owner/repo appears after prefix in github mode",
+                .github
+            ),
+            (
+                "https://example.com appears after prefix in github mode",
+                .github
+            ),
+            (
+                "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef appears after prefix",
+                .github
+            ),
+            (
+                "Line one before soft break\nline two with **bold**",
+                .default
+            ),
+            (
+                "Unicode café before **bold**",
+                .default
+            )
+        ]
+
+        for (input, configuration) in representativeInputs {
+            XCTAssertEqual(
+                parseInlineForLiteralRunByteCountBenchmark(
+                    input,
+                    knownByteCount: true,
+                    configuration: configuration
+                ),
+                parseInlineForLiteralRunByteCountBenchmark(
+                    input,
+                    knownByteCount: false,
+                    configuration: configuration
+                ),
+                "Known literal-run byte counts must preserve inline semantics for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeInlineLiteralRunByteCountBenchmark(count: 4_000)
+
+        let recounting = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    let inlines = parseInlineForLiteralRunByteCountBenchmark(
+                        input,
+                        knownByteCount: false,
+                        configuration: .default
+                    )
+                    checksum += inlineNodesBenchmarkChecksum(inlines)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let counted = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    let inlines = parseInlineForLiteralRunByteCountBenchmark(
+                        input,
+                        knownByteCount: true,
+                        configuration: .default
+                    )
+                    checksum += inlineNodesBenchmarkChecksum(inlines)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] inline literal run append recount bytes: \(formatMilliseconds(recounting)) ms " +
+            "known byte count: \(formatMilliseconds(counted)) ms " +
+            "speedup: \(formatRatio(recounting / max(counted, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            counted,
+            recounting,
+            "Inline literal runs should reuse the byte count already collected by the ASCII scanner."
+        )
+        #endif
+    }
+
+    func testOptimization83_AdvanceLineScansASCIIWithUTF8() throws {
+        let representativeInputs = [
+            "",
+            "\nblank after",
+            "plain line\nnext",
+            "plain line without trailing newline",
+            "   \t   \nnext",
+            "line\r\nnext",
+            "carriage\ronly\nnext",
+            "tabs\tand spaces\n",
+            "unicode café\nnext",
+            "emoji \u{1F680}\nnext",
+            "unterminated unicode café",
+            "combining cafe\u{301} without newline"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parserStateAdvanceLineSignature(input, optimized: true),
+                parserStateAdvanceLineSignature(input, optimized: false),
+                "ParserState.advanceLine must preserve cursor semantics for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let input = makeParserStateAdvanceLineBenchmark(lineCount: 140_000)
+
+        let character = median((0..<5).map { _ in
+            timed {
+                XCTAssertGreaterThan(parserStateAdvanceLineChecksum(input, optimized: false), 0)
+            }
+        })
+
+        let utf8 = median((0..<5).map { _ in
+            timed {
+                XCTAssertGreaterThan(parserStateAdvanceLineChecksum(input, optimized: true), 0)
+            }
+        })
+
+        print(
+            "[BENCH] parser state advanceLine character: \(formatMilliseconds(character)) ms " +
+            "utf8: \(formatMilliseconds(utf8)) ms " +
+            "speedup: \(formatRatio(character / max(utf8, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            utf8,
+            character,
+            "ParserState.advanceLine should find ASCII line endings with UTF-8 bytes instead of Character reads."
+        )
+        #endif
+    }
+
+    func testOptimization128_AdvanceToLineEndCarriesColumnCount() throws {
+        let representativeInputs: [(input: String, startOffset: Int)] = [
+            ("", 0),
+            ("\nblank after", 0),
+            ("plain line\nnext", 0),
+            ("plain line without trailing newline", 0),
+            ("   \t   \nnext", 0),
+            ("line\r\nnext", 0),
+            ("carriage\ronly\nnext", 0),
+            ("tabs\tand spaces\n", 0),
+            ("prefix plain line\nnext", 7),
+            ("prefix tabs\tand spaces\nnext", 7),
+            ("unicode café\nnext", 0),
+            ("emoji \u{1F680}\nnext", 0),
+            ("prefix unicode café\nnext", 7),
+            ("unterminated unicode café", 0),
+            ("combining cafe\u{301} without newline", 0)
+        ]
+
+        for (input, startOffset) in representativeInputs {
+            XCTAssertEqual(
+                parserStateAdvanceToLineEndSignature(input, startOffset: startOffset, optimized: true),
+                parserStateAdvanceToLineEndSignature(input, startOffset: startOffset, optimized: false),
+                "ParserState.advanceToLineEnd must preserve cursor semantics for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let input = makeParserStateAdvanceToLineEndBenchmark(lineCount: 220_000)
+
+        let distance = median((0..<5).map { _ in
+            timed {
+                XCTAssertGreaterThan(parserStateAdvanceToLineEndChecksum(input, optimized: false), 0)
+            }
+        })
+
+        let counted = median((0..<5).map { _ in
+            timed {
+                XCTAssertGreaterThan(parserStateAdvanceToLineEndChecksum(input, optimized: true), 0)
+            }
+        })
+
+        print(
+            "[BENCH] parser state advanceToLineEnd distance: \(formatMilliseconds(distance)) ms " +
+            "counted: \(formatMilliseconds(counted)) ms " +
+            "speedup: \(formatRatio(distance / max(counted, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            counted,
+            distance,
+            "ParserState.advanceToLineEnd should reuse the scan's column count instead of calling UTF-8 distance."
+        )
+        #endif
+    }
+
+    func testOptimization121_ForwardMoveUsesSingleUTF8AccountingPass() throws {
+        let representativeInputs = [
+            ("plain ascii line", 16),
+            ("prefix before target suffix", 20),
+            ("line one\nline two\nline three", 23),
+            ("line one\r\nline two\r\nline three", 25),
+            ("tabs\tand spaces before target", 18),
+            ("unicode café falls back safely", 20),
+            ("emoji \u{1F680} falls back safely", 12)
+        ]
+
+        for (input, offset) in representativeInputs {
+            XCTAssertEqual(
+                parserStateForwardMoveSignature(input, targetOffset: offset, optimized: true),
+                parserStateForwardMoveSignature(input, targetOffset: offset, optimized: false),
+                "ParserState.move(to:) must preserve forward cursor semantics for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeParserStateForwardMoveBenchmark(count: 240_000)
+
+        let advancing = median((0..<5).map { _ in
+            timed {
+                XCTAssertGreaterThan(parserStateForwardMoveChecksum(inputs, optimized: false), 0)
+            }
+        })
+
+        let moved = median((0..<5).map { _ in
+            timed {
+                XCTAssertGreaterThan(parserStateForwardMoveChecksum(inputs, optimized: true), 0)
+            }
+        })
+
+        print(
+            "[BENCH] parser state forward move advance loop: \(formatMilliseconds(advancing)) ms " +
+            "single utf8 accounting: \(formatMilliseconds(moved)) ms " +
+            "speedup: \(formatRatio(advancing / max(moved, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            moved,
+            advancing,
+            "ParserState.move(to:) should account ASCII forward movement in one local UTF-8 pass."
+        )
+        #endif
+    }
+
+    func testOptimization122_NestedEscapedBracketedLinkTextUsesUTF8BalancedScan() throws {
+        let representativeInputs = [
+            "[outer [inner]](http://example.com)",
+            "[deep [one [two]] label](https://example.com/path)",
+            #"[a \[b\]](http://example.com)"#,
+            #"[escaped \\ backslash and \] close](https://example.com)"#,
+            "[multi\nline [inner]](https://example.com)",
+            "[café [世界]](https://example.com/path)",
+            "[emoji ✅ [inner]](https://example.com/path)",
+            "[outer [inner]][ref]",
+            "[unterminated [inner](https://example.com)"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parseLinkBalancedBracketedTextScanCanonicalForBenchmark(input, optimized: true),
+                parseLinkBalancedBracketedTextScanCanonicalForBenchmark(input, optimized: false),
+                "UTF-8 balanced bracketed link-text scan must preserve parse result and parser position for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let links = makeNestedEscapedBracketedLinksForParsingBenchmark(linkCount: 90_000)
+
+        let character = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for link in links {
+                    checksum &+= parseLinkBalancedBracketedTextScanChecksumForBenchmark(link, optimized: false)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let utf8 = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for link in links {
+                    checksum &+= parseLinkBalancedBracketedTextScanChecksumForBenchmark(link, optimized: true)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] nested escaped bracketed link text character scan: \(formatMilliseconds(character)) ms " +
+            "utf8 balanced scan: \(formatMilliseconds(utf8)) ms " +
+            "speedup: \(formatRatio(character / max(utf8, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            utf8,
+            character,
+            "Nested or escaped bracketed link text should balance brackets with UTF-8 bytes before falling back."
+        )
+        #endif
+    }
+
+    func testOptimization123_BalancedLinkResourceDestinationUsesUTF8BackslashScan() throws {
+        let representativeResources = [
+            #"https://example.com/a(b)c)"#,
+            #"https://example.com/a(b(c)d)e)"#,
+            #"https://example.com/a\)b)"#,
+            #"   https://example.com/a(b)c   )"#,
+            #"https://example.com/a(b)c "Title")"#,
+            #"https://example.com/a(b)c 'Title')"#,
+            #"https://example.com/a(b)c (Title))"#,
+            #"https://example.com/café(a)b)"#,
+            #"https://example.com/unterminated(a"#
+        ]
+
+        for resource in representativeResources {
+            let character = parseBalancedInlineLinkResourceDestinationScanForBenchmark(resource, optimized: false)
+            let utf8 = parseBalancedInlineLinkResourceDestinationScanForBenchmark(resource, optimized: true)
+            switch (character, utf8) {
+            case let (character?, utf8?):
+                assertEqualInlineLinkResource(utf8, character, source: resource)
+            case (nil, nil):
+                continue
+            default:
+                XCTFail("UTF-8 destination backslash scan must preserve parse result for \(resource)")
+            }
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let resources = makeBalancedLinkResourcesForDestinationBackslashBenchmark(resourceCount: 72_000)
+
+        let character = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for resource in resources {
+                    if let parsed = parseBalancedInlineLinkResourceDestinationScanForBenchmark(
+                        resource,
+                        optimized: false
+                    ) {
+                        checksum &+= inlineLinkResourceBenchmarkChecksum(parsed, in: resource)
+                    }
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let utf8 = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for resource in resources {
+                    if let parsed = parseBalancedInlineLinkResourceDestinationScanForBenchmark(
+                        resource,
+                        optimized: true
+                    ) {
+                        checksum &+= inlineLinkResourceBenchmarkChecksum(parsed, in: resource)
+                    }
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] balanced link resource destination character backslash scan: \(formatMilliseconds(character)) ms " +
+            "utf8 backslash scan: \(formatMilliseconds(utf8)) ms " +
+            "speedup: \(formatRatio(character / max(utf8, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            utf8,
+            character,
+            "Balanced link resources should probe destination escapes with UTF-8 bytes."
+        )
+        #endif
+    }
+
+    func testOptimization124_BalancedLinkResourceMetadataUsesUTF8Scan() throws {
+        let representativeResources = [
+            #"https://example.com/a(b)c)"#,
+            #"https://example.com/a(b)c "Title")"#,
+            #"https://example.com/a(b)c 'Title')"#,
+            #"https://example.com/a(b)c (Title))"#,
+            #"   https://example.com/a(b)c   "Spaced title"   )"#,
+            #"https://example.com/a(b)c "Title \"quoted\"")"#,
+            #"https://example.com/a(b)c "Café 世界")"#,
+            #"https://example.com/a(b)c trailing-text)"#,
+            #"https://example.com/a(b)c "unterminated title)"#,
+            #"https://example.com/unterminated(a"#
+        ]
+
+        for resource in representativeResources {
+            let character = parseBalancedInlineLinkResourceMetadataScanForBenchmark(resource, optimized: false)
+            let utf8 = parseBalancedInlineLinkResourceMetadataScanForBenchmark(resource, optimized: true)
+            switch (character, utf8) {
+            case let (character?, utf8?):
+                assertEqualInlineLinkResource(utf8, character, source: resource)
+            case (nil, nil):
+                continue
+            default:
+                XCTFail("UTF-8 balanced resource metadata scan must preserve parse result for \(resource)")
+            }
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let resources = makeBalancedLinkResourcesForMetadataScanBenchmark(resourceCount: 96_000)
+
+        let character = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for resource in resources {
+                    if let parsed = parseBalancedInlineLinkResourceMetadataScanForBenchmark(
+                        resource,
+                        optimized: false
+                    ) {
+                        checksum &+= inlineLinkResourceBenchmarkChecksum(parsed, in: resource)
+                    }
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let utf8 = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for resource in resources {
+                    if let parsed = parseBalancedInlineLinkResourceMetadataScanForBenchmark(
+                        resource,
+                        optimized: true
+                    ) {
+                        checksum &+= inlineLinkResourceBenchmarkChecksum(parsed, in: resource)
+                    }
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] balanced link resource character metadata scan: \(formatMilliseconds(character)) ms " +
+            "utf8 metadata scan: \(formatMilliseconds(utf8)) ms " +
+            "speedup: \(formatRatio(character / max(utf8, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            utf8,
+            character,
+            "Balanced link resources should parse destination/title metadata with UTF-8 bytes."
+        )
+        #endif
+    }
+
+    func testOptimization125_ExtensionTriggersKeepASCIITextRunFastPath() throws {
+        let explicitTriggerConfiguration = MarkdownConfiguration.default.addingExtension(
+            makeBadgeExtensionForASCIITextRunBenchmark(triggered: true)
+        )
+        let emptyTriggerConfiguration = MarkdownConfiguration.default.addingExtension(
+            makeBadgeExtensionForASCIITextRunBenchmark(triggered: false)
+        )
+        let representativeInputs: [(String, MarkdownConfiguration)] = [
+            ("hello ::vip:: user", explicitTriggerConfiguration),
+            ("plain **bold** before ::vip:: and [link](https://example.com)", explicitTriggerConfiguration),
+            ("time 10:30 keeps failed trigger probes literal", explicitTriggerConfiguration),
+            ("show `::vip::` inside code", explicitTriggerConfiguration),
+            ("empty-trigger extension ::vip:: stays conservative", emptyTriggerConfiguration)
+        ]
+
+        for (input, configuration) in representativeInputs {
+            XCTAssertEqual(
+                parseInlineForExtensionAwareASCIITextRunBenchmark(input, configuration: configuration, optimized: true),
+                parseInlineForExtensionAwareASCIITextRunBenchmark(input, configuration: configuration, optimized: false),
+                "Extension-aware ASCII text runs must preserve inline parsing for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeExtensionAwareASCIITextRunBenchmark(count: 24_000)
+
+        let conservative = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    let inlines = parseInlineForExtensionAwareASCIITextRunBenchmark(
+                        input,
+                        configuration: explicitTriggerConfiguration,
+                        optimized: false
+                    )
+                    checksum &+= inlineNodesBenchmarkChecksum(inlines)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let extensionAware = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    let inlines = parseInlineForExtensionAwareASCIITextRunBenchmark(
+                        input,
+                        configuration: explicitTriggerConfiguration,
+                        optimized: true
+                    )
+                    checksum &+= inlineNodesBenchmarkChecksum(inlines)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] extension inline conservative character loop: \(formatMilliseconds(conservative)) ms " +
+            "extension-aware ascii runs: \(formatMilliseconds(extensionAware)) ms " +
+            "speedup: \(formatRatio(conservative / max(extensionAware, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            extensionAware,
+            conservative,
+            "Explicit-trigger extensions should keep ASCII literal-run scanning enabled."
+        )
+        #endif
+    }
+
+    func testOptimization84_EmptyLineSkipCombinesScanAndAdvance() throws {
+        let representativeInputs = [
+            "",
+            "\nnext",
+            "   \nnext",
+            "\t\t\nnext",
+            "      ",
+            "plain\n",
+            "  plain\n",
+            "\r\nnext",
+            " \r\nnext",
+            " café\nnext"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parserStateAdvanceIfEmptyLineSignature(input, optimized: true),
+                parserStateAdvanceIfEmptyLineSignature(input, optimized: false),
+                "Combined empty-line skip must preserve cursor semantics for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeEmptyLineScanningBenchmark(count: 180_000)
+
+        let separate = median((0..<5).map { _ in
+            timed {
+                XCTAssertGreaterThan(emptyLineSkipChecksum(inputs, optimized: false), 0)
+            }
+        })
+
+        let combined = median((0..<5).map { _ in
+            timed {
+                XCTAssertGreaterThan(emptyLineSkipChecksum(inputs, optimized: true), 0)
+            }
+        })
+
+        print(
+            "[BENCH] empty-line skip separate scan+advance: \(formatMilliseconds(separate)) ms " +
+            "combined: \(formatMilliseconds(combined)) ms " +
+            "speedup: \(formatRatio(separate / max(combined, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            combined,
+            separate,
+            "Empty-line skipping should classify and advance blank lines in one scan."
+        )
+        #endif
+    }
+
+    func testOptimization85_BlockDispatchScansLeadingSpacesAndMarkersWithUTF8() throws {
+        let representativeInputs = [
+            "# Heading\n",
+            "   # Heading\n",
+            "    indented code\n",
+            "```swift\nlet value = 1\n```\n",
+            "> quote\n",
+            "- item\n",
+            "1. item\n",
+            "***\n",
+            "plain paragraph\n",
+            "  plain paragraph\n",
+            "[^note]: footnote text\n",
+            "٩. unicode digit list\n",
+            "\tleading tab stays paragraph\n",
+            "café paragraph\n"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parseBlockStartDispatchSignatureForBenchmark(input, utf8Dispatch: true),
+                parseBlockStartDispatchSignatureForBenchmark(input, utf8Dispatch: false),
+                "UTF-8 block start dispatch must preserve parseBlock semantics for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeBlockStartDispatchBenchmark(count: 140_000)
+
+        let character = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += parseBlockStartDispatchChecksum(input, utf8Dispatch: false)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        let utf8 = median((0..<5).map { _ in
+            timed {
+                var checksum = 0
+                for input in inputs {
+                    checksum += parseBlockStartDispatchChecksum(input, utf8Dispatch: true)
+                }
+                XCTAssertGreaterThan(checksum, 0)
+            }
+        })
+
+        print(
+            "[BENCH] block start dispatch character: \(formatMilliseconds(character)) ms " +
+            "utf8: \(formatMilliseconds(utf8)) ms " +
+            "speedup: \(formatRatio(character / max(utf8, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            utf8,
+            character,
+            "Block dispatch should scan leading spaces and ASCII markers with UTF-8 bytes."
+        )
+        #endif
+    }
+
+    func testOptimization86_ContainerContentLineEndsUseUTF8Scan() throws {
+        let representativeListInputs = [
+            "plain list item\n  continuation line\n",
+            "[x] completed task\n  continuation with **bold**\n",
+            "[ ] pending task with [link](https://example.com)\n  more text\n",
+            "nested start\n  - nested item\n",
+            "unicode café\n  continuation\n",
+            "crlf line\r\n  continuation\r\n"
+        ]
+
+        for input in representativeListInputs {
+            XCTAssertEqual(
+                parseListItemLineEndSignatureForBenchmark(input, utf8LineEndScan: true),
+                parseListItemLineEndSignatureForBenchmark(input, utf8LineEndScan: false),
+                "UTF-8 list item line-end scan must preserve semantics for \(input)"
+            )
+        }
+
+        let representativeFootnotes = [
+            "[^a]: plain footnote\n    continuation line\n",
+            "[^task]: [x] task-like text\n    continuation with **bold**\n",
+            "[^nested]: intro\n    - nested item\n",
+            "[^unicode]: café\n    continuation\n",
+            "[^crlf]: first\r\n    continuation\r\n"
+        ]
+
+        for input in representativeFootnotes {
+            XCTAssertEqual(
+                parseFootnoteLineEndSignatureForBenchmark(input, utf8LineEndScan: true),
+                parseFootnoteLineEndSignatureForBenchmark(input, utf8LineEndScan: false),
+                "UTF-8 footnote line-end scan must preserve semantics for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeContainerLineEndScanBenchmark(count: 80_000)
+
+        let character = median((0..<5).map { _ in
+            timed {
+                XCTAssertGreaterThan(
+                    containerLineEndScanChecksum(inputs, utf8LineEndScan: false),
+                    0
+                )
+            }
+        })
+
+        let utf8 = median((0..<5).map { _ in
+            timed {
+                XCTAssertGreaterThan(
+                    containerLineEndScanChecksum(inputs, utf8LineEndScan: true),
+                    0
+                )
+            }
+        })
+
+        print(
+            "[BENCH] container line-end character scan: \(formatMilliseconds(character)) ms " +
+            "utf8: \(formatMilliseconds(utf8)) ms " +
+            "speedup: \(formatRatio(character / max(utf8, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            utf8,
+            character,
+            "Container content parsing should find ASCII line ends with UTF-8 bytes."
+        )
+        #endif
+    }
+
+    func testOptimization87_FailedBlockCandidatesRestoreFromMarks() throws {
+        let representativeTables = [
+            "A | B | C\n--- | ---\nparagraph after invalid table\n",
+            "| A | B |\n| :---x | --- |\nparagraph after invalid alignment\n",
+            "Name | Value\n--- | --- | ---\nparagraph after invalid separator\n"
+        ]
+
+        for input in representativeTables {
+            XCTAssertEqual(
+                parseTableCandidateRestoreSignatureForBenchmark(input, markRestore: true),
+                parseTableCandidateRestoreSignatureForBenchmark(input, markRestore: false),
+                "Table candidate restore must preserve semantics for \(input)"
+            )
+        }
+
+        let representativeFootnotes = [
+            "[^missing-colon] text\nnext line\n",
+            "[^unterminated label\nnext line\n",
+            "[^]: empty label\nnext line\n"
+        ]
+
+        for input in representativeFootnotes {
+            XCTAssertEqual(
+                parseFootnoteCandidateRestoreSignatureForBenchmark(input, markRestore: true),
+                parseFootnoteCandidateRestoreSignatureForBenchmark(input, markRestore: false),
+                "Footnote candidate restore must preserve semantics for \(input)"
+            )
+        }
+
+        let representativeBlocks = representativeTables + representativeFootnotes + [
+            "    indented code still parses\n",
+            "Heading\n---x\nparagraph fallback\n",
+            "plain paragraph after failed candidates\n"
+        ]
+
+        for input in representativeBlocks {
+            XCTAssertEqual(
+                parseBlockCandidateRestoreSignatureForBenchmark(input, markRestore: true),
+                parseBlockCandidateRestoreSignatureForBenchmark(input, markRestore: false),
+                "parseBlock candidate restore must preserve semantics for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeFailedBlockCandidateRestoreBenchmark(count: 120_000)
+
+        let indexMove = median((0..<5).map { _ in
+            timed {
+                XCTAssertGreaterThan(
+                    failedBlockCandidateRestoreChecksum(inputs, markRestore: false),
+                    0
+                )
+            }
+        })
+
+        let markRestore = median((0..<5).map { _ in
+            timed {
+                XCTAssertGreaterThan(
+                    failedBlockCandidateRestoreChecksum(inputs, markRestore: true),
+                    0
+                )
+            }
+        })
+
+        print(
+            "[BENCH] failed block candidate index restore: \(formatMilliseconds(indexMove)) ms " +
+            "mark restore: \(formatMilliseconds(markRestore)) ms " +
+            "speedup: \(formatRatio(indexMove / max(markRestore, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            markRestore,
+            indexMove,
+            "Failed block candidates should restore from saved marks instead of rescanning position."
+        )
+        #endif
+    }
+
+    func testOptimization88_ParagraphContinuationBreakRestoresFromMark() throws {
+        let representativeInputs = [
+            "Paragraph before list\n- list item\n- second item\n",
+            "Paragraph before ordered list\n42. ordered item\nnext line\n",
+            "Paragraph before quote\n> quoted line\n",
+            "Paragraph before heading\n## Heading\n",
+            "Paragraph before fence\n```swift\nlet value = 1\n```\n",
+            "Paragraph before thematic break\n***\n",
+            "Paragraph line one\ncontinued words stay in paragraph\n- list starts after continuation\n"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parseParagraphContinuationBreakRestoreSignatureForBenchmark(input, markRestore: true),
+                parseParagraphContinuationBreakRestoreSignatureForBenchmark(input, markRestore: false),
+                "Paragraph continuation break restore must preserve semantics for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeParagraphContinuationBreakRestoreBenchmark(count: 120_000)
+
+        let indexMove = median((0..<5).map { _ in
+            timed {
+                XCTAssertGreaterThan(
+                    paragraphContinuationBreakRestoreChecksum(inputs, markRestore: false),
+                    0
+                )
+            }
+        })
+
+        let markRestore = median((0..<5).map { _ in
+            timed {
+                XCTAssertGreaterThan(
+                    paragraphContinuationBreakRestoreChecksum(inputs, markRestore: true),
+                    0
+                )
+            }
+        })
+
+        print(
+            "[BENCH] paragraph continuation break index move: \(formatMilliseconds(indexMove)) ms " +
+            "mark restore: \(formatMilliseconds(markRestore)) ms " +
+            "speedup: \(formatRatio(indexMove / max(markRestore, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            markRestore,
+            indexMove,
+            "Paragraph continuation breaks should restore from a saved mark instead of rescanning position."
+        )
+        #endif
+    }
+
+    func testOptimization89_HTMLTagAttributeScanAvoidsIgnoredStringCopy() throws {
+        let representativeInputs = [
+            "<br>",
+            "</span>",
+            "<span class=\"name\" data-id=\"123\">",
+            "<a href=\"https://example.com?q=1\" title=\"A title\">",
+            "<custom-tag data-json='{\"k\":1}'>",
+            "<tag\nattr=\"value\">",
+            "<missing attr",
+            "<é attr=\"value\">"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parseHTMLTagAttributeScanCanonicalForBenchmark(input, optimized: true),
+                parseHTMLTagAttributeScanCanonicalForBenchmark(input, optimized: false),
+                "HTML tag attribute scan must preserve semantics for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeHTMLTagAttributeScanBenchmark(count: 180_000)
+
+        let copying = median((0..<5).map { _ in
+            timed {
+                XCTAssertGreaterThan(
+                    htmlTagAttributeScanChecksumForBenchmark(inputs, optimized: false),
+                    0
+                )
+            }
+        })
+
+        let rangeScan = median((0..<5).map { _ in
+            timed {
+                XCTAssertGreaterThan(
+                    htmlTagAttributeScanChecksumForBenchmark(inputs, optimized: true),
+                    0
+                )
+            }
+        })
+
+        print(
+            "[BENCH] html tag copied attribute scan: \(formatMilliseconds(copying)) ms " +
+            "range scan: \(formatMilliseconds(rangeScan)) ms " +
+            "speedup: \(formatRatio(copying / max(rangeScan, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            rangeScan,
+            copying,
+            "HTML tag parsing should avoid copying ignored attribute text."
+        )
+        #endif
+    }
+
+    func testOptimization101_HTMLTagNameScanAvoidsIgnoredStringCopy() throws {
+        let representativeInputs = [
+            "<br>",
+            "</span>",
+            "<span class=\"name\" data-id=\"123\">",
+            "<a href=\"https://example.com?q=1\" title=\"A title\">",
+            "<custom-tag data-json='{\"k\":1}'>",
+            "<tag\nattr=\"value\">",
+            "<missing attr",
+            "<1invalid>",
+            "<é attr=\"value\">"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parseHTMLTagNameScanCanonicalForBenchmark(input, optimized: true),
+                parseHTMLTagNameScanCanonicalForBenchmark(input, optimized: false),
+                "HTML tag-name scan must preserve semantics for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeHTMLTagAttributeScanBenchmark(count: 220_000)
+
+        let copying = median((0..<5).map { _ in
+            timed {
+                XCTAssertGreaterThan(
+                    htmlTagNameScanChecksumForBenchmark(inputs, optimized: false),
+                    0
+                )
+            }
+        })
+
+        let rangeScan = median((0..<5).map { _ in
+            timed {
+                XCTAssertGreaterThan(
+                    htmlTagNameScanChecksumForBenchmark(inputs, optimized: true),
+                    0
+                )
+            }
+        })
+
+        print(
+            "[BENCH] html tag copied name scan: \(formatMilliseconds(copying)) ms " +
+            "range scan: \(formatMilliseconds(rangeScan)) ms " +
+            "speedup: \(formatRatio(copying / max(rangeScan, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            rangeScan,
+            copying,
+            "HTML tag parsing should avoid copying the tag name when only emptiness is needed."
+        )
+        #endif
+    }
+
+    func testOptimization90_FootnoteDefinitionHeaderScansWithUTF8() throws {
+        let representativeInputs = [
+            "[^note]: plain footnote\n",
+            "[^long-label-with-dashes-and-123]: plain footnote\n    continuation\n",
+            "[^tight]:plain footnote without space\n",
+            "[^unicode-café]: unicode label falls back\n",
+            "[^missing-colon] text\nnext line\n",
+            "[^unterminated label\nnext line\n",
+            "[^]: empty label\nnext line\n"
+        ]
+
+        for input in representativeInputs {
+            XCTAssertEqual(
+                parseFootnoteHeaderScanSignatureForBenchmark(input, utf8HeaderScan: true),
+                parseFootnoteHeaderScanSignatureForBenchmark(input, utf8HeaderScan: false),
+                "UTF-8 footnote header scan must preserve semantics for \(input)"
+            )
+        }
+
+        #if DEBUG
+        throw XCTSkip("Timing benchmark; run in Release with ENABLE_TESTABILITY=YES")
+        #else
+        let inputs = makeFootnoteHeaderScanBenchmark(count: 70_000)
+
+        let character = median((0..<5).map { _ in
+            timed {
+                XCTAssertGreaterThan(
+                    footnoteHeaderScanChecksum(inputs, utf8HeaderScan: false),
+                    0
+                )
+            }
+        })
+
+        let utf8 = median((0..<5).map { _ in
+            timed {
+                XCTAssertGreaterThan(
+                    footnoteHeaderScanChecksum(inputs, utf8HeaderScan: true),
+                    0
+                )
+            }
+        })
+
+        print(
+            "[BENCH] footnote header character scan: \(formatMilliseconds(character)) ms " +
+            "utf8 scan: \(formatMilliseconds(utf8)) ms " +
+            "speedup: \(formatRatio(character / max(utf8, 0.0001)))x"
+        )
+
+        XCTAssertLessThan(
+            utf8,
+            character,
+            "Footnote definition headers should scan ASCII labels with UTF-8 bytes."
+        )
+        #endif
+    }
+
     // MARK: - Timing Helpers
 
     private func timed(_ block: () -> Void) -> TimeInterval {
@@ -4455,6 +8037,162 @@ final class PerformanceOptimizationTests: XCTestCase {
         }
 
         return input.distance(from: input.startIndex, to: state.currentIndex) ^ state.line ^ state.column
+    }
+
+    private func parserStateAdvanceLineSignature(_ input: String, optimized: Bool) -> String {
+        var state = ParserState(text: input)
+        if optimized {
+            state.advanceLine()
+        } else {
+            state.advanceLineByCharacterForTesting()
+        }
+
+        return "index:\(input.distance(from: input.startIndex, to: state.currentIndex))|" +
+            "line:\(state.line)|column:\(state.column)"
+    }
+
+    private func makeParserStateAdvanceLineBenchmark(lineCount: Int) -> String {
+        var input = ""
+        input.reserveCapacity(lineCount * 76)
+
+        for index in 0..<lineCount {
+            input += "Line \(index) with stable ASCII words, numbers \(index % 97), tabs\t, and spaces.\n"
+        }
+
+        return input
+    }
+
+    private func parserStateAdvanceLineChecksum(_ input: String, optimized: Bool) -> Int {
+        var state = ParserState(text: input)
+        var checksum = 0
+
+        while !state.isAtEnd {
+            if optimized {
+                state.advanceLine()
+            } else {
+                state.advanceLineByCharacterForTesting()
+            }
+            checksum &+= state.line &* 31 &+ state.column
+        }
+
+        return checksum
+    }
+
+    private func parserStateAdvanceToLineEndSignature(
+        _ input: String,
+        startOffset: Int,
+        optimized: Bool
+    ) -> String {
+        let boundedOffset = min(max(0, startOffset), input.count)
+        let start = input.index(input.startIndex, offsetBy: boundedOffset)
+        var state = ParserState(text: input)
+        state.move(to: start)
+
+        if optimized {
+            state.advanceToLineEnd()
+        } else {
+            state.advanceToLineEndByDistanceAccountingForTesting()
+        }
+
+        return "index:\(input.distance(from: input.startIndex, to: state.currentIndex))|" +
+            "line:\(state.line)|column:\(state.column)"
+    }
+
+    private func makeParserStateAdvanceToLineEndBenchmark(lineCount: Int) -> String {
+        var input = ""
+        input.reserveCapacity(lineCount * 80)
+
+        for index in 0..<lineCount {
+            input += "Line \(index) with stable ASCII words, numbers \(index % 97), tabs\t, and spaces.\n"
+        }
+
+        return input
+    }
+
+    private func parserStateAdvanceToLineEndChecksum(_ input: String, optimized: Bool) -> Int {
+        var state = ParserState(text: input)
+        state.enableASCIIFastPathIfPossible()
+        var checksum = 0
+
+        while !state.isAtEnd {
+            if optimized {
+                state.advanceToLineEnd()
+            } else {
+                state.advanceToLineEndByDistanceAccountingForTesting()
+            }
+            checksum &+= state.line &* 31 &+ state.column
+
+            if !state.isAtEnd {
+                state.advance()
+            }
+        }
+
+        return checksum
+    }
+
+    private func parserStateForwardMoveSignature(
+        _ input: String,
+        targetOffset: Int,
+        optimized: Bool
+    ) -> String {
+        let boundedOffset = min(targetOffset, input.count)
+        let target = input.index(input.startIndex, offsetBy: boundedOffset)
+        var state = ParserState(text: input)
+        state.enableASCIIFastPathIfPossible()
+
+        if optimized {
+            state.move(to: target)
+        } else {
+            state.advance(to: target)
+        }
+
+        return "index:\(input.distance(from: input.startIndex, to: state.currentIndex))|" +
+            "line:\(state.line)|column:\(state.column)"
+    }
+
+    private func makeParserStateForwardMoveBenchmark(count: Int) -> [String] {
+        var inputs: [String] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 5 {
+            case 0:
+                inputs.append("plain ascii move target \(index) with stable words and suffix")
+            case 1:
+                inputs.append("line one \(index)\nline two with more ASCII words\nline three target")
+            case 2:
+                inputs.append("tabs\tand spaces \(index)\tbefore target with trailing words")
+            case 3:
+                inputs.append("short \(index)")
+            default:
+                inputs.append("first \(index)\nsecond \(index)\nthird \(index)\nfourth \(index)")
+            }
+        }
+
+        return inputs
+    }
+
+    private func parserStateForwardMoveChecksum(_ inputs: [String], optimized: Bool) -> Int {
+        var checksum = 0
+
+        for input in inputs {
+            var state = ParserState(
+                text: input,
+                currentIndex: input.startIndex,
+                endIndex: input.endIndex,
+                asciiFastPath: true
+            )
+
+            if optimized {
+                state.move(to: input.endIndex)
+            } else {
+                state.advance(to: input.endIndex)
+            }
+
+            checksum &+= input.utf8.count &+ state.line &* 31 &+ state.column
+        }
+
+        return checksum
     }
 
     // MARK: - Item 24 Parallel Chunk Splitter
@@ -4857,6 +8595,124 @@ final class PerformanceOptimizationTests: XCTestCase {
         return GitHubEmojis.processEmojiShortcodes(text)
     }
 
+    private func makeInlineFootnoteMatcherBenchmark(count: Int) -> [String] {
+        var inputs: [String] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 8 {
+            case 0:
+                inputs.append("Plain paragraph \(index) with no caret markers and enough ASCII text for scanning.")
+            case 1:
+                inputs.append("Caret-heavy \(index) ^ value ^ power ^^ escaped-looking \\^ text without inline notes.")
+            case 2:
+                inputs.append("Inline note \(index) ^[footnote \(index) with **bold** and [link](https://example.com)] end.")
+            case 3:
+                inputs.append("Two notes \(index) ^[first \(index)] middle ^[second \(index)] done.")
+            case 4:
+                inputs.append("Malformed \(index) ^[unclosed inline note and later ^ marker without close")
+            case 5:
+                inputs.append("Empty \(index) ^[] then valid ^[filled \(index)]")
+            case 6:
+                inputs.append("Unicode \(index) ^[cafe\u{301} and 😀 value \(index)] after text.")
+            default:
+                inputs.append("Bracket noise \(index) ^ [spaced] and ^(paren) before ^[valid \(index)].")
+            }
+        }
+
+        return inputs
+    }
+
+    private func makeInlineFootnoteSourceASCIIBenchmark(count: Int) -> [String] {
+        var inputs: [String] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 8 {
+            case 0:
+                inputs.append("Plain ASCII paragraph \(index) with no inline footnote markers and stable words.")
+            case 1:
+                inputs.append("Caret noise \(index) with ^ markers, ^^ doubles, and spaced ^ [brackets].")
+            case 2:
+                inputs.append("Inline note \(index) ^[footnote \(index) with **bold** and [link](https://example.com)].")
+            case 3:
+                inputs.append("Two notes \(index) ^[first \(index)] middle text ^[second \(index)] ending.")
+            case 4:
+                inputs.append("Malformed \(index) ^[unclosed note followed by ASCII content and another ^ marker.")
+            case 5:
+                inputs.append("Definition-looking [^note\(index)] reference plus [^note\(index)]: definition text.")
+            case 6:
+                inputs.append("GitHub-ish \(index) @reviewer\(index % 97) #\(index) owner/repo and :rocket: shortcode.")
+            default:
+                inputs.append("Long ASCII run \(index) " + String(repeating: "word\(index % 31) ", count: 12))
+            }
+        }
+
+        return inputs
+    }
+
+    private func makeInlineFootnoteContiguousStorageBenchmark() -> [String] {
+        var documents: [String] = []
+        documents.reserveCapacity(6)
+
+        for seed in 0..<6 {
+            var document = "# Inline footnote storage benchmark \(seed)\n\n"
+            document.reserveCapacity(420_000)
+
+            for index in 0..<3_500 {
+                switch (index + seed) % 10 {
+                case 0:
+                    document += "Plain paragraph \(index) with no inline footnote markers and stable ASCII words.\n"
+                case 1:
+                    document += "Caret noise \(index) with ^ markers, ^^ doubles, and spaced ^ [brackets].\n"
+                case 2:
+                    document += "Inline note \(index) ^[footnote \(index) with **bold** and [link](https://example.com)].\n"
+                case 3:
+                    document += "Two notes \(index) ^[first \(index)] middle text ^[second \(index)] ending.\n"
+                case 4:
+                    document += "Malformed \(index) ^[unclosed note followed by ASCII content and another ^ marker.\n"
+                case 5:
+                    document += "Definition-looking [^note\(index)] reference plus [^note\(index)]: definition text.\n"
+                case 6:
+                    document += "Unicode \(index) cafe\u{301} with inline note ^[resume\u{301} text].\n"
+                case 7:
+                    document += "GitHub-ish \(index) @reviewer\(index % 97) #\(index) owner/repo and :rocket: shortcode.\n"
+                case 8:
+                    document += "Empty inline note \(index) ^[] then valid ^[filled \(index)] after literal text.\n"
+                default:
+                    document += "Long ASCII run \(index) " + String(repeating: "word\(index % 31) ", count: 12) + "\n"
+                }
+            }
+
+            documents.append(document)
+        }
+
+        return documents
+    }
+
+    private func inlineFootnoteMatcherParseCanonicalForBenchmark(
+        _ markdown: String,
+        singlePass: Bool
+    ) -> String {
+        let blocks: [MarkdownParser.BlockNode]
+        if singlePass {
+            blocks = MarkdownParser.parse(markdown, configuration: .default)
+        } else {
+            blocks = MarkdownParser.parseByCaretSearchInlineFootnotePreprocessForTesting(
+                markdown,
+                configuration: .default
+            )
+        }
+        return ParserCanonicalSnapshot.canonicalDescription(for: blocks)
+    }
+
+    private func inlineFootnoteMatcherMatchChecksumForBenchmark(
+        _ markdown: String,
+        singlePass: Bool
+    ) -> Int {
+        MarkdownParser.inlineFootnoteMatchCountForTesting(markdown, singlePass: singlePass) + markdown.utf8.count
+    }
+
     // MARK: - Item 7 Streaming Updates
 
     private func makeAppendOnlyStreamingUpdates(updateCount: Int) -> [String] {
@@ -5208,6 +9064,30 @@ final class PerformanceOptimizationTests: XCTestCase {
         return rows
     }
 
+    private func makeASCIITableRowsForSinglePassBenchmark(rowCount: Int) -> [String] {
+        var rows: [String] = []
+        rows.reserveCapacity(rowCount)
+
+        for row in 0..<rowCount {
+            switch row % 6 {
+            case 0:
+                rows.append("| alpha \(row) | beta \(row) | gamma \(row) |")
+            case 1:
+                rows.append("alpha \(row)|beta \(row)|gamma \(row)")
+            case 2:
+                rows.append("| **bold \(row)** | [doc](https://example.com/\(row)) | `code \(row)` |")
+            case 3:
+                rows.append("| | middle \(row) | |")
+            case 4:
+                rows.append("| left \(row)    |    center \(row)    | right \(row) |")
+            default:
+                rows.append("plain \(row)|*em \(row % 17)*|@octo #\(row % 500)")
+            }
+        }
+
+        return rows
+    }
+
     private func makeASCIITableAlignmentBenchmark(count: Int) -> [String] {
         var lines: [String] = []
         lines.reserveCapacity(count)
@@ -5282,10 +9162,25 @@ final class PerformanceOptimizationTests: XCTestCase {
         return markdown
     }
 
+    private func makeLazyASCIIBlockquoteLineScanBenchmark(lineCount: Int) -> String {
+        var markdown = "> quoted root line with ordinary ASCII words\n"
+        markdown.reserveCapacity(lineCount * 72)
+
+        for line in 0..<lineCount {
+            markdown += "lazy continuation \(line) with several ordinary words value \(line % 97)\n"
+            if line % 29 == 0 {
+                markdown += "> quoted reset \(line) with plain continuation words\n"
+            }
+        }
+
+        return markdown
+    }
+
     private enum BlockquoteBenchmarkMode {
         case copyingLines
         case recursiveRangeBacked
         case paragraphFastPathJoiningSingleRanges
+        case paragraphFastPathSeparateLineClassification
         case paragraphFastPath
     }
 
@@ -5308,6 +9203,8 @@ final class PerformanceOptimizationTests: XCTestCase {
             return BlockParser.parseBlockquoteByRecursivelyParsingJoinedContentForTesting(&state, configuration: .default)
         case .paragraphFastPathJoiningSingleRanges:
             return BlockParser.parseBlockquoteByJoiningSingleParagraphsForTesting(&state, configuration: .default)
+        case .paragraphFastPathSeparateLineClassification:
+            return BlockParser.parseBlockquoteBySeparateLineClassificationForTesting(&state, configuration: .default)
         case .paragraphFastPath:
             return BlockParser.parseBlockquote(&state, configuration: .default)
         }
@@ -5419,6 +9316,34 @@ final class PerformanceOptimizationTests: XCTestCase {
         return inputs
     }
 
+    private func makeParagraphContinuationBreakRestoreBenchmark(count: Int) -> [String] {
+        var inputs: [String] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 8 {
+            case 0:
+                inputs.append("Paragraph before list \(index)\n- list item \(index)\n- second item\n")
+            case 1:
+                inputs.append("Paragraph before ordered list \(index)\n\(index % 997 + 1). ordered item\nnext line\n")
+            case 2:
+                inputs.append("Paragraph before quote \(index)\n> quoted line \(index)\n")
+            case 3:
+                inputs.append("Paragraph before heading \(index)\n## Heading \(index)\n")
+            case 4:
+                inputs.append("Paragraph before fence \(index)\n```swift\nlet value = \(index)\n```\n")
+            case 5:
+                inputs.append("Paragraph before thematic break \(index)\n***\n")
+            case 6:
+                inputs.append("Paragraph \(index)\ncontinued words stay in paragraph \(index)\n- list starts after continuation\n")
+            default:
+                inputs.append("Paragraph \(index)\ncontinued words stay in paragraph \(index)\n> blockquote after continuation\n")
+            }
+        }
+
+        return inputs
+    }
+
     private func parseParagraphForBenchmark(
         _ markdown: String,
         copying: Bool
@@ -5467,6 +9392,50 @@ final class PerformanceOptimizationTests: XCTestCase {
             return BlockParser.parseParagraph(&state, configuration: .default)
         }
         return BlockParser.parseParagraphByRescanningContinuationLinesForTesting(&state, configuration: .default)
+    }
+
+    private func parseParagraphContinuationBreakRestoreSignatureForBenchmark(
+        _ markdown: String,
+        markRestore: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        let start = state.currentIndex
+        let block = parseParagraphContinuationBreakRestoreForBenchmark(&state, markRestore: markRestore)
+        let canonical = block.map { ParserCanonicalSnapshot.canonicalDescription(for: [$0]) } ?? "nil\n"
+        let offset = state.text.distance(from: start, to: state.currentIndex)
+        return "\(canonical)line:\(state.line),column:\(state.column),offset:\(offset)"
+    }
+
+    private func paragraphContinuationBreakRestoreChecksum(
+        _ inputs: [String],
+        markRestore: Bool
+    ) -> Int {
+        var checksum = 0
+
+        for input in inputs {
+            var state = ParserState(text: input)
+            let start = state.currentIndex
+            let block = parseParagraphContinuationBreakRestoreForBenchmark(&state, markRestore: markRestore)
+            checksum &+= blockBenchmarkChecksum(block)
+            checksum &+= state.line &* 31 &+ state.column
+            checksum &+= state.text.distance(from: start, to: state.currentIndex)
+        }
+
+        return checksum
+    }
+
+    private func parseParagraphContinuationBreakRestoreForBenchmark(
+        _ state: inout ParserState,
+        markRestore: Bool
+    ) -> MarkdownParser.BlockNode? {
+        if markRestore {
+            return BlockParser.parseParagraph(&state, configuration: .default)
+        }
+
+        return BlockParser.parseParagraphByMovingBackToContinuationBreakForTesting(
+            &state,
+            configuration: .default
+        )
     }
 
     private func parseKnownParagraphForBenchmark(
@@ -5557,6 +9526,444 @@ final class PerformanceOptimizationTests: XCTestCase {
             block = BlockParser.parseBlockBySeparateParagraphStartProbesForTesting(&state, configuration: .default)
         }
         return blockBenchmarkChecksum(block) + state.line + state.column
+    }
+
+    private func parseBlockStartDispatchSignatureForBenchmark(
+        _ markdown: String,
+        utf8Dispatch: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        let start = state.currentIndex
+        let block = utf8Dispatch
+            ? BlockParser.parseBlock(&state, configuration: .default)
+            : BlockParser.parseBlockByCharacterDispatchForTesting(&state, configuration: .default)
+
+        let canonical = block.map { ParserCanonicalSnapshot.canonicalDescription(for: [$0]) } ?? "nil\n"
+        let offset = state.text.distance(from: start, to: state.currentIndex)
+        return "\(canonical)line:\(state.line),column:\(state.column),offset:\(offset)"
+    }
+
+    private func parseBlockStartDispatchChecksum(
+        _ markdown: String,
+        utf8Dispatch: Bool
+    ) -> Int {
+        var state = ParserState(text: markdown)
+        let start = state.currentIndex
+        let block = utf8Dispatch
+            ? BlockParser.parseBlock(&state, configuration: .default)
+            : BlockParser.parseBlockByCharacterDispatchForTesting(&state, configuration: .default)
+        let offset = state.text.distance(from: start, to: state.currentIndex)
+        return blockBenchmarkChecksum(block) + state.line + state.column + offset
+    }
+
+    private func makeBlockStartDispatchBenchmark(count: Int) -> [String] {
+        var inputs: [String] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 12 {
+            case 0:
+                inputs.append("# Heading \(index)\n")
+            case 1:
+                inputs.append("   # Heading \(index)\n")
+            case 2:
+                inputs.append("plain paragraph \(index)\n")
+            case 3:
+                inputs.append("  plain paragraph \(index)\n")
+            case 4:
+                inputs.append("- item \(index)\n")
+            case 5:
+                inputs.append("\(index % 100). ordered item \(index)\n")
+            case 6:
+                inputs.append("***\n")
+            case 7:
+                inputs.append("> quote \(index)\n")
+            case 8:
+                inputs.append("```swift\nlet value = \(index)\n```\n")
+            case 9:
+                inputs.append("    indented code \(index)\n")
+            case 10:
+                inputs.append("[^note\(index)]: footnote \(index)\n")
+            default:
+                inputs.append("café paragraph \(index)\n")
+            }
+        }
+
+        return inputs
+    }
+
+    private func parseListItemLineEndSignatureForBenchmark(
+        _ markdown: String,
+        utf8LineEndScan: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        let item = utf8LineEndScan
+            ? BlockParser.parseListItemContent(&state, indent: 0, marker: "-", configuration: .github)
+            : BlockParser.parseListItemContentByCharacterLineEndScanningForTesting(
+                &state,
+                indent: 0,
+                marker: "-",
+                configuration: .github
+            )
+        let canonical = ParserCanonicalSnapshot.canonicalDescription(
+            for: [.list(ordered: false, tight: false, items: [item])]
+        )
+        let offset = markdown.distance(from: markdown.startIndex, to: state.currentIndex)
+        return "\(canonical)line:\(state.line),column:\(state.column),offset:\(offset)"
+    }
+
+    private func parseFootnoteLineEndSignatureForBenchmark(
+        _ markdown: String,
+        utf8LineEndScan: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        let block = utf8LineEndScan
+            ? BlockParser.parseFootnoteDefinition(&state, configuration: .github)
+            : BlockParser.parseFootnoteDefinitionByCharacterLineEndScanningForTesting(
+                &state,
+                configuration: .github
+            )
+        let canonical = block.map { ParserCanonicalSnapshot.canonicalDescription(for: [$0]) } ?? "nil\n"
+        let offset = markdown.distance(from: markdown.startIndex, to: state.currentIndex)
+        return "\(canonical)line:\(state.line),column:\(state.column),offset:\(offset)"
+    }
+
+    private func parseFootnoteHeaderScanSignatureForBenchmark(
+        _ markdown: String,
+        utf8HeaderScan: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        let block = utf8HeaderScan
+            ? BlockParser.parseFootnoteDefinition(&state, configuration: .github)
+            : BlockParser.parseFootnoteDefinitionByCharacterHeaderScanningForTesting(
+                &state,
+                configuration: .github
+            )
+        let canonical = block.map { ParserCanonicalSnapshot.canonicalDescription(for: [$0]) } ?? "nil\n"
+        let offset = markdown.distance(from: markdown.startIndex, to: state.currentIndex)
+        return "\(canonical)line:\(state.line),column:\(state.column),offset:\(offset)"
+    }
+
+    private func parseFootnoteContinuationPrefixSignatureForBenchmark(
+        _ markdown: String,
+        utf8Prefix: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        let block = utf8Prefix
+            ? BlockParser.parseFootnoteDefinition(&state, configuration: .github)
+            : BlockParser.parseFootnoteDefinitionByCharacterContinuationPrefixForTesting(
+                &state,
+                configuration: .github
+            )
+        let canonical = block.map { ParserCanonicalSnapshot.canonicalDescription(for: [$0]) } ?? "nil\n"
+        let offset = markdown.distance(from: markdown.startIndex, to: state.currentIndex)
+        return "\(canonical)line:\(state.line),column:\(state.column),offset:\(offset)"
+    }
+
+    private func makeFootnoteHeaderScanBenchmark(count: Int) -> [String] {
+        let repeatedLabel = String(repeating: "ascii-label-", count: 10)
+        var inputs: [String] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            inputs.append("[^note-\(index)-\(repeatedLabel)]: footnote \(index)\n")
+        }
+
+        return inputs
+    }
+
+    private func makeFootnoteContinuationPrefixBenchmark(count: Int) -> [String] {
+        var inputs: [String] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 6 {
+            case 0:
+                inputs.append(
+                    """
+                    [^note\(index)]: first line \(index)
+                        continuation \(index) with stable ASCII text
+                        final continuation \(index)
+                    """
+                )
+            case 1:
+                inputs.append(
+                    """
+                    [^tab\(index)]: first line \(index)
+                    \tcontinuation \(index) with `code`
+                    \tfinal continuation \(index)
+                    """
+                )
+            case 2:
+                inputs.append(
+                    """
+                    [^mixed\(index)]: first line \(index)
+                       \tcontinuation \(index) after spaces and tab
+                        final continuation \(index)
+                    """
+                )
+            case 3:
+                inputs.append(
+                    """
+                    [^short\(index)]: first line \(index)
+                       not a continuation \(index)
+                    trailing paragraph \(index)
+                    """
+                )
+            case 4:
+                inputs.append(
+                    """
+                    [^nested\(index)]: intro \(index)
+                        - nested item \(index)
+                        - second nested item \(index)
+                    """
+                )
+            default:
+                inputs.append(
+                    """
+                    [^link\(index)]: first line \(index)
+                        continuation \(index) with [link](https://example.com/\(index))
+                        continuation \(index) with **bold**
+                    """
+                )
+            }
+        }
+
+        return inputs
+    }
+
+    private func footnoteContinuationPrefixChecksum(
+        _ inputs: [String],
+        utf8Prefix: Bool
+    ) -> Int {
+        var checksum = 0
+
+        for input in inputs {
+            var state = ParserState(text: input)
+            let start = state.currentIndex
+            let block = utf8Prefix
+                ? BlockParser.parseFootnoteDefinition(&state, configuration: .github)
+                : BlockParser.parseFootnoteDefinitionByCharacterContinuationPrefixForTesting(
+                    &state,
+                    configuration: .github
+                )
+            checksum &+= blockBenchmarkChecksum(block)
+            checksum &+= state.line &* 47 &+ state.column
+            checksum &+= input.distance(from: start, to: state.currentIndex)
+        }
+
+        return checksum
+    }
+
+    private func footnoteHeaderScanChecksum(
+        _ inputs: [String],
+        utf8HeaderScan: Bool
+    ) -> Int {
+        var checksum = 0
+
+        for input in inputs {
+            var state = ParserState(text: input)
+            let start = state.currentIndex
+            let block = utf8HeaderScan
+                ? BlockParser.parseFootnoteDefinition(&state, configuration: .github)
+                : BlockParser.parseFootnoteDefinitionByCharacterHeaderScanningForTesting(
+                    &state,
+                    configuration: .github
+                )
+            checksum &+= blockBenchmarkChecksum(block)
+            checksum &+= state.line &* 43 &+ state.column
+            checksum &+= input.distance(from: start, to: state.currentIndex)
+        }
+
+        return checksum
+    }
+
+    private func makeContainerLineEndScanBenchmark(count: Int) -> [(list: String, footnote: String)] {
+        var inputs: [(list: String, footnote: String)] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            let list = """
+            [x] list item \(index) with plain ASCII text and `code`
+              continuation \(index) with [link](https://example.com/\(index))
+              final continuation \(index) with **bold** text
+            """
+            let footnote = """
+            [^note\(index)]: footnote \(index) with plain ASCII text and `code`
+                continuation \(index) with [link](https://example.com/\(index))
+                final continuation \(index) with **bold** text
+            """
+            inputs.append((list, footnote))
+        }
+
+        return inputs
+    }
+
+    private func containerLineEndScanChecksum(
+        _ inputs: [(list: String, footnote: String)],
+        utf8LineEndScan: Bool
+    ) -> Int {
+        var checksum = 0
+
+        for input in inputs {
+            var listState = ParserState(text: input.list)
+            let item = utf8LineEndScan
+                ? BlockParser.parseListItemContent(&listState, indent: 0, marker: "-", configuration: .github)
+                : BlockParser.parseListItemContentByCharacterLineEndScanningForTesting(
+                    &listState,
+                    indent: 0,
+                    marker: "-",
+                    configuration: .github
+                )
+            checksum &+= listItemBenchmarkChecksum(item)
+            checksum &+= listState.line &* 31 &+ listState.column
+
+            var footnoteState = ParserState(text: input.footnote)
+            let footnote = utf8LineEndScan
+                ? BlockParser.parseFootnoteDefinition(&footnoteState, configuration: .github)
+                : BlockParser.parseFootnoteDefinitionByCharacterLineEndScanningForTesting(
+                    &footnoteState,
+                    configuration: .github
+                )
+            checksum &+= blockBenchmarkChecksum(footnote)
+            checksum &+= footnoteState.line &* 37 &+ footnoteState.column
+        }
+
+        return checksum
+    }
+
+    private func parseBlockCandidateRestoreSignatureForBenchmark(
+        _ markdown: String,
+        markRestore: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        let start = state.currentIndex
+        let block = markRestore
+            ? BlockParser.parseBlock(&state, configuration: .github)
+            : BlockParser.parseBlockByIndexMoveCandidateRestoreForTesting(&state, configuration: .github)
+        let canonical = block.map { ParserCanonicalSnapshot.canonicalDescription(for: [$0]) } ?? "nil\n"
+        let offset = markdown.distance(from: start, to: state.currentIndex)
+        return "\(canonical)line:\(state.line),column:\(state.column),offset:\(offset)"
+    }
+
+    private func parseTableCandidateRestoreSignatureForBenchmark(
+        _ markdown: String,
+        markRestore: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        let start = state.currentIndex
+        let block = markRestore
+            ? BlockParser.parseTableUsingStartProbeForTesting(&state, configuration: .github)
+            : BlockParser.parseTableByIndexMoveCandidateRestoreForTesting(&state, configuration: .github)
+        let canonical = block.map { ParserCanonicalSnapshot.canonicalDescription(for: [$0]) } ?? "nil\n"
+        let offset = markdown.distance(from: start, to: state.currentIndex)
+        return "\(canonical)line:\(state.line),column:\(state.column),offset:\(offset)"
+    }
+
+    private func parseFootnoteCandidateRestoreSignatureForBenchmark(
+        _ markdown: String,
+        markRestore: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        let start = state.currentIndex
+        let block = markRestore
+            ? BlockParser.parseFootnoteDefinition(&state, configuration: .github)
+            : BlockParser.parseFootnoteDefinitionByIndexMoveCandidateRestoreForTesting(
+                &state,
+                configuration: .github
+            )
+        let canonical = block.map { ParserCanonicalSnapshot.canonicalDescription(for: [$0]) } ?? "nil\n"
+        let offset = markdown.distance(from: start, to: state.currentIndex)
+        return "\(canonical)line:\(state.line),column:\(state.column),offset:\(offset)"
+    }
+
+    private func makeFailedBlockCandidateRestoreBenchmark(
+        count: Int
+    ) -> [(block: String, table: String, footnote: String)] {
+        var inputs: [(block: String, table: String, footnote: String)] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            let table: String
+            switch index % 3 {
+            case 0:
+                table = """
+                A \(index) | B \(index) | C \(index)
+                --- | ---
+                paragraph after invalid table \(index)
+                """
+            case 1:
+                table = """
+                | A \(index) | B \(index) |
+                | :---x | --- |
+                paragraph after invalid alignment \(index)
+                """
+            default:
+                table = """
+                Name \(index) | Value \(index)
+                --- | --- | ---
+                paragraph after invalid separator \(index)
+                """
+            }
+
+            let footnote: String
+            switch index % 3 {
+            case 0:
+                footnote = "[^missing-colon-\(index)] text after label\nnext line \(index)\n"
+            case 1:
+                footnote = "[^unterminated-\(index)\nnext line \(index)\n"
+            default:
+                footnote = "[^]: empty label \(index)\nnext line \(index)\n"
+            }
+
+            let block = index.isMultiple(of: 2) ? table : footnote
+            inputs.append((block, table, footnote))
+        }
+
+        return inputs
+    }
+
+    private func failedBlockCandidateRestoreChecksum(
+        _ inputs: [(block: String, table: String, footnote: String)],
+        markRestore: Bool
+    ) -> Int {
+        var checksum = 0
+
+        for input in inputs {
+            var blockState = ParserState(text: input.block)
+            let start = blockState.currentIndex
+            let block = markRestore
+                ? BlockParser.parseBlock(&blockState, configuration: .github)
+                : BlockParser.parseBlockByIndexMoveCandidateRestoreForTesting(
+                    &blockState,
+                    configuration: .github
+                )
+            checksum &+= blockBenchmarkChecksum(block)
+            checksum &+= blockState.line &* 31 &+ blockState.column
+            checksum &+= input.block.distance(from: start, to: blockState.currentIndex)
+
+            var tableState = ParserState(text: input.table)
+            let table = markRestore
+                ? BlockParser.parseTableUsingStartProbeForTesting(&tableState, configuration: .github)
+                : BlockParser.parseTableByIndexMoveCandidateRestoreForTesting(
+                    &tableState,
+                    configuration: .github
+                )
+            checksum &+= blockBenchmarkChecksum(table)
+            checksum &+= tableState.line &* 37 &+ tableState.column
+
+            var footnoteState = ParserState(text: input.footnote)
+            let footnote = markRestore
+                ? BlockParser.parseFootnoteDefinition(&footnoteState, configuration: .github)
+                : BlockParser.parseFootnoteDefinitionByIndexMoveCandidateRestoreForTesting(
+                    &footnoteState,
+                    configuration: .github
+                )
+            checksum &+= blockBenchmarkChecksum(footnote)
+            checksum &+= footnoteState.line &* 41 &+ footnoteState.column
+        }
+
+        return checksum
     }
 
     private func makeBlockDispatchProbeEligibilityBenchmark(count: Int) -> [String] {
@@ -5677,6 +10084,31 @@ final class PerformanceOptimizationTests: XCTestCase {
             return state.isAtEmptyLine()
         }
         return state.isAtEmptyLineByCharacterScanningForTesting()
+    }
+
+    private func parserStateAdvanceIfEmptyLineSignature(_ input: String, optimized: Bool) -> String {
+        var state = ParserState(text: input)
+        let advanced = optimized
+            ? state.advanceIfAtEmptyLine()
+            : state.advanceIfAtEmptyLineBySeparateScanForTesting()
+
+        return "advanced:\(advanced)|index:\(input.distance(from: input.startIndex, to: state.currentIndex))|" +
+            "line:\(state.line)|column:\(state.column)"
+    }
+
+    private func emptyLineSkipChecksum(_ inputs: [String], optimized: Bool) -> Int {
+        var checksum = 0
+
+        for input in inputs {
+            var state = ParserState(text: input)
+            let advanced = optimized
+                ? state.advanceIfAtEmptyLine()
+                : state.advanceIfAtEmptyLineBySeparateScanForTesting()
+            checksum &+= advanced ? 17 : 3
+            checksum &+= state.line &* 31 &+ state.column
+        }
+
+        return checksum
     }
 
     private func makeBlankLineRangeScanningBenchmark(count: Int) -> [String] {
@@ -6043,6 +10475,30 @@ final class PerformanceOptimizationTests: XCTestCase {
         return inputs
     }
 
+    private func makeTableSeparatorAlignmentReuseBenchmark(count: Int) -> [String] {
+        var inputs: [String] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 6 {
+            case 0:
+                inputs.append("| A \(index) | B | C |\n| --- | :---: | ---: |")
+            case 1:
+                inputs.append("Name \(index) | Value | Status\n--- | ---: | :---:")
+            case 2:
+                inputs.append("| Key \(index) | Value |\n|\t---\t|\t---:\t|")
+            case 3:
+                inputs.append("| A \(index) | B |\n| :- | -: |\n| 1 | 2 |")
+            case 4:
+                inputs.append("| A \(index) | B |\n| ---- | ---- |")
+            default:
+                inputs.append("Left \(index) | Center | Right\n:--- | :---: | ---:")
+            }
+        }
+
+        return inputs
+    }
+
     private func tableParseCanonicalForBenchmark(
         _ markdown: String,
         optimized: Bool
@@ -6086,6 +10542,50 @@ final class PerformanceOptimizationTests: XCTestCase {
             return nil
         }
         return BlockParser.parseTableByRescanningStartLinesForTesting(&state, configuration: .github)
+    }
+
+    private func tableSeparatorAlignmentParseCanonicalForBenchmark(
+        _ markdown: String,
+        reusedAlignments: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        let block = parseTableSeparatorAlignmentForBenchmark(&state, reusedAlignments: reusedAlignments)
+        let canonical: String
+        if let block {
+            canonical = ParserCanonicalSnapshot.canonicalDescription(for: [block])
+        } else {
+            canonical = "nil"
+        }
+        return "\(canonical)|index:\(state.currentIndex)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func tableSeparatorAlignmentParseChecksumForBenchmark(
+        _ markdown: String,
+        reusedAlignments: Bool
+    ) -> Int {
+        var state = ParserState(text: markdown)
+        guard let block = parseTableSeparatorAlignmentForBenchmark(&state, reusedAlignments: reusedAlignments) else {
+            return state.line + state.column
+        }
+
+        if case let .table(header, rows) = block {
+            let headerChecksum = header.reduce(0) { $0 + tableCellBenchmarkChecksum($1) }
+            let rowChecksum = rows.flatMap { $0 }.reduce(0) { $0 + tableCellBenchmarkChecksum($1) }
+            return headerChecksum + rowChecksum + state.line + state.column
+        }
+
+        return state.line + state.column
+    }
+
+    private func parseTableSeparatorAlignmentForBenchmark(
+        _ state: inout ParserState,
+        reusedAlignments: Bool
+    ) -> MarkdownParser.BlockNode? {
+        if reusedAlignments {
+            return BlockParser.parseTableUsingStartProbeForTesting(&state, configuration: .github)
+        }
+
+        return BlockParser.parseTableByReparsingSeparatorAlignmentsForTesting(&state, configuration: .github)
     }
 
     private func makeSetextProbeReuseBenchmark(count: Int) -> [String] {
@@ -6182,6 +10682,84 @@ final class PerformanceOptimizationTests: XCTestCase {
         return inputs
     }
 
+    private func makeFencedCodeStateMoveBenchmark(count: Int) -> [String] {
+        func makeBody(index: Int, lineCount: Int) -> String {
+            var body = ""
+            body.reserveCapacity(lineCount * 72)
+            for line in 0..<lineCount {
+                if line > 0 {
+                    body += "\n"
+                }
+                body += "let value\(line) = \(index + line) // stable ascii payload for fenced code"
+            }
+            return body
+        }
+
+        var inputs: [String] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 6 {
+            case 0:
+                let body = makeBody(index: index, lineCount: 12)
+                inputs.append("```swift\n\(body)\n```")
+            case 1:
+                let body = makeBody(index: index, lineCount: 18)
+                inputs.append("~~~text\n\(body)\n~~~\nnext paragraph")
+            case 2:
+                let body = makeBody(index: index, lineCount: 24)
+                inputs.append("```\n\(body)")
+            case 3:
+                let body = makeBody(index: index, lineCount: 10)
+                inputs.append("````swift\n```nested literal \(index)\n\(body)\n````\nafter")
+            case 4:
+                let body = makeBody(index: index, lineCount: 16)
+                inputs.append("```json\n{\"index\": \(index)}\n\(body)\n```\n")
+            default:
+                let body = makeBody(index: index, lineCount: 8)
+                inputs.append("```\n\(body)\n")
+            }
+        }
+
+        return inputs
+    }
+
+    private func makeUnicodeFencedCodeParseBenchmark(count: Int) -> [String] {
+        var inputs: [String] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 6 {
+            case 0:
+                inputs.append(
+                    "```swift\nlet greeting = \"こんにちは \(index)\"\nprint(\"✅ \(index)\")\n```"
+                )
+            case 1:
+                inputs.append(
+                    "~~~text\ncafé résumé \(index)\nnaïve jalapeño \(index)\n~~~\nnext"
+                )
+            case 2:
+                inputs.append(
+                    "```json\n{\"message\":\"こんにちは \(index)\",\"emoji\":\"✅\"}\n```"
+                )
+            case 3:
+                inputs.append(
+                    "````café\nUnicode info \(index)\nline \(index)\n````"
+                )
+            case 4:
+                inputs.append(
+                    "```\nline \(index) 世界\nline \(index) café\n```\n"
+                )
+            default:
+                inputs.append(
+                    "```\nemoji ✅ \(index)\n"
+                )
+            }
+        }
+
+        return inputs
+    }
+
     private func makeHorizontalRuleParseBenchmark(count: Int) -> [String] {
         var inputs: [String] = []
         inputs.reserveCapacity(count)
@@ -6208,6 +10786,34 @@ final class PerformanceOptimizationTests: XCTestCase {
                 inputs.append("***\nnext")
             default:
                 inputs.append("paragraph \(index)")
+            }
+        }
+
+        return inputs
+    }
+
+    private func makeHorizontalRuleStateMoveBenchmark(count: Int) -> [String] {
+        var inputs: [String] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 8 {
+            case 0:
+                inputs.append("---")
+            case 1:
+                inputs.append(" ---\nnext")
+            case 2:
+                inputs.append("   ***   \nnext")
+            case 3:
+                inputs.append("_ _ _")
+            case 4:
+                inputs.append("- - - - -")
+            case 5:
+                inputs.append("***\nnext")
+            case 6:
+                inputs.append("___   ")
+            default:
+                inputs.append("--")
             }
         }
 
@@ -6399,6 +11005,36 @@ final class PerformanceOptimizationTests: XCTestCase {
         return inputs
     }
 
+    private func makeTableFailedRowStateMoveBenchmark(count: Int) -> [String] {
+        var inputs: [String] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 8 {
+            case 0:
+                inputs.append("| A \(index) | B |\n| - | - |\nplain paragraph \(index) without pipe")
+            case 1:
+                inputs.append("A \(index) | B\n--- | ---\nrow | cell\nplain continuation \(index)")
+            case 2:
+                inputs.append(
+                    "| Name | Value |\n| --- | ---: |\n| row \(index) | code |\nlong plain row \(index) with no separator"
+                )
+            case 3:
+                inputs.append("| A \(index) | B |\n| - | - |\nemoji 😀 paragraph \(index)")
+            case 4:
+                inputs.append("| A \(index) | B |\n| - | - |\ncafe\u{301} paragraph \(index)")
+            case 5:
+                inputs.append("| A \(index) | B |\n| - | - |\ntabs\twithout\tpipe \(index)")
+            case 6:
+                inputs.append("| A \(index) | B |\n| - | - |\n")
+            default:
+                inputs.append("| A \(index) | B |\n| - | - |\n| 1 | 2 |\n| 3 | 4 |\nplain \(index)")
+            }
+        }
+
+        return inputs
+    }
+
     private func tableRowPipeParseCanonicalForBenchmark(
         _ markdown: String,
         optimized: Bool
@@ -6435,6 +11071,37 @@ final class PerformanceOptimizationTests: XCTestCase {
     ) -> Int {
         var state = ParserState(text: markdown)
         guard let block = parseTableRowLineScanForBenchmark(&state, optimized: optimized) else {
+            return state.line + state.column
+        }
+
+        if case let .table(header, rows) = block {
+            return header.count + rows.count + state.line + state.column
+        }
+
+        return state.line + state.column
+    }
+
+    private func tableFailedRowStateMoveCanonicalForBenchmark(
+        _ markdown: String,
+        deferred: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        let block = parseTableFailedRowStateMoveForBenchmark(&state, deferred: deferred)
+        let canonical: String
+        if let block {
+            canonical = ParserCanonicalSnapshot.canonicalDescription(for: [block])
+        } else {
+            canonical = "nil"
+        }
+        return "\(canonical)|index:\(state.currentIndex)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func tableFailedRowStateMoveChecksumForBenchmark(
+        _ markdown: String,
+        deferred: Bool
+    ) -> Int {
+        var state = ParserState(text: markdown)
+        guard let block = parseTableFailedRowStateMoveForBenchmark(&state, deferred: deferred) else {
             return state.line + state.column
         }
 
@@ -6503,6 +11170,16 @@ final class PerformanceOptimizationTests: XCTestCase {
         return blockBenchmarkChecksum(block) + state.line + state.column
     }
 
+    private func unicodeFencedCodeParseChecksumForBenchmark(
+        _ markdown: String,
+        optimized: Bool
+    ) -> Int {
+        var state = ParserState(text: markdown)
+        let block = parseFencedCodeForBenchmark(&state, optimized: optimized)
+        let offset = markdown.distance(from: markdown.startIndex, to: state.currentIndex)
+        return blockBenchmarkChecksum(block) + offset + state.line + state.column
+    }
+
     private func parseFencedCodeForBenchmark(
         _ state: inout ParserState,
         optimized: Bool
@@ -6511,6 +11188,41 @@ final class PerformanceOptimizationTests: XCTestCase {
             return BlockParser.parseFencedCodeBlock(&state)
         }
         return BlockParser.parseFencedCodeBlockByCharacterScanningForTesting(&state)
+    }
+
+    private func fencedCodeStateMoveCanonicalForBenchmark(
+        _ markdown: String,
+        countedMove: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        let block = parseFencedCodeStateMoveForBenchmark(&state, countedMove: countedMove)
+        let canonical: String
+        if let block {
+            canonical = ParserCanonicalSnapshot.canonicalDescription(for: [block])
+        } else {
+            canonical = "nil"
+        }
+        return "\(canonical)|index:\(state.currentIndex)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func fencedCodeStateMoveChecksumForBenchmark(
+        _ markdown: String,
+        countedMove: Bool
+    ) -> Int {
+        var state = ParserState(text: markdown)
+        let block = parseFencedCodeStateMoveForBenchmark(&state, countedMove: countedMove)
+        let offset = markdown.distance(from: markdown.startIndex, to: state.currentIndex)
+        return blockBenchmarkChecksum(block) + offset + state.line + state.column
+    }
+
+    private func parseFencedCodeStateMoveForBenchmark(
+        _ state: inout ParserState,
+        countedMove: Bool
+    ) -> MarkdownParser.BlockNode? {
+        if countedMove {
+            return BlockParser.parseFencedCodeBlock(&state)
+        }
+        return BlockParser.parseFencedCodeBlockByRescanningUTF8StateForTesting(&state)
     }
 
     private func horizontalRuleParseCanonicalForBenchmark(
@@ -6547,6 +11259,40 @@ final class PerformanceOptimizationTests: XCTestCase {
         return BlockParser.parseHorizontalRuleByCharacterScanningForTesting(&state)
     }
 
+    private func horizontalRuleStateMoveCanonicalForBenchmark(
+        _ markdown: String,
+        countedStateMove: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        let block = parseHorizontalRuleStateMoveForBenchmark(&state, countedStateMove: countedStateMove)
+        let canonical: String
+        if let block {
+            canonical = ParserCanonicalSnapshot.canonicalDescription(for: [block])
+        } else {
+            canonical = "nil"
+        }
+        return "\(canonical)|index:\(state.currentIndex)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func horizontalRuleStateMoveChecksumForBenchmark(
+        _ markdown: String,
+        countedStateMove: Bool
+    ) -> Int {
+        var state = ParserState(text: markdown)
+        let block = parseHorizontalRuleStateMoveForBenchmark(&state, countedStateMove: countedStateMove)
+        return blockBenchmarkChecksum(block) + state.line + state.column
+    }
+
+    private func parseHorizontalRuleStateMoveForBenchmark(
+        _ state: inout ParserState,
+        countedStateMove: Bool
+    ) -> MarkdownParser.BlockNode? {
+        if countedStateMove {
+            return BlockParser.parseHorizontalRule(&state)
+        }
+        return BlockParser.parseHorizontalRuleByRescanningUTF8StateForTesting(&state)
+    }
+
     private func indentedCodeParseCanonicalForBenchmark(
         _ markdown: String,
         optimized: Bool
@@ -6571,6 +11317,30 @@ final class PerformanceOptimizationTests: XCTestCase {
         return blockBenchmarkChecksum(block) + state.line + state.column
     }
 
+    private func indentedCodeStateMoveCanonicalForBenchmark(
+        _ markdown: String,
+        countedStateMove: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        let block = parseIndentedCodeStateMoveForBenchmark(&state, countedStateMove: countedStateMove)
+        let canonical: String
+        if let block {
+            canonical = ParserCanonicalSnapshot.canonicalDescription(for: [block])
+        } else {
+            canonical = "nil"
+        }
+        return "\(canonical)|index:\(state.currentIndex)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func indentedCodeStateMoveChecksumForBenchmark(
+        _ markdown: String,
+        countedStateMove: Bool
+    ) -> Int {
+        var state = ParserState(text: markdown)
+        let block = parseIndentedCodeStateMoveForBenchmark(&state, countedStateMove: countedStateMove)
+        return blockBenchmarkChecksum(block) + state.line + state.column
+    }
+
     private func parseIndentedCodeForBenchmark(
         _ state: inout ParserState,
         optimized: Bool
@@ -6579,6 +11349,16 @@ final class PerformanceOptimizationTests: XCTestCase {
             return BlockParser.parseIndentedCodeBlock(&state)
         }
         return BlockParser.parseIndentedCodeBlockByCharacterScanningForTesting(&state)
+    }
+
+    private func parseIndentedCodeStateMoveForBenchmark(
+        _ state: inout ParserState,
+        countedStateMove: Bool
+    ) -> MarkdownParser.BlockNode? {
+        if countedStateMove {
+            return BlockParser.parseIndentedCodeBlock(&state)
+        }
+        return BlockParser.parseIndentedCodeBlockByRescanningUTF8StateForTesting(&state)
     }
 
     private func parseNonASCIIInlineRangeForBenchmark(
@@ -6674,6 +11454,16 @@ final class PerformanceOptimizationTests: XCTestCase {
             return BlockParser.parseTableUsingStartProbeForTesting(&state, configuration: .github)
         }
         return BlockParser.parseTableBySeparateRowLineAndPipeScansForTesting(&state, configuration: .github)
+    }
+
+    private func parseTableFailedRowStateMoveForBenchmark(
+        _ state: inout ParserState,
+        deferred: Bool
+    ) -> MarkdownParser.BlockNode? {
+        if deferred {
+            return BlockParser.parseTableUsingStartProbeForTesting(&state, configuration: .github)
+        }
+        return BlockParser.parseTableByEagerFailedRowStateMoveForTesting(&state, configuration: .github)
     }
 
     private func setextParseCanonicalForBenchmark(
@@ -6971,6 +11761,37 @@ final class PerformanceOptimizationTests: XCTestCase {
         return (source, ranges, reservedUTF8Count)
     }
 
+    private func makeJoinedTrimmedContentBenchmark(
+        lineCount: Int
+    ) -> (source: String, ranges: [Range<String.Index>], reservedUTF8Count: Int) {
+        var source = ""
+        source.reserveCapacity(lineCount * 72)
+        source += "   \n\n"
+
+        for line in 0..<lineCount {
+            switch line % 7 {
+            case 0:
+                source += "  **bold \(line)** and *italic* text with [link](https://example.com/\(line))\n"
+            case 1:
+                source += "plain middle line \(line) with `code` and stable ASCII words\n"
+            case 2:
+                source += "\n"
+            case 3:
+                source += "  trailing spaces line \(line) with words   \n"
+            case 4:
+                source += "    indented-ish paragraph line \(line) should stay as content\n"
+            case 5:
+                source += "[ref \(line)](https://example.com/docs/\(line)) plus text\n"
+            default:
+                source += "last-ish content \(line) before another paragraph marker\n"
+            }
+        }
+
+        source += "   \n\n"
+        let ranges = lineRangesExcludingTrailingNewlines(in: source)
+        return (source, ranges, reservedUTF8CountForRanges(ranges, in: source))
+    }
+
     private func lineRanges(in source: String) -> [Range<String.Index>] {
         var ranges: [Range<String.Index>] = []
         var lineStart = source.startIndex
@@ -6990,6 +11811,50 @@ final class PerformanceOptimizationTests: XCTestCase {
             ranges.append(lineStart..<source.endIndex)
         }
         return ranges
+    }
+
+    private func reservedUTF8CountForRanges(
+        _ ranges: [Range<String.Index>],
+        in source: String
+    ) -> Int {
+        ranges.reduce(0) { partial, range in
+            guard let lower = range.lowerBound.samePosition(in: source.utf8),
+                  let upper = range.upperBound.samePosition(in: source.utf8) else {
+                return partial + source[range].utf8.count
+            }
+            return partial + source.utf8.distance(from: lower, to: upper)
+        }
+    }
+
+    private func joinedTrimmedContentForBenchmark(
+        source: String,
+        ranges: [Range<String.Index>],
+        reservedUTF8Count: Int,
+        materializeRanges: Bool
+    ) -> String {
+        BlockParser.joinedTrimmedContentForTesting(
+            from: ranges,
+            in: source,
+            reservedUTF8Count: reservedUTF8Count,
+            materializeRanges: materializeRanges
+        )
+    }
+
+    private func joinedTrimmedContentChecksumForBenchmark(
+        source: String,
+        ranges: [Range<String.Index>],
+        reservedUTF8Count: Int,
+        materializeRanges: Bool
+    ) -> Int {
+        let content = joinedTrimmedContentForBenchmark(
+            source: source,
+            ranges: ranges,
+            reservedUTF8Count: reservedUTF8Count,
+            materializeRanges: materializeRanges
+        )
+        return content.utf8.count +
+            Int(content.utf8.first ?? 0) +
+            Int(content.utf8.last ?? 0)
     }
 
     private func plainTextParagraphHelperChecksum(
@@ -7028,6 +11893,17 @@ final class PerformanceOptimizationTests: XCTestCase {
         return BlockParser.parseListByCharacterMarkerParsingForTesting(&state, configuration: .github)
     }
 
+    private func parseListIndentForBenchmark(
+        _ markdown: String,
+        utf8Indent: Bool
+    ) -> MarkdownParser.BlockNode? {
+        var state = ParserState(text: markdown)
+        if utf8Indent {
+            return BlockParser.parseList(&state, configuration: .github)
+        }
+        return BlockParser.parseListByCharacterIndentScanningForTesting(&state, configuration: .github)
+    }
+
     private func parseListMarkerSignatureForBenchmark(
         _ markdown: String,
         optimized: Bool
@@ -7036,6 +11912,43 @@ final class PerformanceOptimizationTests: XCTestCase {
         return BlockParser.parseListMarkerSignatureForTesting(
             &state,
             useASCIIListMarkerFastPath: optimized
+        )
+    }
+
+    private func parseListMarkerMoveSignatureForBenchmark(
+        _ markdown: String,
+        countedMove: Bool
+    ) -> String? {
+        var state = ParserState(text: markdown)
+        return BlockParser.parseListMarkerSignatureForTesting(
+            &state,
+            useASCIIListMarkerFastPath: true,
+            useCountedASCIIListMarkerMove: countedMove
+        )
+    }
+
+    private func parseListMarkerMoveCanonicalForBenchmark(
+        _ markdown: String,
+        countedMove: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        let block = countedMove
+            ? BlockParser.parseList(&state, configuration: .github)
+            : BlockParser.parseListByRecountingASCIIListMarkerMoveForTesting(&state, configuration: .github)
+        let description = block.map { ParserCanonicalSnapshot.canonicalDescription(for: [$0]) } ?? "nil"
+        let offset = markdown.utf8.distance(from: markdown.utf8.startIndex, to: state.currentIndex)
+        return "\(description)|\(offset)|\(state.line)|\(state.column)"
+    }
+
+    private func parseIndentedListMarkerSignatureForBenchmark(
+        _ markdown: String,
+        utf8Indent: Bool
+    ) -> String? {
+        var state = ParserState(text: markdown)
+        return BlockParser.parseIndentedListMarkerSignatureForTesting(
+            &state,
+            limit: 3,
+            useASCIIListIndentFastPath: utf8Indent
         )
     }
 
@@ -7057,6 +11970,58 @@ final class PerformanceOptimizationTests: XCTestCase {
                 inputs.append("\(index % 1_000)) ordered \(index)")
             default:
                 inputs.append("- task-like [ ] item \(index)")
+            }
+        }
+
+        return inputs
+    }
+
+    private func makeASCIIListMarkerMoveBenchmark(count: Int) -> [String] {
+        var inputs: [String] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 6 {
+            case 0:
+                inputs.append("- item \(index)")
+            case 1:
+                inputs.append("* item \(index)")
+            case 2:
+                inputs.append("+ item \(index)")
+            case 3:
+                inputs.append("\(100_000_000 + index). ordered \(index)")
+            case 4:
+                inputs.append("\(100_000_000 + index)) ordered \(index)")
+            default:
+                inputs.append("123456789. stable ordered \(index)")
+            }
+        }
+
+        return inputs
+    }
+
+    private func makeASCIIListMarkerIndentBenchmark(count: Int) -> [String] {
+        var inputs: [String] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 8 {
+            case 0:
+                inputs.append("- item \(index)")
+            case 1:
+                inputs.append(" - item \(index)")
+            case 2:
+                inputs.append("  * item \(index)")
+            case 3:
+                inputs.append("   + item \(index)")
+            case 4:
+                inputs.append(" \(index % 1_000). ordered \(index)")
+            case 5:
+                inputs.append("  \(index % 1_000)) ordered \(index)")
+            case 6:
+                inputs.append("   - task-like [ ] item \(index)")
+            default:
+                inputs.append("   9. final ordered \(index)")
             }
         }
 
@@ -7131,6 +12096,150 @@ final class PerformanceOptimizationTests: XCTestCase {
             marker: "-",
             configuration: .github
         )
+    }
+
+    private func parseSingleLineListItemRangeReuseForBenchmark(
+        _ markdown: String,
+        reuseSingleTrimmedRange: Bool
+    ) -> MarkdownParser.ListItem {
+        var state = ParserState(text: markdown)
+        if reuseSingleTrimmedRange {
+            return BlockParser.parseListItemContent(&state, indent: 0, marker: "-", configuration: .github)
+        }
+        return BlockParser.parseListItemContentByRecomputingSingleTrimmedRangeForTesting(
+            &state,
+            indent: 0,
+            marker: "-",
+            configuration: .github
+        )
+    }
+
+    private func makeTaskMarkerBytePeekBenchmark(count: Int) -> [String] {
+        var inputs: [String] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 8 {
+            case 0:
+                inputs.append("[x] done \(index)")
+            case 1:
+                inputs.append("[X] uppercase \(index)")
+            case 2:
+                inputs.append("[ ] todo \(index)")
+            case 3:
+                inputs.append("[o] malformed \(index)")
+            case 4:
+                inputs.append("[x]missing trailing space \(index)")
+            case 5:
+                inputs.append("[ ] café \(index)")
+            case 6:
+                inputs.append("plain item \(index)")
+            default:
+                inputs.append("[ ] ")
+            }
+        }
+
+        return inputs
+    }
+
+    private func makeListItemContinuationPrefixBenchmark(count: Int) -> [String] {
+        var inputs: [String] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 6 {
+            case 0:
+                inputs.append(
+                    """
+                    first line \(index)
+                      continuation \(index) with stable ASCII text
+                      final continuation \(index)
+                    """
+                )
+            case 1:
+                inputs.append(
+                    """
+                    [x] completed \(index)
+                      continuation \(index) with `code`
+                      trailing continuation \(index)
+                    """
+                )
+            case 2:
+                inputs.append(
+                    """
+                    first line \(index)
+                        over-indented continuation \(index)
+                      normal continuation \(index)
+                    """
+                )
+            case 3:
+                inputs.append(
+                    """
+                    first line \(index)
+                      - nested list item \(index)
+                    """
+                )
+            case 4:
+                inputs.append(
+                    """
+                    first line \(index)
+                      1. ordered nested item \(index)
+                    """
+                )
+            default:
+                inputs.append(
+                    """
+                    first line \(index)
+                      continuation \(index) with [link](https://example.com/\(index))
+                      continuation \(index) with **bold**
+                    """
+                )
+            }
+        }
+
+        return inputs
+    }
+
+    private func parseTaskMarkerListItemForBenchmark(
+        _ markdown: String,
+        utf8TaskMarker: Bool
+    ) -> (item: MarkdownParser.ListItem, offset: Int, line: Int, column: Int) {
+        var state = ParserState(text: markdown)
+        let item: MarkdownParser.ListItem
+        if utf8TaskMarker {
+            item = BlockParser.parseListItemContent(&state, indent: 0, marker: "-", configuration: .github)
+        } else {
+            item = BlockParser.parseListItemContentByPeekingTaskMarkerForTesting(
+                &state,
+                indent: 0,
+                marker: "-",
+                configuration: .github
+            )
+        }
+
+        let offset = markdown.utf8.distance(from: markdown.utf8.startIndex, to: state.currentIndex)
+        return (item, offset, state.line, state.column)
+    }
+
+    private func parseListItemContinuationPrefixForBenchmark(
+        _ markdown: String,
+        utf8Prefix: Bool
+    ) -> (item: MarkdownParser.ListItem, offset: Int, line: Int, column: Int) {
+        var state = ParserState(text: markdown)
+        let item: MarkdownParser.ListItem
+        if utf8Prefix {
+            item = BlockParser.parseListItemContent(&state, indent: 0, marker: "-", configuration: .github)
+        } else {
+            item = BlockParser.parseListItemContentByCharacterContinuationPrefixForTesting(
+                &state,
+                indent: 0,
+                marker: "-",
+                configuration: .github
+            )
+        }
+
+        let offset = markdown.utf8.distance(from: markdown.utf8.startIndex, to: state.currentIndex)
+        return (item, offset, state.line, state.column)
     }
 
     private func listItemBenchmarkChecksum(_ item: MarkdownParser.ListItem) -> Int {
@@ -7216,6 +12325,66 @@ final class PerformanceOptimizationTests: XCTestCase {
         return links
     }
 
+    private func makeASCIILinksForBracketedTextMoveBenchmark(linkCount: Int) -> [String] {
+        var links: [String] = []
+        links.reserveCapacity(linkCount)
+
+        for index in 0..<linkCount {
+            links.append(
+                "[Glimmer parser performance guide \(index) with inline markers **bold** and `code`]" +
+                "(https://example.com/docs/\(index)?ref=glimmer \"Title \(index)\")"
+            )
+        }
+
+        return links
+    }
+
+    private func makeUnicodeSimpleBracketedLinksForParsingBenchmark(linkCount: Int) -> [String] {
+        var links: [String] = []
+        links.reserveCapacity(linkCount)
+
+        for index in 0..<linkCount {
+            switch index % 6 {
+            case 0:
+                links.append("[Glimmer café guide \(index)](https://example.com/docs/\(index))")
+            case 1:
+                links.append("[こんにちは parser \(index)](https://example.com/docs/\(index) \"Title \(index)\")")
+            case 2:
+                links.append("[Résumé parser guide \(index)](https://example.com/docs/\(index))")
+            case 3:
+                links.append("[Emoji ✅ performance \(index)](https://example.com/docs/\(index))")
+            case 4:
+                links.append("[Mixed ASCII and 世界 \(index)](https://example.com/docs/\(index))")
+            default:
+                links.append("[naïve jalapeño parser \(index)](https://example.com/docs/\(index))")
+            }
+        }
+
+        return links
+    }
+
+    private func makeNestedEscapedBracketedLinksForParsingBenchmark(linkCount: Int) -> [String] {
+        var links: [String] = []
+        links.reserveCapacity(linkCount)
+
+        for index in 0..<linkCount {
+            switch index % 5 {
+            case 0:
+                links.append("[Guide [parser \(index)] details](https://example.com/docs/\(index))")
+            case 1:
+                links.append(#"[Escaped \[brackets \] guide \#(index)](https://example.com/docs/\#(index))"#)
+            case 2:
+                links.append("[Deep [one [two \(index)]] label](https://example.com/docs/\(index) \"Title \(index)\")")
+            case 3:
+                links.append(#"[Backslash \\ and escaped \] closer \#(index)](https://example.com/docs/\#(index))"#)
+            default:
+                links.append("[Line one \(index)\nline two [nested \(index % 19)]](https://example.com/docs/\(index))")
+            }
+        }
+
+        return links
+    }
+
     private func makeASCIIAutolinksForMoveBenchmark(count: Int) -> [String] {
         var links: [String] = []
         links.reserveCapacity(count)
@@ -7244,6 +12413,54 @@ final class PerformanceOptimizationTests: XCTestCase {
         return links
     }
 
+    private func makeUnresolvedReferenceLinksForParsingBenchmark(linkCount: Int) -> [String] {
+        var links: [String] = []
+        links.reserveCapacity(linkCount)
+
+        for index in 0..<linkCount {
+            switch index % 5 {
+            case 0:
+                links.append("[label-\(index)][reference-\(index)-with-long-unused-label]")
+            case 1:
+                links.append("[outer [inner \(index)]][reference-\(index)]")
+            case 2:
+                links.append("[café \(index)][référence-\(index)-unused]")
+            case 3:
+                links.append("[label-\(index)][]")
+            default:
+                links.append("[label-\(index)][unterminated-reference-\(index)")
+            }
+        }
+
+        return links
+    }
+
+    private func makeInlineFootnoteReferenceMoveBenchmark(count: Int) -> [String] {
+        var references: [String] = []
+        references.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 7 {
+            case 0:
+                references.append("[^\(index)]")
+            case 1:
+                references.append("[^long-ascii-label-\(index)]")
+            case 2:
+                references.append("[^label_with_underscore_\(index)]")
+            case 3:
+                references.append("[^mix-\(index)-A9]")
+            case 4:
+                references.append("[^]")
+            case 5:
+                references.append("[^unclosed-\(index)")
+            default:
+                references.append("[^line-\(index)\n]")
+            }
+        }
+
+        return references
+    }
+
     private func makeBareASCIIAutolinksForSchemeBenchmark(count: Int) -> [String] {
         var links: [String] = []
         links.reserveCapacity(count)
@@ -7262,6 +12479,62 @@ final class PerformanceOptimizationTests: XCTestCase {
                 links.append("ftp://example.com/file-\(index).txt")
             default:
                 links.append("plain-text-\(index)")
+            }
+        }
+
+        return links
+    }
+
+    private func makeASCIIAutolinksForTailTrimBenchmark(count: Int) -> [String] {
+        var links: [String] = []
+        links.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 8 {
+            case 0:
+                links.append("https://example.com/docs/\(index)?ref=glimmer.")
+            case 1:
+                links.append("https://example.com/docs/\(index).,;:?!")
+            case 2:
+                links.append("http://example.com/a(\(index)))")
+            case 3:
+                links.append("www.example.com/a[\(index)]]")
+            case 4:
+                links.append("mailto:octocat\(index)@example.com;")
+            case 5:
+                links.append("<https://example.com/docs/\(index).>")
+            case 6:
+                links.append("https://example.com/docs/\(index)?ref=glimmer")
+            default:
+                links.append("https://example.com/cafe-\(index).")
+            }
+        }
+
+        return links
+    }
+
+    private func makeRejectedAngleAutolinksForCopyBenchmark(count: Int) -> [String] {
+        var links: [String] = []
+        links.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 8 {
+            case 0:
+                links.append("<span>")
+            case 1:
+                links.append("</span>")
+            case 2:
+                links.append("<br>")
+            case 3:
+                links.append("<custom-tag-\(index)>")
+            case 4:
+                links.append("<h\(index % 6 + 1)>")
+            case 5:
+                links.append("<em>")
+            case 6:
+                links.append("<img/>")
+            default:
+                links.append("<invalid-\(index)>")
             }
         }
 
@@ -7292,6 +12565,158 @@ final class PerformanceOptimizationTests: XCTestCase {
         }
 
         return codes
+    }
+
+    private func makeFailedASCIIInlineCodeSpanBenchmark(documentCount: Int, runCount: Int) -> [String] {
+        var documents: [String] = []
+        documents.reserveCapacity(documentCount)
+
+        for documentIndex in 0..<documentCount {
+            var markdown = "prefix \(documentIndex) "
+            markdown.reserveCapacity(runCount * (runCount + 32))
+
+            for runLength in 1...runCount {
+                markdown += String(repeating: "`", count: runLength)
+                markdown += " unmatched-\(documentIndex)-\(runLength) "
+            }
+
+            markdown += "tail \(documentIndex)"
+            documents.append(markdown)
+        }
+
+        return documents
+    }
+
+    private func makeHTMLTagAttributeScanBenchmark(count: Int) -> [String] {
+        var tags: [String] = []
+        tags.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 8 {
+            case 0:
+                tags.append("<span class=\"name-\(index)\" data-id=\"\(index)\" data-role=\"inline\">")
+            case 1:
+                tags.append("<a href=\"https://example.com/path/\(index)?q=\(index % 97)\" title=\"Title \(index)\">")
+            case 2:
+                tags.append("<img src=\"https://example.com/image-\(index).png\" alt=\"Image \(index)\" loading=\"lazy\">")
+            case 3:
+                tags.append("<custom-tag data-alpha=\"\(index)\" data-beta=\"\(index + 1)\" data-gamma=\"\(index + 2)\">")
+            case 4:
+                tags.append("<br>")
+            case 5:
+                tags.append("</span>")
+            case 6:
+                tags.append("<tag\nattr=\"value-\(index)\">")
+            default:
+                tags.append("<missing attr \(index)")
+            }
+        }
+
+        return tags
+    }
+
+    private func parseHTMLTagAttributeScanCanonicalForBenchmark(
+        _ markdown: String,
+        optimized: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseHTMLTagAttributeScanForBenchmark(&state, optimized: optimized)
+        let canonical: String
+        if let node {
+            canonical = ParserCanonicalSnapshot.canonicalDescription(for: [.paragraph(children: [node])])
+        } else {
+            canonical = "nil"
+        }
+        let offset = markdown.distance(from: markdown.startIndex, to: state.currentIndex)
+        return "\(canonical)|offset:\(offset)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func htmlTagAttributeScanChecksumForBenchmark(
+        _ markdown: String,
+        optimized: Bool
+    ) -> Int {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseHTMLTagAttributeScanForBenchmark(&state, optimized: optimized)
+        return (node.map { inlineNodeBenchmarkChecksum($0) } ?? 0) +
+            markdown.distance(from: markdown.startIndex, to: state.currentIndex) +
+            state.line +
+            state.column
+    }
+
+    private func htmlTagAttributeScanChecksumForBenchmark(
+        _ tags: [String],
+        optimized: Bool
+    ) -> Int {
+        var checksum = 0
+        for tag in tags {
+            checksum &+= htmlTagAttributeScanChecksumForBenchmark(tag, optimized: optimized)
+        }
+        return checksum
+    }
+
+    private func parseHTMLTagAttributeScanForBenchmark(
+        _ state: inout ParserState,
+        optimized: Bool
+    ) -> MarkdownParser.InlineNode? {
+        if optimized {
+            return InlineParser.parseHTMLTag(&state)
+        }
+
+        return InlineParser.parseHTMLTagByCopyingIgnoredAttributeScanForTesting(&state)
+    }
+
+    private func parseHTMLTagNameScanCanonicalForBenchmark(
+        _ markdown: String,
+        optimized: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseHTMLTagNameScanForBenchmark(&state, optimized: optimized)
+        let canonical: String
+        if let node {
+            canonical = ParserCanonicalSnapshot.canonicalDescription(for: [.paragraph(children: [node])])
+        } else {
+            canonical = "nil"
+        }
+        let offset = markdown.distance(from: markdown.startIndex, to: state.currentIndex)
+        return "\(canonical)|offset:\(offset)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func htmlTagNameScanChecksumForBenchmark(
+        _ markdown: String,
+        optimized: Bool
+    ) -> Int {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseHTMLTagNameScanForBenchmark(&state, optimized: optimized)
+        return (node.map { inlineNodeBenchmarkChecksum($0) } ?? 0) +
+            markdown.distance(from: markdown.startIndex, to: state.currentIndex) +
+            state.line +
+            state.column
+    }
+
+    private func htmlTagNameScanChecksumForBenchmark(
+        _ tags: [String],
+        optimized: Bool
+    ) -> Int {
+        var checksum = 0
+        for tag in tags {
+            checksum &+= htmlTagNameScanChecksumForBenchmark(tag, optimized: optimized)
+        }
+        return checksum
+    }
+
+    private func parseHTMLTagNameScanForBenchmark(
+        _ state: inout ParserState,
+        optimized: Bool
+    ) -> MarkdownParser.InlineNode? {
+        if optimized {
+            return InlineParser.parseHTMLTag(&state)
+        }
+
+        return InlineParser.parseHTMLTagByCopyingTagNameForTesting(&state)
     }
 
     private func parseAutolinkMoveCanonicalForBenchmark(
@@ -7335,6 +12760,175 @@ final class PerformanceOptimizationTests: XCTestCase {
             &state,
             angleBracketMode: angleBracketMode
         )
+    }
+
+    private func parseAutolinkCountedMoveCanonicalForBenchmark(
+        _ markdown: String,
+        countedMove: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseAutolinkCountedMoveForBenchmark(&state, countedMove: countedMove)
+        let canonical: String
+        if let node {
+            canonical = ParserCanonicalSnapshot.canonicalDescription(for: [.paragraph(children: [node])])
+        } else {
+            canonical = "nil"
+        }
+        return "\(canonical)|index:\(state.currentIndex)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func parseAutolinkCountedMoveChecksumForBenchmark(
+        _ markdown: String,
+        countedMove: Bool
+    ) -> Int {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseAutolinkCountedMoveForBenchmark(&state, countedMove: countedMove)
+        return (node.map { inlineNodeBenchmarkChecksum($0) } ?? 0) +
+            markdown.distance(from: markdown.startIndex, to: state.currentIndex) +
+            state.line +
+            state.column
+    }
+
+    private func parseAutolinkCountedMoveForBenchmark(
+        _ state: inout ParserState,
+        countedMove: Bool
+    ) -> MarkdownParser.InlineNode? {
+        let angleBracketMode = state.current() == "<"
+        if countedMove {
+            return InlineParser.parseUnifiedAutolink(&state, angleBracketMode: angleBracketMode)
+        }
+        return InlineParser.parseUnifiedAutolinkByRecountingASCIIMoveForTesting(
+            &state,
+            angleBracketMode: angleBracketMode
+        )
+    }
+
+    private func parseAutolinkTailTrimCanonicalForBenchmark(
+        _ markdown: String,
+        byteTrim: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseAutolinkTailTrimForBenchmark(&state, byteTrim: byteTrim)
+        let canonical: String
+        if let node {
+            canonical = ParserCanonicalSnapshot.canonicalDescription(for: [.paragraph(children: [node])])
+        } else {
+            canonical = "nil"
+        }
+        return "\(canonical)|index:\(state.currentIndex)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func parseAutolinkTailTrimChecksumForBenchmark(
+        _ markdown: String,
+        byteTrim: Bool
+    ) -> Int {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseAutolinkTailTrimForBenchmark(&state, byteTrim: byteTrim)
+        return (node.map { inlineNodeBenchmarkChecksum($0) } ?? 0) +
+            markdown.distance(from: markdown.startIndex, to: state.currentIndex) +
+            state.line +
+            state.column
+    }
+
+    private func parseAutolinkTailTrimForBenchmark(
+        _ state: inout ParserState,
+        byteTrim: Bool
+    ) -> MarkdownParser.InlineNode? {
+        let angleBracketMode = state.current() == "<"
+        if byteTrim {
+            return InlineParser.parseUnifiedAutolink(&state, angleBracketMode: angleBracketMode)
+        }
+        return InlineParser.parseUnifiedAutolinkByTrimmingTailWithCharactersForTesting(
+            &state,
+            angleBracketMode: angleBracketMode
+        )
+    }
+
+    private func parseAngleAutolinkCopyCanonicalForBenchmark(
+        _ markdown: String,
+        deferRejectedCopy: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseAngleAutolinkCopyForBenchmark(&state, deferRejectedCopy: deferRejectedCopy)
+        let canonical: String
+        if let node {
+            canonical = ParserCanonicalSnapshot.canonicalDescription(for: [.paragraph(children: [node])])
+        } else {
+            canonical = "nil"
+        }
+        return "\(canonical)|index:\(state.currentIndex)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func parseAngleAutolinkCopyChecksumForBenchmark(
+        _ markdown: String,
+        deferRejectedCopy: Bool
+    ) -> Int {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseAngleAutolinkCopyForBenchmark(&state, deferRejectedCopy: deferRejectedCopy)
+        return (node.map { inlineNodeBenchmarkChecksum($0) } ?? 17) +
+            markdown.distance(from: markdown.startIndex, to: state.currentIndex) +
+            state.line +
+            state.column
+    }
+
+    private func parseAngleAutolinkCopyForBenchmark(
+        _ state: inout ParserState,
+        deferRejectedCopy: Bool
+    ) -> MarkdownParser.InlineNode? {
+        let angleBracketMode = state.current() == "<"
+        if deferRejectedCopy {
+            return InlineParser.parseUnifiedAutolink(&state, angleBracketMode: angleBracketMode)
+        }
+
+        return InlineParser.parseUnifiedAutolinkByCopyingRejectedAngleContentForTesting(
+            &state,
+            angleBracketMode: angleBracketMode
+        )
+    }
+
+    private func parseFootnoteReferenceMoveCanonicalForBenchmark(
+        _ markdown: String,
+        countedMove: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseFootnoteReferenceMoveForBenchmark(&state, countedMove: countedMove)
+        let canonical: String
+        if let node {
+            canonical = ParserCanonicalSnapshot.canonicalDescription(for: [.paragraph(children: [node])])
+        } else {
+            canonical = "nil"
+        }
+        return "\(canonical)|index:\(state.currentIndex)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func parseFootnoteReferenceMoveChecksumForBenchmark(
+        _ markdown: String,
+        countedMove: Bool
+    ) -> Int {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseFootnoteReferenceMoveForBenchmark(&state, countedMove: countedMove)
+        return (node.map { inlineNodeBenchmarkChecksum($0) } ?? 0) +
+            markdown.distance(from: markdown.startIndex, to: state.currentIndex) +
+            state.line +
+            state.column
+    }
+
+    private func parseFootnoteReferenceMoveForBenchmark(
+        _ state: inout ParserState,
+        countedMove: Bool
+    ) -> MarkdownParser.InlineNode? {
+        if countedMove {
+            return InlineParser.parseFootnoteReference(&state)
+        }
+        return InlineParser.parseFootnoteReferenceByRecountingASCIIMoveForTesting(&state)
     }
 
     private func parseAutolinkSchemeCanonicalForBenchmark(
@@ -7430,6 +13024,128 @@ final class PerformanceOptimizationTests: XCTestCase {
         return resources
     }
 
+    private func makeUnicodeSimpleLinkResourcesForParsingBenchmark(resourceCount: Int) -> [String] {
+        var resources: [String] = []
+        resources.reserveCapacity(resourceCount)
+
+        for index in 0..<resourceCount {
+            switch index % 6 {
+            case 0:
+                resources.append("https://example.com/docs/\(index)-café)")
+            case 1:
+                resources.append("https://example.com/search?q=こんにちは-\(index))")
+            case 2:
+                resources.append("https://example.com/docs/\(index) \"Café title \(index)\")")
+            case 3:
+                resources.append("https://example.com/docs/\(index) 'Résumé title \(index)')")
+            case 4:
+                resources.append("https://example.com/docs/\(index) \"こんにちは ✅ \(index)\")")
+            default:
+                resources.append("   https://example.com/café-\(index)   )")
+            }
+        }
+
+        return resources
+    }
+
+    private func makeBalancedLinkResourcesForDestinationBackslashBenchmark(resourceCount: Int) -> [String] {
+        var resources: [String] = []
+        resources.reserveCapacity(resourceCount)
+
+        for index in 0..<resourceCount {
+            switch index % 6 {
+            case 0:
+                resources.append("https://example.com/docs/\(index)/section(a)b)")
+            case 1:
+                resources.append("https://example.com/docs/\(index)/section(a(b)c)d)")
+            case 2:
+                resources.append("   https://example.com/docs/\(index)/section(a)b   )")
+            case 3:
+                resources.append("https://example.com/docs/\(index)/section(a)b \"Title \(index)\")")
+            case 4:
+                resources.append("https://example.com/docs/\(index)/section(a)b 'Title \(index)')")
+            default:
+                resources.append("https://example.com/docs/\(index)/section(a)b (Title \(index)))")
+            }
+        }
+
+        return resources
+    }
+
+    private func makeBalancedLinkResourcesForMetadataScanBenchmark(resourceCount: Int) -> [String] {
+        var resources: [String] = []
+        resources.reserveCapacity(resourceCount)
+
+        for index in 0..<resourceCount {
+            switch index % 8 {
+            case 0:
+                resources.append("https://example.com/docs/\(index)/section(a)b)")
+            case 1:
+                resources.append("https://example.com/docs/\(index)/section(a)b \"Title \(index)\")")
+            case 2:
+                resources.append("https://example.com/docs/\(index)/section(a)b 'Title \(index)'   )")
+            case 3:
+                resources.append("https://example.com/docs/\(index)/section(a)b (Title \(index)))")
+            case 4:
+                resources.append("   https://example.com/docs/\(index)/section(a(b)c)d   \"Spaced title \(index)\"   )")
+            case 5:
+                resources.append("https://example.com/docs/\(index)/section(a)b \"Title \\\"quoted\\\" \(index)\")")
+            case 6:
+                resources.append("https://example.com/docs/\(index)/section(a)b \"Café title \(index)\"   )")
+            default:
+                resources.append("https://example.com/docs/\(index)/section(a)b trailing-text)")
+            }
+        }
+
+        return resources
+    }
+
+    private func makeExtensionAwareASCIITextRunBenchmark(count: Int) -> [String] {
+        var inputs: [String] = []
+        inputs.reserveCapacity(count)
+
+        let prefix = String(repeating: "alpha beta gamma delta epsilon ", count: 4)
+        let suffix = String(repeating: " zeta eta theta iota kappa", count: 4)
+
+        for index in 0..<count {
+            switch index % 4 {
+            case 0:
+                inputs.append("\(prefix)\(index) before ::vip:: after\(suffix)")
+            case 1:
+                inputs.append("\(prefix)\(index) before **bold \(index % 17)** and ::vip:: after\(suffix)")
+            case 2:
+                inputs.append("\(prefix)\(index) with failed colon 10:30 and trailing words\(suffix)")
+            default:
+                inputs.append("\(prefix)\(index) before [link](https://example.com/\(index)) then ::vip::\(suffix)")
+            }
+        }
+
+        return inputs
+    }
+
+    private func makeInvalidInlineURLValidationBenchmark(count: Int) -> [(link: String, image: String)] {
+        let invalidDestinations = [
+            "http://[",
+            "http://%",
+            "http://exa<mple.com",
+            "http://{"
+        ]
+        var inputs: [(link: String, image: String)] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            let label = "**bold \(index)** and `code \(index % 17)` with [nested \(index % 11)] " +
+                "plus escaped \\[ bracket"
+            let destination = invalidDestinations[index % invalidDestinations.count]
+            inputs.append((
+                link: "[\(label)](\(destination))",
+                image: "![\(label)](\(destination))"
+            ))
+        }
+
+        return inputs
+    }
+
     private func parseLinkForBenchmark(_ markdown: String, copying: Bool) -> MarkdownParser.InlineNode? {
         var state = ParserState(text: markdown)
         state.enableASCIIFastPathIfPossible()
@@ -7437,6 +13153,70 @@ final class PerformanceOptimizationTests: XCTestCase {
             return InlineParser.parseLinkByCopyingTextAndDestinationForTesting(&state, configuration: .default)
         }
         return InlineParser.parseLink(&state, configuration: .default)
+    }
+
+    private func parseInlineURLValidationCanonicalForBenchmark(
+        _ markdown: String,
+        image: Bool,
+        earlyValidation: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseInlineURLValidationForBenchmark(
+            &state,
+            image: image,
+            earlyValidation: earlyValidation
+        )
+        let canonical: String
+        if let node {
+            canonical = ParserCanonicalSnapshot.canonicalDescription(for: [.paragraph(children: [node])])
+        } else {
+            canonical = "nil"
+        }
+        let offset = markdown.distance(from: markdown.startIndex, to: state.currentIndex)
+        return "\(canonical)|offset:\(offset)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func parseInlineURLValidationChecksumForBenchmark(
+        _ markdown: String,
+        image: Bool,
+        earlyValidation: Bool
+    ) -> Int {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseInlineURLValidationForBenchmark(
+            &state,
+            image: image,
+            earlyValidation: earlyValidation
+        )
+        return (node.map { inlineNodeBenchmarkChecksum($0) } ?? 1) +
+            markdown.distance(from: markdown.startIndex, to: state.currentIndex) +
+            state.line +
+            state.column
+    }
+
+    private func parseInlineURLValidationForBenchmark(
+        _ state: inout ParserState,
+        image: Bool,
+        earlyValidation: Bool
+    ) -> MarkdownParser.InlineNode? {
+        if image {
+            if earlyValidation {
+                return InlineParser.parseImage(&state, configuration: .github)
+            }
+            return InlineParser.parseImageByParsingAltBeforeURLValidationForTesting(
+                &state,
+                configuration: .github
+            )
+        }
+
+        if earlyValidation {
+            return InlineParser.parseLink(&state, configuration: .github)
+        }
+        return InlineParser.parseLinkByParsingContentBeforeURLValidationForTesting(
+            &state,
+            configuration: .github
+        )
     }
 
     private func parseLinkResourceMoveForBenchmark(
@@ -7449,6 +13229,203 @@ final class PerformanceOptimizationTests: XCTestCase {
             return InlineParser.parseLink(&state, configuration: .default)
         }
         return InlineParser.parseLinkByMovingResourceWithCharactersForTesting(&state, configuration: .default)
+    }
+
+    private func parseLinkResourceByteCountCanonicalForBenchmark(
+        _ markdown: String,
+        countedByteCount: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseLinkResourceByteCountForBenchmark(&state, countedByteCount: countedByteCount)
+        let canonical: String
+        if let node {
+            canonical = ParserCanonicalSnapshot.canonicalDescription(for: [.paragraph(children: [node])])
+        } else {
+            canonical = "nil"
+        }
+        let offset = markdown.distance(from: markdown.startIndex, to: state.currentIndex)
+        return "\(canonical)|offset:\(offset)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func parseLinkResourceByteCountChecksumForBenchmark(
+        _ markdown: String,
+        countedByteCount: Bool
+    ) -> Int {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseLinkResourceByteCountForBenchmark(&state, countedByteCount: countedByteCount)
+        return (node.map { inlineNodeBenchmarkChecksum($0) } ?? 0) +
+            markdown.distance(from: markdown.startIndex, to: state.currentIndex) +
+            state.line +
+            state.column
+    }
+
+    private func parseLinkResourceByteCountForBenchmark(
+        _ state: inout ParserState,
+        countedByteCount: Bool
+    ) -> MarkdownParser.InlineNode? {
+        if countedByteCount {
+            return InlineParser.parseLink(&state, configuration: .default)
+        }
+        return InlineParser.parseLinkByRecountingSimpleResourceByteCountForTesting(&state, configuration: .default)
+    }
+
+    private func parseLinkBracketedTextMoveCanonicalForBenchmark(
+        _ markdown: String,
+        countedMove: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseLinkBracketedTextMoveForBenchmark(&state, countedMove: countedMove)
+        let canonical: String
+        if let node {
+            canonical = ParserCanonicalSnapshot.canonicalDescription(for: [.paragraph(children: [node])])
+        } else {
+            canonical = "nil"
+        }
+        return "\(canonical)|index:\(state.currentIndex)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func parseLinkBracketedTextMoveChecksumForBenchmark(
+        _ markdown: String,
+        countedMove: Bool
+    ) -> Int {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseLinkBracketedTextMoveForBenchmark(&state, countedMove: countedMove)
+        return (node.map { inlineNodeBenchmarkChecksum($0) } ?? 0) +
+            markdown.distance(from: markdown.startIndex, to: state.currentIndex) +
+            state.line +
+            state.column
+    }
+
+    private func parseLinkBracketedTextMoveForBenchmark(
+        _ state: inout ParserState,
+        countedMove: Bool
+    ) -> MarkdownParser.InlineNode? {
+        if countedMove {
+            return InlineParser.parseLink(&state, configuration: .default)
+        }
+        return InlineParser.parseLinkByRecountingBracketedTextMoveForTesting(&state, configuration: .default)
+    }
+
+    private func parseLinkBracketedTextScanCanonicalForBenchmark(
+        _ markdown: String,
+        optimized: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseLinkBracketedTextScanForBenchmark(&state, optimized: optimized)
+        let canonical: String
+        if let node {
+            canonical = ParserCanonicalSnapshot.canonicalDescription(for: [.paragraph(children: [node])])
+        } else {
+            canonical = "nil"
+        }
+        return "\(canonical)|index:\(state.currentIndex)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func parseLinkBracketedTextScanChecksumForBenchmark(
+        _ markdown: String,
+        optimized: Bool
+    ) -> Int {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseLinkBracketedTextScanForBenchmark(&state, optimized: optimized)
+        return (node.map { inlineNodeBenchmarkChecksum($0) } ?? 0) +
+            markdown.distance(from: markdown.startIndex, to: state.currentIndex) +
+            state.line +
+            state.column
+    }
+
+    private func parseLinkBracketedTextScanForBenchmark(
+        _ state: inout ParserState,
+        optimized: Bool
+    ) -> MarkdownParser.InlineNode? {
+        if optimized {
+            return InlineParser.parseLink(&state, configuration: .default)
+        }
+        return InlineParser.parseLinkByCharacterSimpleBracketedTextForTesting(&state, configuration: .default)
+    }
+
+    private func parseLinkBalancedBracketedTextScanCanonicalForBenchmark(
+        _ markdown: String,
+        optimized: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseLinkBalancedBracketedTextScanForBenchmark(&state, optimized: optimized)
+        let canonical: String
+        if let node {
+            canonical = ParserCanonicalSnapshot.canonicalDescription(for: [.paragraph(children: [node])])
+        } else {
+            canonical = "nil"
+        }
+        return "\(canonical)|index:\(state.currentIndex)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func parseLinkBalancedBracketedTextScanChecksumForBenchmark(
+        _ markdown: String,
+        optimized: Bool
+    ) -> Int {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseLinkBalancedBracketedTextScanForBenchmark(&state, optimized: optimized)
+        return (node.map { inlineNodeBenchmarkChecksum($0) } ?? 0) +
+            markdown.distance(from: markdown.startIndex, to: state.currentIndex) +
+            state.line +
+            state.column
+    }
+
+    private func parseLinkBalancedBracketedTextScanForBenchmark(
+        _ state: inout ParserState,
+        optimized: Bool
+    ) -> MarkdownParser.InlineNode? {
+        if optimized {
+            return InlineParser.parseLink(&state, configuration: .default)
+        }
+        return InlineParser.parseLinkByCharacterBalancedBracketedTextForTesting(&state, configuration: .default)
+    }
+
+    private func parseLinkReferenceLabelScanCanonicalForBenchmark(
+        _ markdown: String,
+        optimized: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseLinkReferenceLabelScanForBenchmark(&state, optimized: optimized)
+        let canonical: String
+        if let node {
+            canonical = ParserCanonicalSnapshot.canonicalDescription(for: [.paragraph(children: [node])])
+        } else {
+            canonical = "nil"
+        }
+        return "\(canonical)|index:\(state.currentIndex)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func parseLinkReferenceLabelScanChecksumForBenchmark(
+        _ markdown: String,
+        optimized: Bool
+    ) -> Int {
+        var state = ParserState(text: markdown)
+        state.enableASCIIFastPathIfPossible()
+        let node = parseLinkReferenceLabelScanForBenchmark(&state, optimized: optimized)
+        return (node.map { inlineNodeBenchmarkChecksum($0) } ?? 0) +
+            markdown.distance(from: markdown.startIndex, to: state.currentIndex) +
+            state.line +
+            state.column +
+            markdown.utf8.count
+    }
+
+    private func parseLinkReferenceLabelScanForBenchmark(
+        _ state: inout ParserState,
+        optimized: Bool
+    ) -> MarkdownParser.InlineNode? {
+        if optimized {
+            return InlineParser.parseLink(&state, configuration: .default)
+        }
+        return InlineParser.parseLinkByScanningUnresolvedReferenceLabelForTesting(&state, configuration: .default)
     }
 
     private func linkBenchmarkChecksum(_ node: MarkdownParser.InlineNode) -> Int {
@@ -7475,6 +13452,78 @@ final class PerformanceOptimizationTests: XCTestCase {
             in: resource,
             from: resource.startIndex,
             to: resource.endIndex
+        )
+    }
+
+    private func parseBalancedInlineLinkResourceDestinationScanForBenchmark(
+        _ resource: String,
+        optimized: Bool
+    ) -> InlineParser.InlineLinkResource? {
+        if optimized {
+            return InlineParser.parseInlineLinkResourceWithBalancedScanForTesting(
+                in: resource,
+                from: resource.startIndex,
+                to: resource.endIndex
+            )
+        }
+
+        return InlineParser.parseInlineLinkResourceWithCharacterDestinationBackslashScanForTesting(
+            in: resource,
+            from: resource.startIndex,
+            to: resource.endIndex
+        )
+    }
+
+    private func parseBalancedInlineLinkResourceMetadataScanForBenchmark(
+        _ resource: String,
+        optimized: Bool
+    ) -> InlineParser.InlineLinkResource? {
+        if optimized {
+            return InlineParser.parseInlineLinkResourceWithBalancedScanForTesting(
+                in: resource,
+                from: resource.startIndex,
+                to: resource.endIndex
+            )
+        }
+
+        return InlineParser.parseInlineLinkResourceWithCharacterMetadataScanForTesting(
+            in: resource,
+            from: resource.startIndex,
+            to: resource.endIndex
+        )
+    }
+
+    private func makeBadgeExtensionForASCIITextRunBenchmark(triggered: Bool) -> MarkdownExtension {
+        let triggerCharacters: Set<Character> = triggered ? [":"] : []
+        return MarkdownExtension(
+            id: "example.badges",
+            version: 1,
+            triggerCharacters: triggerCharacters,
+            parseInline: { context in
+                guard context.remaining.hasPrefix("::vip::") else { return nil }
+                return MarkdownExtensionInlineMatch(
+                    name: "badge",
+                    literal: "::vip::",
+                    fields: ["kind": "vip"],
+                    endIndex: context.index(offsetBy: 7)
+                )
+            }
+        )
+    }
+
+    private func parseInlineForExtensionAwareASCIITextRunBenchmark(
+        _ markdown: String,
+        configuration: MarkdownConfiguration,
+        optimized: Bool
+    ) -> [MarkdownParser.InlineNode] {
+        var state = ParserState(text: markdown)
+        if optimized {
+            return InlineParser.parseInlineElements(&state, configuration: configuration)
+        }
+
+        return InlineParser.parseInlineElementsByDisablingExtensionAwareASCIITextRunsForTesting(
+            &state,
+            configuration: configuration
         )
     }
 
@@ -7591,6 +13640,51 @@ final class PerformanceOptimizationTests: XCTestCase {
         return InlineParser.parseInlineElementsByCopyingLiteralRunsForTesting(&state, configuration: configuration)
     }
 
+    private func makeInlineLiteralRunByteCountBenchmark(count: Int) -> [String] {
+        var inputs: [String] = []
+        inputs.reserveCapacity(count)
+
+        let firstRun = String(
+            repeating: "alpha beta gamma delta epsilon zeta eta theta ",
+            count: 10
+        )
+        let secondRun = String(
+            repeating: "iota kappa lambda mu nu xi omicron pi ",
+            count: 8
+        )
+        let thirdRun = String(
+            repeating: "rho sigma tau upsilon phi chi psi omega ",
+            count: 8
+        )
+
+        for index in 0..<count {
+            inputs.append(
+                """
+                \(firstRun)\(index) before **bold \(index % 17)** \(secondRun) \
+                before [link \(index % 23)](https://example.com/docs/\(index)) \(thirdRun) \
+                before `code \(index % 31)` \(firstRun) and trailing ASCII words \(index).
+                """
+            )
+        }
+
+        return inputs
+    }
+
+    private func parseInlineForLiteralRunByteCountBenchmark(
+        _ markdown: String,
+        knownByteCount: Bool,
+        configuration: MarkdownConfiguration
+    ) -> [MarkdownParser.InlineNode] {
+        var state = ParserState(text: markdown)
+        if knownByteCount {
+            return InlineParser.parseInlineElements(&state, configuration: configuration)
+        }
+        return InlineParser.parseInlineElementsByRecountingLiteralRunBytesForTesting(
+            &state,
+            configuration: configuration
+        )
+    }
+
     private func makeASCIITextRunDispatchBenchmark(count: Int) -> [String] {
         var inputs: [String] = []
         inputs.reserveCapacity(count)
@@ -7663,6 +13757,245 @@ final class PerformanceOptimizationTests: XCTestCase {
         return inputs
     }
 
+    private func makeGFMCandidateValidationGateBenchmark(count: Int) -> [String] {
+        var inputs: [String] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 4 {
+            case 0:
+                inputs.append(
+                    """
+                    Zyzz qrst uvxyz qrst uvxyz qrst uvxyz qrst uvxyz before \
+                    https://example.com/path/\(index) and owner/repo.
+                    """
+                )
+            case 1:
+                inputs.append(
+                    """
+                    Qrst yz uvxyz qrst yz uvxyz qrst yz uvxyz before \
+                    swiftlang/swift-markdown#\(index % 997) and deadbeefcafebabe.
+                    """
+                )
+            case 2:
+                inputs.append(
+                    """
+                    Qrst yz uvxyz punctuation only; qrst yz uvxyz punctuation only; \
+                    qrst yz uvxyz punctuation only.
+                    """
+                )
+            default:
+                inputs.append(
+                    """
+                    Zyzz qrst uvxyz before ffffftp://example.com/text and \
+                    owner\(index % 31)/repo\(index % 37).
+                    """
+                )
+            }
+        }
+
+        return inputs
+    }
+
+    private func makeGFMLeafMoveBenchmark(count: Int) -> [String] {
+        var inputs: [String] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            inputs.append(
+                """
+                @reviewer\(index % 97) closed #\(index + 1) with :rocket: and :sparkles: in \
+                owner\(index % 29)/repo\(index % 31)#\(index % 997). \
+                Commit deadbeefcafebabe\(index % 10) followed up in swiftlang/swift-markdown.
+                """
+            )
+        }
+
+        return inputs
+    }
+
+    private func makeGFMLeafBoundaryBenchmark(count: Int) -> [String] {
+        var inputs: [String] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 4 {
+            case 0:
+                inputs.append(
+                    """
+                    @reviewer\(index % 97) closed #\(index + 1) in \
+                    owner\(index % 29)/repo\(index % 31)#\(index % 997) near deadbeefcafebabe\(index % 10).
+                    """
+                )
+            case 1:
+                inputs.append(
+                    """
+                    Email user\(index)@example.com keeps text; @owner\(index % 13) and \
+                    swiftlang/swift-markdown#\(index % 997) should parse.
+                    """
+                )
+            case 2:
+                inputs.append(
+                    """
+                    prefix@skip \(index) abc#\(index) xdeadbeefcafebabe deadbeefcafebabeX \
+                    plus ABCDEF1234567890.
+                    """
+                )
+            default:
+                inputs.append(
+                    """
+                    /owner\(index % 17)/repo :owner\(index % 19)/repo @owner\(index % 23)/repo \
+                    owner\(index % 29)/repo\(index % 31)#not owner\(index % 31)/repo\(index % 37)#\(index % 997).
+                    """
+                )
+            }
+        }
+
+        return inputs
+    }
+
+    private func makeMentionUsernameCopyBenchmark(count: Int) -> [String] {
+        var inputs: [String] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 5 {
+            case 0:
+                inputs.append(
+                    "Contact @example\(index % 97).com about @valid\(index % 31) and #\(index % 997)."
+                )
+            case 1:
+                inputs.append(
+                    "Domain-like @docs-\(index % 19).example.org should stay text before @reviewer\(index % 23)."
+                )
+            case 2:
+                inputs.append(
+                    "Ordinary email user\(index)@example.com rejects before username scanning, then @owner\(index % 17)."
+                )
+            case 3:
+                inputs.append(
+                    "Valid mentions @octocat\(index % 29), @swift_\(index % 31), and @repo-owner\(index % 37)."
+                )
+            default:
+                inputs.append(
+                    "Mixed prefix@skip\(index) plus (@alice\(index % 41)) and trailing @domain\(index % 43).io."
+                )
+            }
+        }
+
+        return inputs
+    }
+
+    private func makeASCIIInlineByteDispatchBenchmark(
+        count: Int
+    ) -> [(markdown: String, configuration: MarkdownConfiguration)] {
+        var inputs: [(markdown: String, configuration: MarkdownConfiguration)] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 6 {
+            case 0:
+                inputs.append((
+                    "Prefix \(index) before **bold \(index % 17)** and _italic_ then `code`.",
+                    .default
+                ))
+            case 1:
+                inputs.append((
+                    "[link \(index)](https://example.com/\(index)) and ![alt](https://example.com/i.png)",
+                    .default
+                ))
+            case 2:
+                inputs.append((
+                    "~~gone \(index)~~ <https://example.com/\(index)> <span class=\"x\">html</span>",
+                    .github
+                ))
+            case 3:
+                inputs.append((
+                    "@reviewer\(index % 97) closed #\(index + 1) with :rocket: in owner/repo#\(index % 997).",
+                    .github
+                ))
+            case 4:
+                inputs.append((
+                    "See https://example.com/path/\(index) and www.example.com plus deadbeefcafebabe\(index % 10).",
+                    .github
+                ))
+            default:
+                inputs.append((
+                    "Failed *marker \(index) and [link plus ! image and <not closed before owner/repo.",
+                    .github
+                ))
+            }
+        }
+
+        return inputs
+    }
+
+    private func makeASCIIBackslashEscapeDispatchBenchmark(
+        count: Int
+    ) -> [(markdown: String, configuration: MarkdownConfiguration)] {
+        var inputs: [(markdown: String, configuration: MarkdownConfiguration)] = []
+        inputs.reserveCapacity(count)
+
+        for index in 0..<count {
+            switch index % 5 {
+            case 0:
+                inputs.append((
+                    "Escaped \\*marker \(index)\\* and \\_literal\\_ before **bold \(index % 17)**.",
+                    .default
+                ))
+            case 1:
+                inputs.append((
+                    "Escaped \\[bracket \(index)\\] and \\(paren\\) around [link](https://example.com/\(index)).",
+                    .default
+                ))
+            case 2:
+                inputs.append((
+                    "Escaped \\#\(index) \\@octocat \\:rocket: before #\(index + 1) and @reviewer\(index % 97).",
+                    .github
+                ))
+            case 3:
+                inputs.append((
+                    "Escaped \\!image \\<tag> \\~strike\\~ before owner\(index % 29)/repo\(index % 31).",
+                    .github
+                ))
+            default:
+                inputs.append((
+                    "Trailing escaped-looking slash \(index) \\ and more text before deadbeefcafebabe\(index % 10).",
+                    .github
+                ))
+            }
+        }
+
+        return inputs
+    }
+
+    private func makeSourceASCIIInlineRangeBenchmark(sectionCount: Int) -> String {
+        var markdown = ""
+        markdown.reserveCapacity(sectionCount * 760)
+
+        for index in 0..<sectionCount {
+            markdown +=
+                """
+                ## Section \(index) with **bold \(index % 17)** and `code`
+
+                Paragraph \(index) starts with [link text](https://example.com/\(index)) and \
+                continues with @reviewer\(index % 97), #\(index + 1), :rocket:, owner\(index % 29)/repo\(index % 31), \
+                and deadbeefcafebabe\(index % 10).
+
+                - list item \(index) with **bold** and [link](https://example.com/list/\(index))
+                  continuation \(index) with `code` and owner\(index % 31)/repo\(index % 37)#\(index % 997)
+
+                > quoted line \(index) with _emphasis_ and https://example.com/quote/\(index)
+                > second quoted line \(index) with :sparkles: and deadbeefcafebabe\(index % 10)
+
+                [^note\(index)]: footnote \(index) with **bold** and [link](https://example.com/note/\(index))
+
+                """
+        }
+
+        return markdown
+    }
+
     private func parseInlineForGFMCandidateDispatchBenchmark(
         _ markdown: String,
         cachedDispatch: Bool
@@ -7672,6 +14005,253 @@ final class PerformanceOptimizationTests: XCTestCase {
             return InlineParser.parseInlineElements(&state, configuration: .github)
         }
         return InlineParser.parseInlineElementsByReprobingASCIICandidatesForTesting(&state, configuration: .github)
+    }
+
+    private func parseInlineForGFMCandidateValidationGateCanonicalForBenchmark(
+        _ markdown: String,
+        gated: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        let inlines: [MarkdownParser.InlineNode]
+        if gated {
+            inlines = InlineParser.parseInlineElements(&state, configuration: .github)
+        } else {
+            inlines = InlineParser.parseInlineElementsWithUngatedASCIICandidateValidationForTesting(
+                &state,
+                configuration: .github
+            )
+        }
+
+        let canonical = ParserCanonicalSnapshot.canonicalDescription(for: [.paragraph(children: inlines)])
+        let offset = markdown.distance(from: markdown.startIndex, to: state.currentIndex)
+        return "\(canonical)|offset:\(offset)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func parseInlineForGFMCandidateValidationGateBenchmark(
+        _ markdown: String,
+        gated: Bool
+    ) -> [MarkdownParser.InlineNode] {
+        var state = ParserState(text: markdown)
+        if gated {
+            return InlineParser.parseInlineElements(&state, configuration: .github)
+        }
+        return InlineParser.parseInlineElementsWithUngatedASCIICandidateValidationForTesting(
+            &state,
+            configuration: .github
+        )
+    }
+
+    private func parseInlineForGFMLeafMoveCanonicalForBenchmark(
+        _ markdown: String,
+        countedMove: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        let inlines: [MarkdownParser.InlineNode]
+        if countedMove {
+            inlines = InlineParser.parseInlineElements(&state, configuration: .github)
+        } else {
+            inlines = InlineParser.parseInlineElementsByRecountingGFMLeafMovesForTesting(&state, configuration: .github)
+        }
+
+        let canonical = ParserCanonicalSnapshot.canonicalDescription(for: [.paragraph(children: inlines)])
+        let offset = markdown.distance(from: markdown.startIndex, to: state.currentIndex)
+        return "\(canonical)|offset:\(offset)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func parseInlineForGFMLeafMoveBenchmark(
+        _ markdown: String,
+        countedMove: Bool
+    ) -> [MarkdownParser.InlineNode] {
+        var state = ParserState(text: markdown)
+        if countedMove {
+            return InlineParser.parseInlineElements(&state, configuration: .github)
+        }
+        return InlineParser.parseInlineElementsByRecountingGFMLeafMovesForTesting(&state, configuration: .github)
+    }
+
+    private func parseInlineForGFMLeafBoundaryCanonicalForBenchmark(
+        _ markdown: String,
+        asciiBytes: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        let inlines: [MarkdownParser.InlineNode]
+        if asciiBytes {
+            inlines = InlineParser.parseInlineElements(&state, configuration: .github)
+        } else {
+            inlines = InlineParser.parseInlineElementsByCheckingGFMLeafBoundariesWithCharactersForTesting(
+                &state,
+                configuration: .github
+            )
+        }
+
+        let canonical = ParserCanonicalSnapshot.canonicalDescription(for: [.paragraph(children: inlines)])
+        let offset = markdown.distance(from: markdown.startIndex, to: state.currentIndex)
+        return "\(canonical)|offset:\(offset)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func parseInlineForGFMLeafBoundaryBenchmark(
+        _ markdown: String,
+        asciiBytes: Bool
+    ) -> [MarkdownParser.InlineNode] {
+        var state = ParserState(text: markdown)
+        if asciiBytes {
+            return InlineParser.parseInlineElements(&state, configuration: .github)
+        }
+        return InlineParser.parseInlineElementsByCheckingGFMLeafBoundariesWithCharactersForTesting(
+            &state,
+            configuration: .github
+        )
+    }
+
+    private func parseInlineForMentionUsernameCopyCanonicalForBenchmark(
+        _ markdown: String,
+        deferredCopy: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        let inlines = parseInlineForMentionUsernameCopyBenchmark(
+            &state,
+            deferredCopy: deferredCopy
+        )
+        let canonical = ParserCanonicalSnapshot.canonicalDescription(for: [.paragraph(children: inlines)])
+        let offset = markdown.distance(from: markdown.startIndex, to: state.currentIndex)
+        return "\(canonical)|offset:\(offset)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func parseInlineForMentionUsernameCopyBenchmark(
+        _ markdown: String,
+        deferredCopy: Bool
+    ) -> [MarkdownParser.InlineNode] {
+        var state = ParserState(text: markdown)
+        return parseInlineForMentionUsernameCopyBenchmark(&state, deferredCopy: deferredCopy)
+    }
+
+    private func parseInlineForMentionUsernameCopyBenchmark(
+        _ state: inout ParserState,
+        deferredCopy: Bool
+    ) -> [MarkdownParser.InlineNode] {
+        if deferredCopy {
+            return InlineParser.parseInlineElements(&state, configuration: .github)
+        }
+        return InlineParser.parseInlineElementsByCopyingMentionUsernamesBeforeEmailRejectionForTesting(
+            &state,
+            configuration: .github
+        )
+    }
+
+    private func parseInlineForASCIIByteDispatchCanonicalForBenchmark(
+        _ markdown: String,
+        configuration: MarkdownConfiguration,
+        byteDispatch: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        let inlines: [MarkdownParser.InlineNode]
+        if byteDispatch {
+            inlines = InlineParser.parseInlineElements(&state, configuration: configuration)
+        } else {
+            inlines = InlineParser.parseInlineElementsBySwitchingASCIIDispatchWithCharactersForTesting(
+                &state,
+                configuration: configuration
+            )
+        }
+
+        let canonical = ParserCanonicalSnapshot.canonicalDescription(for: [.paragraph(children: inlines)])
+        let offset = markdown.distance(from: markdown.startIndex, to: state.currentIndex)
+        return "\(canonical)|offset:\(offset)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func parseInlineForASCIIByteDispatchBenchmark(
+        _ input: (markdown: String, configuration: MarkdownConfiguration),
+        byteDispatch: Bool
+    ) -> [MarkdownParser.InlineNode] {
+        var state = ParserState(text: input.markdown)
+        if byteDispatch {
+            return InlineParser.parseInlineElements(&state, configuration: input.configuration)
+        }
+        return InlineParser.parseInlineElementsBySwitchingASCIIDispatchWithCharactersForTesting(
+            &state,
+            configuration: input.configuration
+        )
+    }
+
+    private func parseInlineForASCIIEscapeDispatchCanonicalForBenchmark(
+        _ markdown: String,
+        configuration: MarkdownConfiguration,
+        byteEscapes: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        let inlines: [MarkdownParser.InlineNode]
+        if byteEscapes {
+            inlines = InlineParser.parseInlineElements(&state, configuration: configuration)
+        } else {
+            inlines = InlineParser.parseInlineElementsByHandlingASCIIEscapesWithCharactersForTesting(
+                &state,
+                configuration: configuration
+            )
+        }
+
+        let canonical = ParserCanonicalSnapshot.canonicalDescription(for: [.paragraph(children: inlines)])
+        let offset = markdown.distance(from: markdown.startIndex, to: state.currentIndex)
+        return "\(canonical)|offset:\(offset)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func parseInlineForASCIIEscapeDispatchBenchmark(
+        _ input: (markdown: String, configuration: MarkdownConfiguration),
+        byteEscapes: Bool
+    ) -> [MarkdownParser.InlineNode] {
+        var state = ParserState(text: input.markdown)
+        if byteEscapes {
+            return InlineParser.parseInlineElements(&state, configuration: input.configuration)
+        }
+        return InlineParser.parseInlineElementsByHandlingASCIIEscapesWithCharactersForTesting(
+            &state,
+            configuration: input.configuration
+        )
+    }
+
+    private func parseInlineForFailedCodeSpanCanonicalForBenchmark(
+        _ markdown: String,
+        configuration: MarkdownConfiguration,
+        cachedFailures: Bool
+    ) -> String {
+        var state = ParserState(text: markdown)
+        let inlines = parseInlineForFailedCodeSpanBenchmark(
+            &state,
+            configuration: configuration,
+            cachedFailures: cachedFailures
+        )
+        let canonical = ParserCanonicalSnapshot.canonicalDescription(for: [.paragraph(children: inlines)])
+        let offset = markdown.distance(from: markdown.startIndex, to: state.currentIndex)
+        return "\(canonical)|offset:\(offset)|line:\(state.line)|column:\(state.column)"
+    }
+
+    private func parseInlineFailedCodeSpanChecksumForBenchmark(
+        _ markdown: String,
+        cachedFailures: Bool
+    ) -> Int {
+        var state = ParserState(text: markdown)
+        let inlines = parseInlineForFailedCodeSpanBenchmark(
+            &state,
+            configuration: .default,
+            cachedFailures: cachedFailures
+        )
+        return inlineNodesBenchmarkChecksum(inlines) +
+            markdown.distance(from: markdown.startIndex, to: state.currentIndex) +
+            state.line +
+            state.column
+    }
+
+    private func parseInlineForFailedCodeSpanBenchmark(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration,
+        cachedFailures: Bool
+    ) -> [MarkdownParser.InlineNode] {
+        if cachedFailures {
+            return InlineParser.parseInlineElements(&state, configuration: configuration)
+        }
+        return InlineParser.parseInlineElementsByReprobingFailedInlineCodeSpansForTesting(
+            &state,
+            configuration: configuration
+        )
     }
 
     private func parseInlineForPlainTextPrescanBenchmark(

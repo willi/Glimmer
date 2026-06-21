@@ -11,6 +11,7 @@ public struct ParserState {
     // Enables ASCII/UTF-8 fast path scans for inline parsing
     var asciiFastPath: Bool
     private var asciiFastPathChecked: Bool
+    private let sourceASCIIFastPath: Bool?
 
     // Fragment buffer for accumulating text efficiently
     private var fragmentBuffer: String
@@ -24,6 +25,20 @@ public struct ParserState {
         self.column = 1
         self.asciiFastPath = false
         self.asciiFastPathChecked = false
+        self.sourceASCIIFastPath = nil
+        self.fragmentBuffer = String()
+        self.pendingLiteralRange = nil
+    }
+
+    init(text: String, sourceASCIIFastPath: Bool?) {
+        self.text = text
+        self.currentIndex = text.startIndex
+        self.endIndex = text.endIndex
+        self.line = 1
+        self.column = 1
+        self.asciiFastPath = false
+        self.asciiFastPathChecked = false
+        self.sourceASCIIFastPath = sourceASCIIFastPath
         self.fragmentBuffer = String()
         self.pendingLiteralRange = nil
     }
@@ -34,7 +49,8 @@ public struct ParserState {
         endIndex: String.Index,
         line: Int = 1,
         column: Int = 1,
-        asciiFastPath: Bool? = nil
+        asciiFastPath: Bool? = nil,
+        sourceASCIIFastPath: Bool? = nil
     ) {
         self.text = text
         self.currentIndex = currentIndex
@@ -47,6 +63,7 @@ public struct ParserState {
             self.asciiFastPath = ParsingHelpers.isASCII(in: text, from: currentIndex, to: endIndex)
         }
         self.asciiFastPathChecked = true
+        self.sourceASCIIFastPath = sourceASCIIFastPath
         self.fragmentBuffer = String()
         self.pendingLiteralRange = nil
     }
@@ -66,6 +83,11 @@ public struct ParserState {
     mutating func repeatFullTextASCIIEligibilityScanForTesting() {
         asciiFastPath = ParsingHelpers.isASCII(text)
         asciiFastPathChecked = true
+    }
+
+    @inline(__always)
+    var inlineRangeASCIIFastPath: Bool? {
+        sourceASCIIFastPath == true ? true : nil
     }
 
     @inline(__always)
@@ -142,13 +164,81 @@ public struct ParserState {
         while k > 0 { advance(); k -= 1 }
     }
 
+    @inline(__always)
     mutating func advanceLine() {
+        guard !isAtEnd else { return }
+        let utf8 = text.utf8
+        let start = currentIndex
+        var index = start
+        var sawNonASCII = false
+
+        while index < endIndex {
+            let byte = utf8[index]
+            if byte == 0x0D {
+                advanceLineByCharacter()
+                return
+            }
+
+            if byte == 0x0A {
+                line += 1
+                column = 1
+                currentIndex = utf8.index(after: index)
+                return
+            }
+
+            if byte >= 0x80 {
+                sawNonASCII = true
+            }
+            index = utf8.index(after: index)
+        }
+
+        guard !sawNonASCII else {
+            advanceLineByCharacter()
+            return
+        }
+
+        column += utf8.distance(from: start, to: endIndex)
+        currentIndex = endIndex
+    }
+
+    mutating func advanceLineByCharacterForTesting() {
+        advanceLineByCharacter()
+    }
+
+    @inline(__always)
+    private mutating func advanceLineByCharacter() {
         while let ch = current(), ch != "\n" { advance() }
         if let ch = current(), ch == "\n" { advance() }
     }
 
     @inline(__always)
     mutating func advanceToLineEnd() {
+        guard !isAtEnd else { return }
+        let utf8 = text.utf8
+        let utf8Start = currentIndex
+        let utf8End = endIndex
+        var utf8Index = utf8Start
+        var columnAdvance = 0
+        while utf8Index < utf8End {
+            let byte = utf8[utf8Index]
+            if byte == 0x0A {
+                column += columnAdvance
+                currentIndex = utf8Index
+                return
+            }
+            if byte >= 0x80 {
+                advanceToLineEndByCharacter()
+                return
+            }
+            columnAdvance += 1
+            utf8Index = utf8.index(after: utf8Index)
+        }
+
+        column += columnAdvance
+        currentIndex = endIndex
+    }
+
+    mutating func advanceToLineEndByDistanceAccountingForTesting() {
         guard !isAtEnd else { return }
         let utf8 = text.utf8
         let utf8Start = currentIndex
@@ -194,7 +284,12 @@ public struct ParserState {
 
         // Forward movement can preserve position tracking by advancing.
         if target > currentIndex {
-            advance(to: target)
+            if asciiFastPath,
+               let utf8Target = target.samePosition(in: text.utf8) {
+                moveForwardASCII(to: target, utf8Target: utf8Target)
+            } else {
+                advance(to: target)
+            }
             return
         }
 
@@ -217,6 +312,49 @@ public struct ParserState {
             scan = prev
         }
         column = newColumn
+        currentIndex = target
+    }
+
+    @inline(__always)
+    private mutating func moveForwardASCII(to target: String.Index, utf8Target: String.UTF8View.Index) {
+        let utf8 = text.utf8
+        var index = currentIndex
+        var consumedColumns = 0
+        var lineBreaks = 0
+        var bytesAfterLastLineBreak = 0
+
+        while index < utf8Target {
+            let byte = utf8[index]
+            if byte == 0x0D {
+                let nextIndex = utf8.index(after: index)
+                if nextIndex < endIndex, nextIndex < utf8Target, utf8[nextIndex] == 0x0A {
+                    if lineBreaks == 0 {
+                        consumedColumns += 1
+                    } else {
+                        bytesAfterLastLineBreak += 1
+                    }
+                    index = utf8.index(after: nextIndex)
+                    continue
+                }
+            }
+
+            index = utf8.index(after: index)
+            if byte == 0x0A {
+                lineBreaks += 1
+                bytesAfterLastLineBreak = 0
+            } else if lineBreaks == 0 {
+                consumedColumns += 1
+            } else {
+                bytesAfterLastLineBreak += 1
+            }
+        }
+
+        if lineBreaks == 0 {
+            column += consumedColumns
+        } else {
+            line += lineBreaks
+            column = bytesAfterLastLineBreak + 1
+        }
         currentIndex = target
     }
 
@@ -338,6 +476,39 @@ public struct ParserState {
         return true
     }
 
+    @discardableResult
+    @inline(__always)
+    mutating func advanceIfAtEmptyLine() -> Bool {
+        let utf8 = text.utf8
+        let start = currentIndex
+        var index = start
+
+        while index < endIndex {
+            switch utf8[index] {
+            case 0x20, 0x09: // space, tab
+                index = utf8.index(after: index)
+            case 0x0A: // newline
+                line += 1
+                column = 1
+                currentIndex = utf8.index(after: index)
+                return true
+            default:
+                return false
+            }
+        }
+
+        column += utf8.distance(from: start, to: endIndex)
+        currentIndex = endIndex
+        return true
+    }
+
+    @discardableResult
+    mutating func advanceIfAtEmptyLineBySeparateScanForTesting() -> Bool {
+        guard isAtEmptyLine() else { return false }
+        advanceLine()
+        return true
+    }
+
     // MARK: - Fragment Buffer Management
 
     @inline(__always)
@@ -348,6 +519,11 @@ public struct ParserState {
 
     @inline(__always)
     mutating func appendLiteralRunToFragmentBuffer(upTo target: String.Index) {
+        appendLiteralRunToFragmentBuffer(upTo: target, consumedBytes: nil)
+    }
+
+    @inline(__always)
+    mutating func appendLiteralRunToFragmentBuffer(upTo target: String.Index, consumedBytes: Int?) {
         guard target > currentIndex else { return }
         if fragmentBuffer.isEmpty {
             if let range = pendingLiteralRange, range.upperBound == currentIndex {
@@ -362,7 +538,12 @@ public struct ParserState {
         }
 
         if asciiFastPath,
-           target >= currentIndex {
+           target >= currentIndex,
+           let consumedBytes {
+            column += consumedBytes
+            currentIndex = target
+        } else if asciiFastPath,
+                  target >= currentIndex {
             column += text.utf8.distance(from: currentIndex, to: target)
             currentIndex = target
         } else {

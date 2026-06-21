@@ -2,6 +2,12 @@ import Foundation
 
 /// GitHub Flavored Markdown extensions parser
 public struct GFMExtensions {
+    private static let httpPrefix: [UInt8] = [0x68, 0x74, 0x74, 0x70, 0x3A, 0x2F, 0x2F]
+    private static let httpsPrefix: [UInt8] = [0x68, 0x74, 0x74, 0x70, 0x73, 0x3A, 0x2F, 0x2F]
+    private static let ftpPrefix: [UInt8] = [0x66, 0x74, 0x70, 0x3A, 0x2F, 0x2F]
+    private static let mailtoPrefix: [UInt8] = [0x6D, 0x61, 0x69, 0x6C, 0x74, 0x6F, 0x3A]
+    private static let wwwPrefix: [UInt8] = [0x77, 0x77, 0x77, 0x2E]
+
     
     // MARK: - Task Lists
     
@@ -44,11 +50,12 @@ public struct GFMExtensions {
     static func parseTable(
         source: String,
         lineRanges: [Range<String.Index>],
-        configuration: MarkdownConfiguration
+        configuration: MarkdownConfiguration,
+        precomputedAlignments: [MarkdownParser.TableAlignment]? = nil
     ) -> (headers: [MarkdownParser.TableCell], rows: [[MarkdownParser.TableCell]], alignments: [MarkdownParser.TableAlignment])? {
         guard lineRanges.count >= 2 else { return nil }
 
-        let alignments = parseTableAlignments(source: source, range: lineRanges[1])
+        let alignments = precomputedAlignments ?? parseTableAlignments(source: source, range: lineRanges[1])
         guard !alignments.isEmpty else { return nil }
 
         let headers = parseTableRow(source: source, range: lineRanges[0], alignments: alignments, configuration: configuration)
@@ -157,6 +164,34 @@ public struct GFMExtensions {
         alignments: [MarkdownParser.TableAlignment]?,
         configuration: MarkdownConfiguration
     ) -> [MarkdownParser.TableCell]? {
+        parseASCIITableRow(
+            line,
+            alignments: alignments,
+            configuration: configuration,
+            materializeCellRanges: false
+        )
+    }
+
+    private static func parseASCIITableRow(
+        source: String,
+        range: Range<String.Index>,
+        alignments: [MarkdownParser.TableAlignment]?,
+        configuration: MarkdownConfiguration
+    ) -> [MarkdownParser.TableCell]? {
+        parseASCIITableRow(
+            source: source,
+            range: range,
+            alignments: alignments,
+            configuration: configuration,
+            materializeCellRanges: false
+        )
+    }
+
+    static func parseASCIITableRowByCopyingCellsForTesting(
+        _ line: String,
+        alignments: [MarkdownParser.TableAlignment]?,
+        configuration: MarkdownConfiguration
+    ) -> [MarkdownParser.TableCell]? {
         guard let ranges = asciiTableCellRanges(in: line) else {
             return nil
         }
@@ -169,13 +204,7 @@ public struct GFMExtensions {
             if partIndex == 0 && isEmpty { continue }
             if partIndex == ranges.count - 1 && isEmpty { continue }
 
-            let content = InlineParser.parseInlineElements(
-                in: line,
-                from: range.lowerBound,
-                to: range.upperBound,
-                configuration: configuration,
-                asciiFastPath: true
-            )
+            let content = InlineParser.parseInlineOptimized(String(line[range]), configuration: configuration)
             let alignment = alignments?[safe: cells.count] ?? .left
             cells.append(MarkdownParser.TableCell(content: content, alignment: alignment))
         }
@@ -183,7 +212,74 @@ public struct GFMExtensions {
         return cells
     }
 
+    static func parseASCIITableRowByMaterializingRangesForTesting(
+        _ line: String,
+        alignments: [MarkdownParser.TableAlignment]?,
+        configuration: MarkdownConfiguration
+    ) -> [MarkdownParser.TableCell]? {
+        parseASCIITableRow(
+            line,
+            alignments: alignments,
+            configuration: configuration,
+            materializeCellRanges: true
+        )
+    }
+
+    static func parseASCIITableRowByParsingPlainCellsForTesting(
+        _ line: String,
+        alignments: [MarkdownParser.TableAlignment]?,
+        configuration: MarkdownConfiguration
+    ) -> [MarkdownParser.TableCell]? {
+        parseASCIITableRowInSinglePass(
+            source: line,
+            range: line.startIndex..<line.endIndex,
+            alignments: alignments,
+            configuration: configuration,
+            usePlainTextCellFastPath: false
+        )
+    }
+
     private static func parseASCIITableRow(
+        _ line: String,
+        alignments: [MarkdownParser.TableAlignment]?,
+        configuration: MarkdownConfiguration,
+        materializeCellRanges: Bool
+    ) -> [MarkdownParser.TableCell]? {
+        parseASCIITableRow(
+            source: line,
+            range: line.startIndex..<line.endIndex,
+            alignments: alignments,
+            configuration: configuration,
+            materializeCellRanges: materializeCellRanges
+        )
+    }
+
+    private static func parseASCIITableRow(
+        source: String,
+        range: Range<String.Index>,
+        alignments: [MarkdownParser.TableAlignment]?,
+        configuration: MarkdownConfiguration,
+        materializeCellRanges: Bool
+    ) -> [MarkdownParser.TableCell]? {
+        if materializeCellRanges {
+            return parseASCIITableRowByMaterializingCellRanges(
+                source: source,
+                range: range,
+                alignments: alignments,
+                configuration: configuration
+            )
+        }
+
+        return parseASCIITableRowInSinglePass(
+            source: source,
+            range: range,
+            alignments: alignments,
+            configuration: configuration,
+            usePlainTextCellFastPath: true
+        )
+    }
+
+    private static func parseASCIITableRowByMaterializingCellRanges(
         source: String,
         range: Range<String.Index>,
         alignments: [MarkdownParser.TableAlignment]?,
@@ -215,37 +311,206 @@ public struct GFMExtensions {
         return cells
     }
 
-    static func parseASCIITableRowByCopyingCellsForTesting(
-        _ line: String,
+    private static func parseASCIITableRowInSinglePass(
+        source: String,
+        range: Range<String.Index>,
         alignments: [MarkdownParser.TableAlignment]?,
-        configuration: MarkdownConfiguration
+        configuration: MarkdownConfiguration,
+        usePlainTextCellFastPath: Bool
     ) -> [MarkdownParser.TableCell]? {
-        guard let ranges = asciiTableCellRanges(in: line) else {
+        guard let utf8Start = range.lowerBound.samePosition(in: source.utf8),
+              let utf8End = range.upperBound.samePosition(in: source.utf8) else {
             return nil
         }
 
+        let utf8 = source.utf8
         var cells: [MarkdownParser.TableCell] = []
-        cells.reserveCapacity(ranges.count)
+        cells.reserveCapacity(4)
 
-        for (partIndex, range) in ranges.enumerated() {
-            let isEmpty = range.lowerBound == range.upperBound
-            if partIndex == 0 && isEmpty { continue }
-            if partIndex == ranges.count - 1 && isEmpty { continue }
+        var cellStart = utf8Start
+        var index = utf8Start
+        var partIndex = 0
 
-            let content = InlineParser.parseInlineOptimized(String(line[range]), configuration: configuration)
-            let alignment = alignments?[safe: cells.count] ?? .left
-            cells.append(MarkdownParser.TableCell(content: content, alignment: alignment))
+        while true {
+            if index == utf8End || utf8[index] == 0x7C { // |
+                let trimmed = trimASCIITableWhitespace(in: utf8, lowerBound: cellStart, upperBound: index)
+                guard let lowerBound = String.Index(trimmed.lowerBound, within: source),
+                      let upperBound = String.Index(trimmed.upperBound, within: source) else {
+                    return nil
+                }
+
+                let isEmpty = lowerBound == upperBound
+                if !(partIndex == 0 && isEmpty) && !(index == utf8End && isEmpty) {
+                    let content: [MarkdownParser.InlineNode]
+                    if usePlainTextCellFastPath,
+                       let plainText = plainASCIITableCellText(
+                           source: source,
+                           utf8: utf8,
+                           lowerBound: trimmed.lowerBound,
+                           upperBound: trimmed.upperBound,
+                           configuration: configuration
+                       ) {
+                        content = plainText.isEmpty ? [] : [.text(plainText)]
+                    } else {
+                        content = InlineParser.parseInlineElements(
+                            in: source,
+                            from: lowerBound,
+                            to: upperBound,
+                            configuration: configuration,
+                            asciiFastPath: true
+                        )
+                    }
+                    let alignment = alignments?[safe: cells.count] ?? .left
+                    cells.append(MarkdownParser.TableCell(content: content, alignment: alignment))
+                }
+
+                partIndex += 1
+                if index == utf8End { break }
+                cellStart = utf8.index(after: index)
+            } else if utf8[index] >= 0x80 {
+                return nil
+            }
+
+            index = utf8.index(after: index)
         }
 
         return cells
     }
 
-    private static func parseASCIITableAlignments(_ line: String) -> [MarkdownParser.TableAlignment]? {
-        guard let ranges = asciiTableCellRanges(in: line) else {
+    private static func plainASCIITableCellText(
+        source: String,
+        utf8: String.UTF8View,
+        lowerBound: String.UTF8View.Index,
+        upperBound: String.UTF8View.Index,
+        configuration: MarkdownConfiguration
+    ) -> String? {
+        guard configuration.markdownExtensions.isEmpty else {
             return nil
         }
 
-        return parseASCIITableAlignments(line, ranges: ranges, useUTF8ByteScan: true)
+        let checksIssueReferences = configuration.enableIssueReferences
+        let checksRepositoryReferences = configuration.enableRepositoryReferences
+        let checksEmojiShortcodes = configuration.enableEmojiShortcodes
+        let checksMentions = configuration.enableMentions
+        let checksCommitSHAs = configuration.enableCommitSHAs
+        let checksAutolinks = configuration.enableAutolinks
+
+        var index = lowerBound
+        while index < upperBound {
+            let byte = utf8[index]
+            switch byte {
+            case 0x21, // !
+                 0x2A, // *
+                 0x3C, // <
+                 0x5B, // [
+                 0x5C, // backslash
+                 0x5F, // _
+                 0x60, // `
+                 0x7E: // ~
+                return nil
+            case 0x23 where checksIssueReferences: // #
+                return nil
+            case 0x2F where checksRepositoryReferences: // /
+                return nil
+            case 0x3A where checksEmojiShortcodes: // :
+                return nil
+            case 0x40 where checksMentions: // @
+                return nil
+            case 0x66, // f
+                 0x68, // h
+                 0x6D, // m
+                 0x77: // w
+                if checksAutolinks, containsPotentialBareAutolink(in: utf8, at: index, end: upperBound) {
+                    return nil
+                }
+            default:
+                break
+            }
+
+            if checksCommitSHAs,
+               containsPotentialCommitSHA(in: utf8, at: index, start: lowerBound, end: upperBound) {
+                return nil
+            }
+
+            index = utf8.index(after: index)
+        }
+
+        guard let stringLowerBound = String.Index(lowerBound, within: source),
+              let stringUpperBound = String.Index(upperBound, within: source) else {
+            return nil
+        }
+        return String(source[stringLowerBound..<stringUpperBound])
+    }
+
+    private static func containsPotentialCommitSHA(
+        in utf8: String.UTF8View,
+        at index: String.UTF8View.Index,
+        start: String.UTF8View.Index,
+        end: String.UTF8View.Index
+    ) -> Bool {
+        guard index < end, ParsingHelpers.isASCIIHex(utf8[index]) else {
+            return false
+        }
+
+        if index > start {
+            let previous = utf8[utf8.index(before: index)]
+            if ParsingHelpers.isASCIIAlnum(previous) {
+                return false
+            }
+        }
+
+        var scan = index
+        var count = 0
+        while scan < end, count < 40, ParsingHelpers.isASCIIHex(utf8[scan]) {
+            count += 1
+            scan = utf8.index(after: scan)
+        }
+
+        guard count >= 7 else {
+            return false
+        }
+
+        return scan >= end || !ParsingHelpers.isASCIIAlnum(utf8[scan])
+    }
+
+    private static func containsPotentialBareAutolink(
+        in utf8: String.UTF8View,
+        at index: String.UTF8View.Index,
+        end: String.UTF8View.Index
+    ) -> Bool {
+        switch utf8[index] {
+        case 0x66: // f
+            return hasASCIIPrefix(ftpPrefix, in: utf8, at: index, end: end)
+        case 0x68: // h
+            return hasASCIIPrefix(httpPrefix, in: utf8, at: index, end: end) ||
+                hasASCIIPrefix(httpsPrefix, in: utf8, at: index, end: end)
+        case 0x6D: // m
+            return hasASCIIPrefix(mailtoPrefix, in: utf8, at: index, end: end)
+        case 0x77: // w
+            return hasASCIIPrefix(wwwPrefix, in: utf8, at: index, end: end)
+        default:
+            return false
+        }
+    }
+
+    private static func hasASCIIPrefix(
+        _ prefix: [UInt8],
+        in utf8: String.UTF8View,
+        at index: String.UTF8View.Index,
+        end: String.UTF8View.Index
+    ) -> Bool {
+        var scan = index
+        for byte in prefix {
+            guard scan < end, utf8[scan] == byte else {
+                return false
+            }
+            scan = utf8.index(after: scan)
+        }
+        return true
+    }
+
+    private static func parseASCIITableAlignments(_ line: String) -> [MarkdownParser.TableAlignment]? {
+        parseASCIITableAlignmentsInSinglePass(source: line, range: line.startIndex..<line.endIndex)
     }
 
     static func parseASCIITableAlignmentsByCharacterScanningForTesting(
@@ -256,6 +521,16 @@ public struct GFMExtensions {
         }
 
         return parseASCIITableAlignments(line, ranges: ranges, useUTF8ByteScan: false)
+    }
+
+    static func parseASCIITableAlignmentsByMaterializingRangesForTesting(
+        _ line: String
+    ) -> [MarkdownParser.TableAlignment]? {
+        guard let ranges = asciiTableCellRanges(in: line) else {
+            return nil
+        }
+
+        return parseASCIITableAlignmentsWithBytes(in: line.utf8, ranges: ranges)
     }
 
     private static func parseASCIITableAlignments(
@@ -305,11 +580,7 @@ public struct GFMExtensions {
         source: String,
         range: Range<String.Index>
     ) -> [MarkdownParser.TableAlignment]? {
-        guard let ranges = asciiTableCellRanges(in: source, range: range) else {
-            return nil
-        }
-
-        return parseASCIITableAlignments(source: source, ranges: ranges, useUTF8ByteScan: true)
+        parseASCIITableAlignmentsInSinglePass(source: source, range: range)
     }
 
     private static func parseASCIITableAlignments(
@@ -391,6 +662,81 @@ public struct GFMExtensions {
         }
 
         return alignments
+    }
+
+    private static func parseASCIITableAlignmentsInSinglePass(
+        source: String,
+        range: Range<String.Index>
+    ) -> [MarkdownParser.TableAlignment]? {
+        guard let utf8Start = range.lowerBound.samePosition(in: source.utf8),
+              let utf8End = range.upperBound.samePosition(in: source.utf8) else {
+            return nil
+        }
+
+        let utf8 = source.utf8
+        var alignments: [MarkdownParser.TableAlignment] = []
+        alignments.reserveCapacity(4)
+
+        var cellStart = utf8Start
+        var index = utf8Start
+
+        while true {
+            if index == utf8End || utf8[index] == 0x7C { // |
+                appendASCIITableAlignment(
+                    in: utf8,
+                    lowerBound: cellStart,
+                    upperBound: index,
+                    into: &alignments
+                )
+
+                if index == utf8End { break }
+                cellStart = utf8.index(after: index)
+            } else if utf8[index] >= 0x80 {
+                return nil
+            }
+
+            index = utf8.index(after: index)
+        }
+
+        return alignments
+    }
+
+    private static func appendASCIITableAlignment(
+        in utf8: String.UTF8View,
+        lowerBound: String.UTF8View.Index,
+        upperBound: String.UTF8View.Index,
+        into alignments: inout [MarkdownParser.TableAlignment]
+    ) {
+        let trimmed = trimASCIITableWhitespace(in: utf8, lowerBound: lowerBound, upperBound: upperBound)
+        guard trimmed.lowerBound < trimmed.upperBound else {
+            return
+        }
+
+        var containsDash = false
+        var index = trimmed.lowerBound
+        while index < trimmed.upperBound {
+            if utf8[index] == 0x2D { // -
+                containsDash = true
+                break
+            }
+            index = utf8.index(after: index)
+        }
+
+        guard containsDash else {
+            return
+        }
+
+        let startsWithColon = utf8[trimmed.lowerBound] == 0x3A // :
+        let beforeEnd = utf8.index(before: trimmed.upperBound)
+        let endsWithColon = utf8[beforeEnd] == 0x3A // :
+
+        if startsWithColon && endsWithColon {
+            alignments.append(.center)
+        } else if endsWithColon {
+            alignments.append(.right)
+        } else {
+            alignments.append(.left)
+        }
     }
 
     private static func asciiTableCellRanges(in line: String) -> [Range<String.Index>]? {

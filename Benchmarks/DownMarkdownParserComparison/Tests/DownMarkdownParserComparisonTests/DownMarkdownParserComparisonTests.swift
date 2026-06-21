@@ -206,6 +206,8 @@ final class DownMarkdownParserComparisonTests: XCTestCase {
             BenchmarkCorpus(name: "setext", markdown: makeSetextCorpus(sections: sections)),
             BenchmarkCorpus(name: "code", markdown: makeCodeCorpus(sections: sections)),
             BenchmarkCorpus(name: "mixed", markdown: makeMixedCorpus(sections: sections)),
+            BenchmarkCorpus(name: "progit", markdown: makeProGitStyleCorpus(sections: sections)),
+            BenchmarkCorpus(name: "commonmark-samples", markdown: makeCommonMarkSamplesCorpus(sections: sections)),
         ]
     }
 
@@ -427,6 +429,190 @@ final class DownMarkdownParserComparisonTests: XCTestCase {
 
             """
         }
+
+        return output
+    }
+
+    private static func makeProGitStyleCorpus(sections: Int) -> String {
+        let sectionCount = max(1, sections)
+        let topics = [
+            ("Getting Started", "Snapshots", "repository", "working tree"),
+            ("Branching", "Fast Context Switching", "branch pointer", "merge base"),
+            ("Remote Workflows", "Publishing Changes", "remote tracking branch", "upstream"),
+            ("History Review", "Inspecting Changes", "commit graph", "revision range"),
+            ("Maintenance", "Keeping Repositories Healthy", "object database", "pack file"),
+            ("Collaboration", "Reviewing Contributions", "topic branch", "pull request"),
+        ]
+
+        var output = """
+        # Pro Git-Style Technical Corpus
+
+        This generated corpus models the shape of a long technical Git book without vendoring external prose. It
+        mixes chapter headings, explanatory paragraphs, command transcripts, nested lists, tables, links, images,
+        footnotes, and reference definitions so parser timings include realistic long-document structure.
+
+        """
+        output.reserveCapacity(sectionCount * 2_600)
+
+        for index in 0..<sectionCount {
+            let topic = topics[index % topics.count]
+            output += """
+            # Chapter \(index + 1): \(topic.0)
+
+            \(topic.1)
+            \(String(repeating: "=", count: topic.1.count))
+
+            A \(topic.2) records a sequence of snapshots instead of a loose collection of file differences. Each
+            snapshot has a parent relationship, an author, a message, and enough metadata for the tools to explain how
+            the \(topic.3) moved from one useful state to another.
+
+            When the repository grows, the important performance question is not only whether a parser recognizes the
+            syntax correctly. It is also whether long chapters with repeated paragraphs, commands, and reference-style
+            links continue to parse predictably after thousands of lines.
+
+            ## Command Transcript \(index)
+
+            ```console
+            $ git init example-\(index)
+            $ cd example-\(index)
+            $ git status --short
+            $ git add Sources/App.swift README.md
+            $ git commit -m "Record chapter \(index) example"
+            ```
+
+            The transcript above should stay literal even when it contains hashes like #\(1000 + index), pipes such as
+            alpha | beta | gamma, and characters that usually start inline parsing like *stars* or [brackets].
+
+            ## Review Checklist \(index)
+
+            1. Confirm the \(topic.2) is clean before changing history.
+               - Save work on a topic branch named `chapter-\(index)`.
+               - Compare against `origin/main` with a range like `main..chapter-\(index)`.
+            2. Read the command output before applying the next step.
+               - A clean result should show no modified files.
+               - A conflicted result should be handled before continuing.
+            3. Link the explanation back to [the generated chapter reference][chapter-\(index)].
+
+            | Command | Purpose | Typical Output |
+            | --- | --- | --- |
+            | `git status` | inspect the worktree | `nothing to commit` |
+            | `git log --oneline` | review compact history | `a1b2c3d topic` |
+            | `git diff --stat` | summarize changes | `3 files changed` |
+
+            > Note: generated technical prose is intentionally repetitive. Repetition keeps benchmark inputs stable
+            > while still exercising headings, paragraphs, lists, block quotes, tables, links, and code blocks.
+
+            ![Generated branch diagram \(index)](images/branch-\(index).png "Branch diagram \(index)")
+
+            [^progit-\(index)]: Generated footnote \(index) records a detail about \(topic.1.lowercased()) and
+            keeps footnote parsing active in the large document corpus.
+
+            [chapter-\(index)]: https://example.com/progit/chapter-\(index) "Generated chapter \(index)"
+
+            ---
+
+            """
+        }
+
+        return output
+    }
+
+    private static func makeCommonMarkSamplesCorpus(sections: Int) -> String {
+        let rounds = max(1, min(sections, 8))
+        let referenceCount = max(50, min(sections * 3, 120))
+
+        var output = """
+        # CommonMark Sample Stress Corpus
+
+        This generated corpus mirrors the component-level benchmark shapes used by markdown-it, commonmark.js, and
+        cmark: nested containers, reference definitions, worst-case emphasis delimiters, links, entities, escapes,
+        HTML, raw tabs, and code fences. It is a parser hotspot corpus, not an average prose document.
+
+        """
+        output.reserveCapacity(rounds * 3_000 + referenceCount * 48)
+
+        for index in 0..<rounds {
+            output += """
+            ## Block Containers \(index)
+
+            > flat quote \(index)
+            > with continuation and **inline emphasis**
+
+            > nested quote \(index)
+            > > second level with [link](https://example.com/\(index))
+            > > > third level with `code`
+
+             - this
+               - is
+                 - a
+                   - deeply
+                     - nested
+                       - bullet
+                         - list \(index)
+
+             1. ordered
+                2. nested
+                   3. deeper
+                      4. deepest \(index)
+
+             - 1
+              - 2
+               - 3
+                - 4
+               - 3
+              - 2
+             - 1
+
+            ## Inline Delimiters \(index)
+
+            *this *is *a *worst *case *for *em *backtracking \(index)
+
+            __this __is __a __worst __case __for __em __backtracking \(index)
+
+            ***this ***is ***a ***worst ***case ***for ***em ***backtracking \(index)
+
+            Valid links:
+
+            [[[](https://example.com/\(index))](https://example.com/\(index))](https://example.com/\(index))
+
+            ## Escapes, Entities, HTML, and Tabs \(index)
+
+            Escaped punctuation: \\*not emphasis\\* \\[not a link\\] \\`not code\\` \\\\ backslash.
+
+            Entities: AT&amp;T, &#35;\(index), &#x1F680;, &copy;, and unknown &madeup\(index); text.
+
+            Autolinks: <https://example.com/\(index)?a=1&b=2> and <person\(index)@example.com>.
+
+            <div class="sample" data-index="\(index)">
+            <span>inline html \(index)</span>
+            </div>
+
+            ```swift
+            let sample\(index) = "backticks ``` stay inside fenced code"
+            print(sample\(index))
+            ```
+
+            1\t4444
+            22\t333
+            333\t22
+            4444\t1
+
+            \ttab-indented line \(index)
+                space-indented line \(index)
+            \ttab-indented line \(index)
+
+            a lot of                                                spaces in between here
+
+            a lot of\t\t\t\t\t\t\t\t\t\t\t\ttabs in between here
+
+            """
+        }
+
+        output += "## Reference Definition List\n\n"
+        for index in 1...referenceCount {
+            output += "[item \(index)]: <https://example.com/reference/\(index)> \"Reference title \(index)\"\n"
+        }
+        output += "\n"
 
         return output
     }

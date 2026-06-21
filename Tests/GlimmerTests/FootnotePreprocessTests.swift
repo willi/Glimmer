@@ -39,4 +39,36 @@ final class FootnotePreprocessTests: XCTestCase {
         }
         XCTAssertEqual(definitionLabels, ["inline-1", "inline-2"])
     }
+
+    func testSinglePassInlineFootnoteMatcherMatchesCaretSearchPreprocess() {
+        var disabledFootnotes = MarkdownConfiguration.default
+        disabledFootnotes.enableFootnotes = false
+
+        let inputs = [
+            "Plain text with no inline footnotes.",
+            "Plain carets ^ and ^^ without bracket markers.",
+            "Inline note ^[footnote here] end.",
+            "First ^[one] and second ^[two].",
+            "Unicode inline ^[cafe\u{301} and 😀] note.",
+            "Empty inline note ^[] stays literal.",
+            "Unclosed inline note ^[literal text",
+            "Broken then valid ^[unclosed and ^[valid] end"
+        ]
+
+        for configuration in [MarkdownConfiguration.default, disabledFootnotes] {
+            for input in inputs {
+                let singlePass = MarkdownParser.parse(input, configuration: configuration)
+                let caretSearch = MarkdownParser.parseByCaretSearchInlineFootnotePreprocessForTesting(
+                    input,
+                    configuration: configuration
+                )
+
+                XCTAssertEqual(
+                    ParserCanonicalSnapshot.canonicalDescription(for: singlePass),
+                    ParserCanonicalSnapshot.canonicalDescription(for: caretSearch),
+                    input
+                )
+            }
+        }
+    }
 }

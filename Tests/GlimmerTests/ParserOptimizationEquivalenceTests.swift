@@ -406,6 +406,68 @@ final class ParserOptimizationEquivalenceTests: XCTestCase {
         }
     }
 
+    func testInlineLiteralRunByteCountsMatchRecountingPath() {
+        let fixtures = ParserCorrectnessFixtures.inlineEquivalence + [
+            .init(
+                name: "longPlainASCII",
+                markdown: String(repeating: "plain ascii words before marker ", count: 80) + "**bold** tail",
+                configuration: .default
+            ),
+            .init(
+                name: "defaultMarkers",
+                markdown: "Prefix before [link](https://example.com) then `code` and *italic* after",
+                configuration: .default
+            ),
+            .init(
+                name: "githubRepositoryCandidate",
+                markdown: "Prefix before apple/swift repository reference and trailing text",
+                configuration: .github
+            ),
+            .init(
+                name: "githubAutolinkCandidate",
+                markdown: "Prefix before https://example.com/path?q=1 and trailing text",
+                configuration: .github
+            ),
+            .init(
+                name: "githubCommitCandidate",
+                markdown: "Prefix before deadbeefdeadbeefdeadbeefdeadbeefdeadbeef and trailing text",
+                configuration: .github
+            ),
+            .init(
+                name: "newlineDispatch",
+                markdown: "Line one before soft break\nline two with **bold**",
+                configuration: .default
+            ),
+            .init(
+                name: "unicodeFallback",
+                markdown: "Unicode café before **bold** and 世界 after",
+                configuration: .default
+            )
+        ]
+
+        for fixture in fixtures {
+            var recountingState = ParserState(text: fixture.markdown)
+            let recounting = InlineParser.parseInlineElementsByRecountingLiteralRunBytesForTesting(
+                &recountingState,
+                configuration: fixture.configuration
+            )
+
+            var countedState = ParserState(text: fixture.markdown)
+            let counted = InlineParser.parseInlineElements(&countedState, configuration: fixture.configuration)
+
+            ParserCanonicalSnapshot.assertSemanticallyEqual(
+                [.paragraph(children: counted)],
+                [.paragraph(children: recounting)],
+                fixture.name
+            )
+            XCTAssertEqual(
+                inlineParsePositionSignature(countedState, in: fixture.markdown),
+                inlineParsePositionSignature(recountingState, in: fixture.markdown),
+                fixture.name
+            )
+        }
+    }
+
     func testInlineFastPathsMatchBaselineParsersForFixtures() throws {
         for fixture in ParserCorrectnessFixtures.linkEquivalence {
             var copyingState = ParserState(text: fixture.markdown)
@@ -603,5 +665,10 @@ final class ParserOptimizationEquivalenceTests: XCTestCase {
         let canonical = block.map { ParserCanonicalSnapshot.canonicalDescription(for: [$0]) } ?? "nil"
         let offset = input.distance(from: input.startIndex, to: state.currentIndex)
         return "\(canonical)|line:\(state.line)|column:\(state.column)|offset:\(offset)"
+    }
+
+    private func inlineParsePositionSignature(_ state: ParserState, in input: String) -> String {
+        let offset = input.distance(from: input.startIndex, to: state.currentIndex)
+        return "line:\(state.line)|column:\(state.column)|offset:\(offset)"
     }
 }

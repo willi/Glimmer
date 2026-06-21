@@ -25,9 +25,66 @@ public struct InlineParser {
         let enableRepositoryReferences: Bool
         let enableAutolinks: Bool
         let enableCommitSHAs: Bool
+        let extensionTriggerBytes: ASCIITriggerByteSet?
 
         var hasScanningGitHubFeatures: Bool {
             enableRepositoryReferences || enableAutolinks || enableCommitSHAs
+        }
+    }
+
+    private struct ASCIITriggerByteSet {
+        private var lowerBits: UInt64 = 0
+        private var upperBits: UInt64 = 0
+
+        mutating func insert(_ byte: UInt8) {
+            guard byte < 0x80 else { return }
+            if byte < 64 {
+                lowerBits |= UInt64(1) << UInt64(byte)
+            } else {
+                upperBits |= UInt64(1) << UInt64(byte - 64)
+            }
+        }
+
+        @inline(__always)
+        func contains(_ byte: UInt8) -> Bool {
+            guard byte < 0x80 else { return false }
+            if byte < 64 {
+                return (lowerBits & (UInt64(1) << UInt64(byte))) != 0
+            }
+            return (upperBits & (UInt64(1) << UInt64(byte - 64))) != 0
+        }
+    }
+
+    private struct ASCIIFailedInlineCodeScanCache {
+        private static let maxCachedRunLength = 1_000
+
+        private var scannedThroughEnd = false
+        private var lastRunStartByLength: [Int: String.Index] = [:]
+
+        mutating func shouldSkipScan(openingLength: Int, at openingStart: String.Index) -> Bool {
+            guard scannedThroughEnd,
+                  openingLength <= Self.maxCachedRunLength,
+                  let lastRunStart = lastRunStartByLength[openingLength] else {
+                return false
+            }
+
+            return lastRunStart <= openingStart
+        }
+
+        mutating func recordRun(length: Int, start: String.Index) {
+            guard length > 0, length <= Self.maxCachedRunLength else {
+                return
+            }
+
+            if let previousStart = lastRunStartByLength[length], previousStart >= start {
+                return
+            }
+
+            lastRunStartByLength[length] = start
+        }
+
+        mutating func recordScannedThroughEnd() {
+            scannedThroughEnd = true
         }
     }
 
@@ -42,10 +99,12 @@ public struct InlineParser {
             let ownerRange: Range<String.Index>
             let repoRange: Range<String.Index>
             let afterRepo: String.Index
+            let byteCount: Int
         }
 
         struct CommitSHA {
             let range: Range<String.Index>
+            let byteCount: Int
         }
 
         case bareAutolink(start: String.Index)
@@ -124,16 +183,186 @@ public struct InlineParser {
         )
     }
 
+    static func parseInlineElementsByRecountingLiteralRunBytesForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> [MarkdownParser.InlineNode] {
+        parseInlineElements(
+            &state,
+            configuration: configuration,
+            prescanASCIIPlainText: false,
+            useASCIICandidateDispatch: true,
+            useDeferredLiteralRuns: true,
+            useKnownLiteralRunByteCount: false
+        )
+    }
+
+    static func parseInlineElementsByRecountingGFMLeafMovesForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> [MarkdownParser.InlineNode] {
+        parseInlineElements(
+            &state,
+            configuration: configuration,
+            prescanASCIIPlainText: false,
+            useASCIICandidateDispatch: true,
+            useDeferredLiteralRuns: true,
+            useKnownLiteralRunByteCount: true,
+            useCountedGFMLeafMoves: false
+        )
+    }
+
+    static func parseInlineElementsWithUngatedASCIICandidateValidationForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> [MarkdownParser.InlineNode] {
+        parseInlineElements(
+            &state,
+            configuration: configuration,
+            prescanASCIIPlainText: false,
+            useASCIICandidateDispatch: true,
+            useDeferredLiteralRuns: true,
+            useKnownLiteralRunByteCount: true,
+            useCountedGFMLeafMoves: true,
+            gateASCIICandidateValidation: false
+        )
+    }
+
+    static func parseInlineElementsByCheckingGFMLeafBoundariesWithCharactersForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> [MarkdownParser.InlineNode] {
+        parseInlineElements(
+            &state,
+            configuration: configuration,
+            prescanASCIIPlainText: false,
+            useASCIICandidateDispatch: true,
+            useDeferredLiteralRuns: true,
+            useKnownLiteralRunByteCount: true,
+            useCountedGFMLeafMoves: true,
+            gateASCIICandidateValidation: true,
+            useASCIIByteGFMLeafBoundaryChecks: false
+        )
+    }
+
+    static func parseInlineElementsByCopyingMentionUsernamesBeforeEmailRejectionForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> [MarkdownParser.InlineNode] {
+        parseInlineElements(
+            &state,
+            configuration: configuration,
+            prescanASCIIPlainText: false,
+            useASCIICandidateDispatch: true,
+            useDeferredLiteralRuns: true,
+            useKnownLiteralRunByteCount: true,
+            useCountedGFMLeafMoves: true,
+            gateASCIICandidateValidation: true,
+            useASCIIByteGFMLeafBoundaryChecks: true,
+            useDeferredMentionUsernameCopy: false
+        )
+    }
+
+    static func parseInlineElementsBySwitchingASCIIDispatchWithCharactersForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> [MarkdownParser.InlineNode] {
+        parseInlineElements(
+            &state,
+            configuration: configuration,
+            prescanASCIIPlainText: false,
+            useASCIICandidateDispatch: true,
+            useDeferredLiteralRuns: true,
+            useKnownLiteralRunByteCount: true,
+            useCountedGFMLeafMoves: true,
+            gateASCIICandidateValidation: true,
+            useASCIIByteGFMLeafBoundaryChecks: true,
+            useASCIIByteInlineDispatch: false
+        )
+    }
+
+    static func parseInlineElementsByHandlingASCIIEscapesWithCharactersForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> [MarkdownParser.InlineNode] {
+        parseInlineElements(
+            &state,
+            configuration: configuration,
+            prescanASCIIPlainText: false,
+            useASCIICandidateDispatch: true,
+            useDeferredLiteralRuns: true,
+            useKnownLiteralRunByteCount: true,
+            useCountedGFMLeafMoves: true,
+            gateASCIICandidateValidation: true,
+            useASCIIByteGFMLeafBoundaryChecks: true,
+            useASCIIByteInlineDispatch: true,
+            useASCIIByteEscapeDispatch: false
+        )
+    }
+
+    static func parseInlineElementsByReprobingFailedInlineCodeSpansForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> [MarkdownParser.InlineNode] {
+        parseInlineElements(
+            &state,
+            configuration: configuration,
+            prescanASCIIPlainText: false,
+            useASCIICandidateDispatch: true,
+            useDeferredLiteralRuns: true,
+            useKnownLiteralRunByteCount: true,
+            useCountedGFMLeafMoves: true,
+            gateASCIICandidateValidation: true,
+            useASCIIByteGFMLeafBoundaryChecks: true,
+            useDeferredMentionUsernameCopy: true,
+            useASCIIByteInlineDispatch: true,
+            useASCIIByteEscapeDispatch: true,
+            useFailedInlineCodeScanCache: false
+        )
+    }
+
+    static func parseInlineElementsByDisablingExtensionAwareASCIITextRunsForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> [MarkdownParser.InlineNode] {
+        parseInlineElements(
+            &state,
+            configuration: configuration,
+            prescanASCIIPlainText: false,
+            useASCIICandidateDispatch: true,
+            useDeferredLiteralRuns: true,
+            useKnownLiteralRunByteCount: true,
+            useCountedGFMLeafMoves: true,
+            gateASCIICandidateValidation: true,
+            useASCIIByteGFMLeafBoundaryChecks: true,
+            useDeferredMentionUsernameCopy: true,
+            useASCIIByteInlineDispatch: true,
+            useASCIIByteEscapeDispatch: true,
+            useFailedInlineCodeScanCache: true,
+            useExtensionAwareASCIITextRuns: false
+        )
+    }
+
     private static func parseInlineElements(
         _ state: inout ParserState,
         configuration: MarkdownConfiguration,
         prescanASCIIPlainText: Bool,
         useASCIICandidateDispatch: Bool = true,
-        useDeferredLiteralRuns: Bool = true
+        useDeferredLiteralRuns: Bool = true,
+        useKnownLiteralRunByteCount: Bool = true,
+        useCountedGFMLeafMoves: Bool = true,
+        gateASCIICandidateValidation: Bool = true,
+        useASCIIByteGFMLeafBoundaryChecks: Bool = true,
+        useDeferredMentionUsernameCopy: Bool = true,
+        useASCIIByteInlineDispatch: Bool = true,
+        useASCIIByteEscapeDispatch: Bool = true,
+        useFailedInlineCodeScanCache: Bool = true,
+        useExtensionAwareASCIITextRuns: Bool = true
     ) -> [MarkdownParser.InlineNode] {
         var inlines: [MarkdownParser.InlineNode] = []
         var iterationCount = 0
         var pendingASCIICandidate: ASCIIInlineCandidate?
+        var failedInlineCodeScanCache = ASCIIFailedInlineCodeScanCache()
         let maxIterations = configuration.maxInlineIterations
         let hasMarkdownExtensions = !configuration.markdownExtensions.isEmpty
         let enableFootnotes = configuration.enableFootnotes
@@ -144,6 +373,10 @@ public struct InlineParser {
         let enableAutolinks = configuration.enableAutolinks
         let enableCommitSHAs = configuration.enableCommitSHAs
         let hasScanningGitHubFeatures = enableRepositoryReferences || enableAutolinks || enableCommitSHAs
+        let extensionTriggerBytes = useExtensionAwareASCIITextRuns
+            ? asciiExtensionTriggerByteSet(for: configuration.markdownExtensions)
+            : nil
+        let canUseExtensionAwareASCII = !hasMarkdownExtensions || extensionTriggerBytes != nil
 
         // Decide ASCII fast-path once per state if not already set.
         state.enableASCIIFastPathIfPossible()
@@ -176,7 +409,7 @@ public struct InlineParser {
                 }
                 asciiCandidate = nil
 
-                if !hasMarkdownExtensions {
+                if canUseExtensionAwareASCII {
                     var scannedCandidate: ASCIIInlineCandidate?
                     if consumeASCIITextRunIfPossible(
                         &state,
@@ -186,10 +419,13 @@ public struct InlineParser {
                             enableEmojiShortcodes: enableEmojiShortcodes,
                             enableRepositoryReferences: enableRepositoryReferences,
                             enableAutolinks: enableAutolinks,
-                            enableCommitSHAs: enableCommitSHAs
+                            enableCommitSHAs: enableCommitSHAs,
+                            extensionTriggerBytes: extensionTriggerBytes
                         ),
                         candidate: &scannedCandidate,
-                        useDeferredLiteralRuns: useDeferredLiteralRuns
+                        useDeferredLiteralRuns: useDeferredLiteralRuns,
+                        useKnownLiteralRunByteCount: useKnownLiteralRunByteCount,
+                        gateASCIICandidateValidation: gateASCIICandidateValidation
                     ) {
                         if useASCIICandidateDispatch {
                             pendingASCIICandidate = scannedCandidate
@@ -201,6 +437,38 @@ public struct InlineParser {
             let asciiCandidateKind = asciiCandidate?.kind
 
             let mark = state.mark()
+            if useASCIIByteInlineDispatch,
+               state.asciiFastPath,
+               canUseExtensionAwareASCII,
+               let byte = currentASCIIByte(in: state),
+               parseASCIIInlineDispatchByte(
+                byte,
+                &state,
+                configuration: configuration,
+                extensionTriggerBytes: extensionTriggerBytes,
+                asciiCandidate: asciiCandidate,
+                asciiCandidateKind: asciiCandidateKind,
+                enableFootnotes: enableFootnotes,
+                enableMentions: enableMentions,
+                enableIssueReferences: enableIssueReferences,
+                enableEmojiShortcodes: enableEmojiShortcodes,
+                enableRepositoryReferences: enableRepositoryReferences,
+                enableAutolinks: enableAutolinks,
+                enableCommitSHAs: enableCommitSHAs,
+                useCountedGFMLeafMoves: useCountedGFMLeafMoves,
+                useASCIIByteGFMLeafBoundaryChecks: useASCIIByteGFMLeafBoundaryChecks,
+                useDeferredMentionUsernameCopy: useDeferredMentionUsernameCopy,
+                useASCIIByteEscapeDispatch: useASCIIByteEscapeDispatch,
+                useFailedInlineCodeScanCache: useFailedInlineCodeScanCache,
+                failedInlineCodeScanCache: &failedInlineCodeScanCache,
+                into: &inlines
+               ) {
+                if state.currentIndex == mark.index {
+                    appendCurrentASCIIByteLiteral(&state)
+                }
+                continue
+            }
+
             guard let ch = state.current() else { break }
 
             if hasMarkdownExtensions,
@@ -222,12 +490,20 @@ public struct InlineParser {
                 }
 
             case "`":
-                if let code = parseInlineCode(&state) {
+                if let code = parseInlineCode(
+                    &state,
+                    failedInlineCodeScanCache: &failedInlineCodeScanCache,
+                    useFailedInlineCodeScanCache: useFailedInlineCodeScanCache
+                ) {
                     state.flushFragmentBuffer(&inlines)
                     inlines.append(code)
                 } else {
-                    state.appendToFragmentBuffer("`")
-                    state.advance()
+                    if useFailedInlineCodeScanCache, state.asciiFastPath {
+                        appendCurrentASCIIBacktickRunLiteral(&state)
+                    } else {
+                        state.appendToFragmentBuffer("`")
+                        state.advance()
+                    }
                 }
 
             case "*", "_":
@@ -292,7 +568,13 @@ public struct InlineParser {
                 }
 
             case "@":
-                if enableMentions, let mention = parseMention(&state) {
+                if enableMentions,
+                   let mention = parseMention(
+                    &state,
+                    useCountedASCIIMove: useCountedGFMLeafMoves,
+                    useASCIIByteBoundaryChecks: useASCIIByteGFMLeafBoundaryChecks,
+                    useDeferredUsernameCopy: useDeferredMentionUsernameCopy
+                   ) {
                     state.flushFragmentBuffer(&inlines)
                     inlines.append(mention)
                 } else {
@@ -301,7 +583,12 @@ public struct InlineParser {
                 }
 
             case "#":
-                if enableIssueReferences, let issue = parseIssueReference(&state) {
+                if enableIssueReferences,
+                   let issue = parseIssueReference(
+                    &state,
+                    useCountedASCIIMove: useCountedGFMLeafMoves,
+                    useASCIIByteBoundaryChecks: useASCIIByteGFMLeafBoundaryChecks
+                   ) {
                     state.flushFragmentBuffer(&inlines)
                     inlines.append(issue)
                 } else {
@@ -310,7 +597,8 @@ public struct InlineParser {
                 }
 
             case ":":
-                if enableEmojiShortcodes, let emoji = parseEmojiShortcode(&state) {
+                if enableEmojiShortcodes,
+                   let emoji = parseEmojiShortcode(&state, useCountedASCIIMove: useCountedGFMLeafMoves) {
                     state.flushFragmentBuffer(&inlines)
                     inlines.append(emoji)
                 } else {
@@ -332,7 +620,9 @@ public struct InlineParser {
                           let repo = parseRepositoryReference(
                             &state,
                             candidate: asciiCandidate,
-                            shouldProbe: asciiCandidateKind != .repositoryReference
+                            shouldProbe: asciiCandidateKind != .repositoryReference,
+                            useCountedASCIIMove: useCountedGFMLeafMoves,
+                            useASCIIByteBoundaryChecks: useASCIIByteGFMLeafBoundaryChecks
                           ) {
                     state.flushFragmentBuffer(&inlines)
                     inlines.append(repo)
@@ -346,7 +636,9 @@ public struct InlineParser {
                    let repo = parseRepositoryReference(
                     &state,
                     candidate: asciiCandidate,
-                    shouldProbe: asciiCandidateKind != .repositoryReference
+                    shouldProbe: asciiCandidateKind != .repositoryReference,
+                    useCountedASCIIMove: useCountedGFMLeafMoves,
+                    useASCIIByteBoundaryChecks: useASCIIByteGFMLeafBoundaryChecks
                    ) {
                     state.flushFragmentBuffer(&inlines)
                     inlines.append(repo)
@@ -354,7 +646,9 @@ public struct InlineParser {
                           let sha = parseCommitSHA(
                             &state,
                             candidate: asciiCandidate,
-                            shouldProbe: asciiCandidateKind != .commitSHA
+                            shouldProbe: asciiCandidateKind != .commitSHA,
+                            useCountedASCIIMove: useCountedGFMLeafMoves,
+                            useASCIIByteBoundaryChecks: useASCIIByteGFMLeafBoundaryChecks
                           ) {
                     state.flushFragmentBuffer(&inlines)
                     inlines.append(sha)
@@ -373,6 +667,236 @@ public struct InlineParser {
 
         state.flushFragmentBuffer(&inlines)
         return inlines
+    }
+
+    private static func parseASCIIInlineDispatchByte(
+        _ byte: UInt8,
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration,
+        extensionTriggerBytes: ASCIITriggerByteSet?,
+        asciiCandidate: ASCIIInlineCandidate?,
+        asciiCandidateKind: ASCIIInlineCandidate.Kind?,
+        enableFootnotes: Bool,
+        enableMentions: Bool,
+        enableIssueReferences: Bool,
+        enableEmojiShortcodes: Bool,
+        enableRepositoryReferences: Bool,
+        enableAutolinks: Bool,
+        enableCommitSHAs: Bool,
+        useCountedGFMLeafMoves: Bool,
+        useASCIIByteGFMLeafBoundaryChecks: Bool,
+        useDeferredMentionUsernameCopy: Bool,
+        useASCIIByteEscapeDispatch: Bool,
+        useFailedInlineCodeScanCache: Bool,
+        failedInlineCodeScanCache: inout ASCIIFailedInlineCodeScanCache,
+        into inlines: inout [MarkdownParser.InlineNode]
+    ) -> Bool {
+        if extensionTriggerBytes?.contains(byte) == true,
+           let extensionInline = parseExtensionInline(&state, configuration: configuration) {
+            state.flushFragmentBuffer(&inlines)
+            inlines.append(extensionInline)
+            return true
+        }
+
+        switch byte {
+        case 0x0A, 0x0D: // newline, carriage return
+            return false
+
+        case 0x5C: // backslash
+            guard useASCIIByteEscapeDispatch else {
+                return false
+            }
+            return parseASCIIBackslashEscape(&state, into: &inlines)
+
+        case 0x60: // `
+            if let code = parseInlineCode(
+                &state,
+                failedInlineCodeScanCache: &failedInlineCodeScanCache,
+                useFailedInlineCodeScanCache: useFailedInlineCodeScanCache
+            ) {
+                state.flushFragmentBuffer(&inlines)
+                inlines.append(code)
+            } else {
+                if useFailedInlineCodeScanCache {
+                    appendCurrentASCIIBacktickRunLiteral(&state)
+                } else {
+                    appendCurrentASCIIByteLiteral(&state)
+                }
+            }
+
+        case 0x2A: // *
+            if let emphasis = parseEmphasis(&state, delimiter: "*", configuration: configuration) {
+                state.flushFragmentBuffer(&inlines)
+                inlines.append(emphasis)
+            } else {
+                appendCurrentASCIIByteLiteral(&state)
+            }
+
+        case 0x5F: // _
+            if let emphasis = parseEmphasis(&state, delimiter: "_", configuration: configuration) {
+                state.flushFragmentBuffer(&inlines)
+                inlines.append(emphasis)
+            } else {
+                appendCurrentASCIIByteLiteral(&state)
+            }
+
+        case 0x7E: // ~
+            if let strikethrough = parseStrikethrough(&state, configuration: configuration) {
+                state.flushFragmentBuffer(&inlines)
+                inlines.append(strikethrough)
+            } else {
+                appendCurrentASCIIByteLiteral(&state)
+            }
+
+        case 0x5B: // [
+            if enableFootnotes, nextASCIIByte(in: state) == 0x5E { // ^
+                if let footnote = parseFootnoteReference(&state) {
+                    state.flushFragmentBuffer(&inlines)
+                    inlines.append(footnote)
+                } else {
+                    appendCurrentASCIIByteLiteral(&state)
+                }
+            } else if let link = parseLink(&state, configuration: configuration) {
+                state.flushFragmentBuffer(&inlines)
+                inlines.append(link)
+            } else {
+                appendCurrentASCIIByteLiteral(&state)
+            }
+
+        case 0x21: // !
+            if nextASCIIByte(in: state) == 0x5B, // [
+               let image = parseImage(&state, configuration: configuration) {
+                state.flushFragmentBuffer(&inlines)
+                inlines.append(image)
+            } else {
+                appendCurrentASCIIByteLiteral(&state)
+            }
+
+        case 0x3C: // <
+            if let autolink = parseUnifiedAutolink(&state, angleBracketMode: true) {
+                state.flushFragmentBuffer(&inlines)
+                inlines.append(autolink)
+            } else if let tag = parseHTMLTag(&state) {
+                state.flushFragmentBuffer(&inlines)
+                inlines.append(tag)
+            } else {
+                appendCurrentASCIIByteLiteral(&state)
+            }
+
+        case 0x40: // @
+            if enableMentions,
+               let mention = parseMention(
+                &state,
+                useCountedASCIIMove: useCountedGFMLeafMoves,
+                useASCIIByteBoundaryChecks: useASCIIByteGFMLeafBoundaryChecks,
+                useDeferredUsernameCopy: useDeferredMentionUsernameCopy
+               ) {
+                state.flushFragmentBuffer(&inlines)
+                inlines.append(mention)
+            } else {
+                appendCurrentASCIIByteLiteral(&state)
+            }
+
+        case 0x23: // #
+            if enableIssueReferences,
+               let issue = parseIssueReference(
+                &state,
+                useCountedASCIIMove: useCountedGFMLeafMoves,
+                useASCIIByteBoundaryChecks: useASCIIByteGFMLeafBoundaryChecks
+               ) {
+                state.flushFragmentBuffer(&inlines)
+                inlines.append(issue)
+            } else {
+                appendCurrentASCIIByteLiteral(&state)
+            }
+
+        case 0x3A: // :
+            if enableEmojiShortcodes,
+               let emoji = parseEmojiShortcode(&state, useCountedASCIIMove: useCountedGFMLeafMoves) {
+                state.flushFragmentBuffer(&inlines)
+                inlines.append(emoji)
+            } else {
+                appendCurrentASCIIByteLiteral(&state)
+            }
+
+        case 0x66, 0x68, 0x6D, 0x77: // f h m w
+            if enableAutolinks,
+               (
+                asciiCandidateKind == .bareAutolink ||
+                (asciiCandidateKind == nil && shouldAttemptBareAutolink(state))
+               ),
+               let autolink = parseUnifiedAutolink(&state, angleBracketMode: false) {
+                state.flushFragmentBuffer(&inlines)
+                inlines.append(autolink)
+            } else if enableRepositoryReferences,
+                      let repo = parseRepositoryReference(
+                        &state,
+                        candidate: asciiCandidate,
+                        shouldProbe: asciiCandidateKind != .repositoryReference,
+                        useCountedASCIIMove: useCountedGFMLeafMoves,
+                        useASCIIByteBoundaryChecks: useASCIIByteGFMLeafBoundaryChecks
+                      ) {
+                state.flushFragmentBuffer(&inlines)
+                inlines.append(repo)
+            } else {
+                appendCurrentASCIIByteLiteral(&state)
+            }
+
+        default:
+            if enableRepositoryReferences,
+               let repo = parseRepositoryReference(
+                &state,
+                candidate: asciiCandidate,
+                shouldProbe: asciiCandidateKind != .repositoryReference,
+                useCountedASCIIMove: useCountedGFMLeafMoves,
+                useASCIIByteBoundaryChecks: useASCIIByteGFMLeafBoundaryChecks
+               ) {
+                state.flushFragmentBuffer(&inlines)
+                inlines.append(repo)
+            } else if enableCommitSHAs,
+                      let sha = parseCommitSHA(
+                        &state,
+                        candidate: asciiCandidate,
+                        shouldProbe: asciiCandidateKind != .commitSHA,
+                        useCountedASCIIMove: useCountedGFMLeafMoves,
+                        useASCIIByteBoundaryChecks: useASCIIByteGFMLeafBoundaryChecks
+                      ) {
+                state.flushFragmentBuffer(&inlines)
+                inlines.append(sha)
+            } else {
+                appendCurrentASCIIByteLiteral(&state)
+            }
+        }
+
+        return true
+    }
+
+    private static func parseASCIIBackslashEscape(
+        _ state: inout ParserState,
+        into inlines: inout [MarkdownParser.InlineNode]
+    ) -> Bool {
+        let utf8 = state.text.utf8
+        let escapedStart = utf8.index(after: state.currentIndex)
+        guard escapedStart < state.endIndex else {
+            appendCurrentASCIIByteLiteral(&state)
+            return true
+        }
+
+        let escapedByte = utf8[escapedStart]
+        guard escapedByte < 0x80, escapedByte != 0x0A, escapedByte != 0x0D else { // ASCII except line breaks
+            return false
+        }
+
+        let escapedEnd = utf8.index(after: escapedStart)
+        state.flushFragmentBuffer(&inlines)
+        inlines.append(.text(String(state.text[escapedStart..<escapedEnd])))
+        state.moveASCII(
+            to: escapedEnd,
+            consumedBytes: 2,
+            lineBreaks: 0,
+            bytesAfterLastLineBreak: 2
+        )
+        return true
     }
 
     static func parseInlineElements(
@@ -434,7 +958,9 @@ public struct InlineParser {
         _ state: inout ParserState,
         options: ASCIITextRunOptions,
         candidate: inout ASCIIInlineCandidate?,
-        useDeferredLiteralRuns: Bool
+        useDeferredLiteralRuns: Bool,
+        useKnownLiteralRunByteCount: Bool,
+        gateASCIICandidateValidation: Bool
     ) -> Bool {
         candidate = nil
 
@@ -443,14 +969,17 @@ public struct InlineParser {
                 &state,
                 options: options,
                 candidate: &candidate,
-                useDeferredLiteralRuns: useDeferredLiteralRuns
+                useDeferredLiteralRuns: useDeferredLiteralRuns,
+                useKnownLiteralRunByteCount: useKnownLiteralRunByteCount,
+                gateASCIICandidateValidation: gateASCIICandidateValidation
             )
         }
 
         return consumeSimpleASCIITextRun(
             &state,
             options: options,
-            useDeferredLiteralRuns: useDeferredLiteralRuns
+            useDeferredLiteralRuns: useDeferredLiteralRuns,
+            useKnownLiteralRunByteCount: useKnownLiteralRunByteCount
         )
     }
 
@@ -468,9 +997,11 @@ public struct InlineParser {
                 enableEmojiShortcodes: enableEmojiShortcodes,
                 enableRepositoryReferences: false,
                 enableAutolinks: false,
-                enableCommitSHAs: false
+                enableCommitSHAs: false,
+                extensionTriggerBytes: nil
             ),
-            useDeferredLiteralRuns: true
+            useDeferredLiteralRuns: true,
+            useKnownLiteralRunByteCount: true
         )
     }
 
@@ -489,17 +1020,21 @@ public struct InlineParser {
                 enableEmojiShortcodes: enableEmojiShortcodes,
                 enableRepositoryReferences: false,
                 enableAutolinks: false,
-                enableCommitSHAs: false
+                enableCommitSHAs: false,
+                extensionTriggerBytes: nil
             ),
             candidate: &unusedCandidate,
-            useDeferredLiteralRuns: true
+            useDeferredLiteralRuns: true,
+            useKnownLiteralRunByteCount: true,
+            gateASCIICandidateValidation: true
         )
     }
 
     private static func consumeSimpleASCIITextRun(
         _ state: inout ParserState,
         options: ASCIITextRunOptions,
-        useDeferredLiteralRuns: Bool
+        useDeferredLiteralRuns: Bool,
+        useKnownLiteralRunByteCount: Bool
     ) -> Bool {
         guard state.asciiFastPath else {
             return false
@@ -516,29 +1051,34 @@ public struct InlineParser {
             utf8[start],
             enableMentions: options.enableMentions,
             enableIssueReferences: options.enableIssueReferences,
-            enableEmojiShortcodes: options.enableEmojiShortcodes
+            enableEmojiShortcodes: options.enableEmojiShortcodes,
+            extensionTriggerBytes: options.extensionTriggerBytes
         ) else {
             return false
         }
 
         var scan = utf8.index(after: start)
+        var consumedBytes = 1
         while scan < end {
             if isASCIIInlineDispatchByte(
                 utf8[scan],
                 enableMentions: options.enableMentions,
                 enableIssueReferences: options.enableIssueReferences,
-                enableEmojiShortcodes: options.enableEmojiShortcodes
+                enableEmojiShortcodes: options.enableEmojiShortcodes,
+                extensionTriggerBytes: options.extensionTriggerBytes
             ) {
                 break
             }
 
             scan = utf8.index(after: scan)
+            consumedBytes += 1
         }
 
         appendLiteralRunToFragmentBuffer(
             &state,
             upTo: scan,
-            useDeferredLiteralRuns: useDeferredLiteralRuns
+            useDeferredLiteralRuns: useDeferredLiteralRuns,
+            consumedBytes: useKnownLiteralRunByteCount ? consumedBytes : nil
         )
         return true
     }
@@ -547,7 +1087,9 @@ public struct InlineParser {
         _ state: inout ParserState,
         options: ASCIITextRunOptions,
         candidate: inout ASCIIInlineCandidate?,
-        useDeferredLiteralRuns: Bool
+        useDeferredLiteralRuns: Bool,
+        useKnownLiteralRunByteCount: Bool,
+        gateASCIICandidateValidation: Bool
     ) -> Bool {
         guard state.asciiFastPath else {
             return false
@@ -560,7 +1102,12 @@ public struct InlineParser {
             return false
         }
 
-        if validatedASCIIInlineCandidate(
+        if shouldValidateASCIIInlineCandidate(
+            utf8[start],
+            options: options,
+            gateASCIICandidateValidation: gateASCIICandidateValidation
+        ),
+           validatedASCIIInlineCandidate(
             in: utf8,
             at: start,
             textStart: utf8.startIndex,
@@ -568,7 +1115,7 @@ public struct InlineParser {
             enableRepositoryReferences: options.enableRepositoryReferences,
             enableAutolinks: options.enableAutolinks,
             enableCommitSHAs: options.enableCommitSHAs
-        ) != nil {
+           ) != nil {
             return false
         }
 
@@ -576,14 +1123,21 @@ public struct InlineParser {
             utf8[start],
             enableMentions: options.enableMentions,
             enableIssueReferences: options.enableIssueReferences,
-            enableEmojiShortcodes: options.enableEmojiShortcodes
+            enableEmojiShortcodes: options.enableEmojiShortcodes,
+            extensionTriggerBytes: options.extensionTriggerBytes
         ) else {
             return false
         }
 
         var scan = utf8.index(after: start)
+        var consumedBytesToScan = 1
         while scan < end {
-            if let foundCandidate = validatedASCIIInlineCandidate(
+            if shouldValidateASCIIInlineCandidate(
+                utf8[scan],
+                options: options,
+                gateASCIICandidateValidation: gateASCIICandidateValidation
+            ),
+               let foundCandidate = validatedASCIIInlineCandidate(
                 in: utf8,
                 at: scan,
                 textStart: utf8.startIndex,
@@ -591,7 +1145,7 @@ public struct InlineParser {
                 enableRepositoryReferences: options.enableRepositoryReferences,
                 enableAutolinks: options.enableAutolinks,
                 enableCommitSHAs: options.enableCommitSHAs
-            ) {
+               ) {
                 let candidateStart = foundCandidate.start
                 guard candidateStart > start else {
                     return false
@@ -601,7 +1155,8 @@ public struct InlineParser {
                 appendLiteralRunToFragmentBuffer(
                     &state,
                     upTo: candidateStart,
-                    useDeferredLiteralRuns: useDeferredLiteralRuns
+                    useDeferredLiteralRuns: useDeferredLiteralRuns,
+                    consumedBytes: useKnownLiteralRunByteCount && candidateStart == scan ? consumedBytesToScan : nil
                 )
                 return true
             }
@@ -610,18 +1165,21 @@ public struct InlineParser {
                 utf8[scan],
                 enableMentions: options.enableMentions,
                 enableIssueReferences: options.enableIssueReferences,
-                enableEmojiShortcodes: options.enableEmojiShortcodes
+                enableEmojiShortcodes: options.enableEmojiShortcodes,
+                extensionTriggerBytes: options.extensionTriggerBytes
             ) {
                 break
             }
 
             scan = utf8.index(after: scan)
+            consumedBytesToScan += 1
         }
 
         appendLiteralRunToFragmentBuffer(
             &state,
             upTo: scan,
-            useDeferredLiteralRuns: useDeferredLiteralRuns
+            useDeferredLiteralRuns: useDeferredLiteralRuns,
+            consumedBytes: useKnownLiteralRunByteCount ? consumedBytesToScan : nil
         )
         return true
     }
@@ -630,13 +1188,134 @@ public struct InlineParser {
     private static func appendLiteralRunToFragmentBuffer(
         _ state: inout ParserState,
         upTo target: String.Index,
-        useDeferredLiteralRuns: Bool
+        useDeferredLiteralRuns: Bool,
+        consumedBytes: Int? = nil
     ) {
         if useDeferredLiteralRuns {
-            state.appendLiteralRunToFragmentBuffer(upTo: target)
+            state.appendLiteralRunToFragmentBuffer(upTo: target, consumedBytes: consumedBytes)
         } else {
             state.appendLiteralRunToFragmentBufferByCopyingForTesting(upTo: target)
         }
+    }
+
+    @inline(__always)
+    private static func moveASCII(
+        _ state: inout ParserState,
+        to target: String.Index,
+        consumedBytes: Int,
+        useCountedASCIIMove: Bool
+    ) {
+        if useCountedASCIIMove {
+            state.moveASCII(
+                to: target,
+                consumedBytes: consumedBytes,
+                lineBreaks: 0,
+                bytesAfterLastLineBreak: consumedBytes
+            )
+        } else {
+            state.moveASCII(to: target)
+        }
+    }
+
+    @inline(__always)
+    private static func currentASCIIByte(in state: ParserState) -> UInt8? {
+        guard state.currentIndex < state.endIndex else {
+            return nil
+        }
+        return state.text.utf8[state.currentIndex]
+    }
+
+    @inline(__always)
+    private static func nextASCIIByte(in state: ParserState) -> UInt8? {
+        guard state.currentIndex < state.endIndex else {
+            return nil
+        }
+        let utf8 = state.text.utf8
+        let next = utf8.index(after: state.currentIndex)
+        guard next < state.endIndex else {
+            return nil
+        }
+        return utf8[next]
+    }
+
+    @inline(__always)
+    private static func previousASCIIByte(in state: ParserState, before index: String.Index) -> UInt8? {
+        guard index > state.text.startIndex else {
+            return nil
+        }
+        let utf8 = state.text.utf8
+        return utf8[utf8.index(before: index)]
+    }
+
+    @inline(__always)
+    private static func appendCurrentASCIIByteLiteral(_ state: inout ParserState) {
+        guard state.currentIndex < state.endIndex else {
+            return
+        }
+
+        let byte = state.text.utf8[state.currentIndex]
+        guard byte != 0x0A, byte != 0x0D else {
+            if let current = state.current() {
+                state.appendToFragmentBuffer(current)
+                state.advance()
+            }
+            return
+        }
+
+        let next = state.text.utf8.index(after: state.currentIndex)
+        state.appendLiteralRunToFragmentBuffer(upTo: next, consumedBytes: 1)
+    }
+
+    @inline(__always)
+    private static func appendCurrentASCIIBacktickRunLiteral(_ state: inout ParserState) {
+        guard state.currentIndex < state.endIndex else {
+            return
+        }
+
+        let utf8 = state.text.utf8
+        var scan = state.currentIndex
+        var consumedBytes = 0
+
+        while scan < state.endIndex, utf8[scan] == 0x60 {
+            consumedBytes += 1
+            scan = utf8.index(after: scan)
+        }
+
+        guard consumedBytes > 0 else {
+            appendCurrentASCIIByteLiteral(&state)
+            return
+        }
+
+        state.appendLiteralRunToFragmentBuffer(upTo: scan, consumedBytes: consumedBytes)
+    }
+
+    @inline(__always)
+    private static func shouldValidateASCIIInlineCandidate(
+        _ byte: UInt8,
+        options: ASCIITextRunOptions,
+        gateASCIICandidateValidation: Bool
+    ) -> Bool {
+        guard gateASCIICandidateValidation else {
+            return true
+        }
+
+        if options.enableAutolinks {
+            switch byte {
+            case 0x66, // f
+                 0x68, // h
+                 0x6D, // m
+                 0x77: // w
+                return true
+            default:
+                break
+            }
+        }
+
+        if options.enableCommitSHAs, ParsingHelpers.isASCIIHex(byte) {
+            return true
+        }
+
+        return options.enableRepositoryReferences && byte == 0x2F // /
     }
 
     private static func validatedASCIIInlineCandidate(
@@ -667,7 +1346,7 @@ public struct InlineParser {
         if enableCommitSHAs,
            ParsingHelpers.isASCIIHex(byte),
            let range = commitSHARangeStartingWithHex(in: utf8, at: index, start: textStart, end: end) {
-            return .commitSHA(.init(range: range))
+            return .commitSHA(.init(range: range.range, byteCount: range.count))
         }
 
         if enableRepositoryReferences,
@@ -684,8 +1363,13 @@ public struct InlineParser {
         _ byte: UInt8,
         enableMentions: Bool,
         enableIssueReferences: Bool,
-        enableEmojiShortcodes: Bool
+        enableEmojiShortcodes: Bool,
+        extensionTriggerBytes: ASCIITriggerByteSet? = nil
     ) -> Bool {
+        if extensionTriggerBytes?.contains(byte) == true {
+            return true
+        }
+
         switch byte {
         case 0x0A, // \n
              0x0D, // \r
@@ -707,6 +1391,29 @@ public struct InlineParser {
         default:
             return false
         }
+    }
+
+    private static func asciiExtensionTriggerByteSet(
+        for markdownExtensions: [MarkdownExtension]
+    ) -> ASCIITriggerByteSet? {
+        guard !markdownExtensions.isEmpty else { return nil }
+
+        var triggerBytes = ASCIITriggerByteSet()
+        for markdownExtension in markdownExtensions {
+            guard !markdownExtension.triggerCharacters.isEmpty else {
+                return nil
+            }
+
+            for character in markdownExtension.triggerCharacters {
+                var scalars = character.unicodeScalars.makeIterator()
+                guard let scalar = scalars.next(), scalars.next() == nil, scalar.value < 0x80 else {
+                    continue
+                }
+                triggerBytes.insert(UInt8(scalar.value))
+            }
+        }
+
+        return triggerBytes
     }
 
     private static func containsActiveInlineMarker(
@@ -879,7 +1586,7 @@ public struct InlineParser {
         at index: String.UTF8View.Index,
         start: String.UTF8View.Index,
         end: String.UTF8View.Index
-    ) -> Range<String.Index>? {
+    ) -> (range: Range<String.Index>, count: Int)? {
         if index > start {
             let previous = utf8[utf8.index(before: index)]
             if ParsingHelpers.isASCIIAlnum(previous) {
@@ -902,7 +1609,7 @@ public struct InlineParser {
             return nil
         }
 
-        return index..<scan
+        return (index..<scan, count)
     }
 
     private static func containsPotentialBareAutolink(
@@ -943,11 +1650,13 @@ public struct InlineParser {
         }
 
         var ownerStart = slash
+        var ownerByteCount = 0
         while ownerStart > start {
             let previous = utf8.index(before: ownerStart)
             let byte = utf8[previous]
             if ParsingHelpers.isASCIIAlnum(byte) || byte == 0x2D || byte == 0x5F { // - _
                 ownerStart = previous
+                ownerByteCount += 1
                 continue
             }
             break
@@ -966,10 +1675,12 @@ public struct InlineParser {
         }
 
         var repoScan = repoStart
+        var repoByteCount = 0
         while repoScan < end {
             let byte = utf8[repoScan]
             if ParsingHelpers.isASCIIAlnum(byte) || byte == 0x2D || byte == 0x5F || byte == 0x2E { // - _ .
                 repoScan = utf8.index(after: repoScan)
+                repoByteCount += 1
                 continue
             }
             break
@@ -982,7 +1693,8 @@ public struct InlineParser {
         return .init(
             ownerRange: ownerStart..<slash,
             repoRange: repoStart..<repoScan,
-            afterRepo: repoScan
+            afterRepo: repoScan,
+            byteCount: ownerByteCount + 1 + repoByteCount
         )
     }
 
@@ -1074,8 +1786,26 @@ public struct InlineParser {
     // MARK: - Inline Element Parsers
 
     static func parseInlineCode(_ state: inout ParserState) -> MarkdownParser.InlineNode? {
+        var failedInlineCodeScanCache = ASCIIFailedInlineCodeScanCache()
+        return parseInlineCode(
+            &state,
+            failedInlineCodeScanCache: &failedInlineCodeScanCache,
+            useFailedInlineCodeScanCache: true
+        )
+    }
+
+    private static func parseInlineCode(
+        _ state: inout ParserState,
+        failedInlineCodeScanCache: inout ASCIIFailedInlineCodeScanCache,
+        useFailedInlineCodeScanCache: Bool
+    ) -> MarkdownParser.InlineNode? {
         if state.asciiFastPath {
-            return parseASCIIInlineCode(&state, trimASCIIContentRangeBeforeCopying: true)
+            return parseASCIIInlineCode(
+                &state,
+                trimASCIIContentRangeBeforeCopying: true,
+                failedInlineCodeScanCache: &failedInlineCodeScanCache,
+                useFailedInlineCodeScanCache: useFailedInlineCodeScanCache
+            )
         }
 
         let mark = state.mark()
@@ -1109,12 +1839,20 @@ public struct InlineParser {
     static func parseASCIIInlineCodeByTrimmingCopiedContentForTesting(
         _ state: inout ParserState
     ) -> MarkdownParser.InlineNode? {
-        parseASCIIInlineCode(&state, trimASCIIContentRangeBeforeCopying: false)
+        var failedInlineCodeScanCache = ASCIIFailedInlineCodeScanCache()
+        return parseASCIIInlineCode(
+            &state,
+            trimASCIIContentRangeBeforeCopying: false,
+            failedInlineCodeScanCache: &failedInlineCodeScanCache,
+            useFailedInlineCodeScanCache: true
+        )
     }
 
     private static func parseASCIIInlineCode(
         _ state: inout ParserState,
-        trimASCIIContentRangeBeforeCopying: Bool
+        trimASCIIContentRangeBeforeCopying: Bool,
+        failedInlineCodeScanCache: inout ASCIIFailedInlineCodeScanCache,
+        useFailedInlineCodeScanCache: Bool
     ) -> MarkdownParser.InlineNode? {
         let mark = state.mark()
 
@@ -1138,6 +1876,16 @@ public struct InlineParser {
             return nil
         }
 
+        if useFailedInlineCodeScanCache,
+           failedInlineCodeScanCache.shouldSkipScan(openingLength: opening, at: utf8Start) {
+            state.restore(mark)
+            return nil
+        }
+
+        if useFailedInlineCodeScanCache {
+            failedInlineCodeScanCache.recordRun(length: opening, start: utf8Start)
+        }
+
         let contentStart = scan
         while scan < utf8End {
             let byte = utf8[scan]
@@ -1149,6 +1897,10 @@ public struct InlineParser {
                     consumedBytes += 1
                     bytesAfterLastLineBreak += 1
                     scan = utf8.index(after: scan)
+                }
+
+                if useFailedInlineCodeScanCache {
+                    failedInlineCodeScanCache.recordRun(length: closing, start: closeStart)
                 }
 
                 if closing == opening {
@@ -1187,6 +1939,10 @@ public struct InlineParser {
                 }
                 scan = utf8.index(after: scan)
             }
+        }
+
+        if useFailedInlineCodeScanCache {
+            failedInlineCodeScanCache.recordScannedThroughEnd()
         }
 
         state.restore(mark)
@@ -1809,27 +2565,133 @@ public struct InlineParser {
     }
 
     static func parseLink(_ state: inout ParserState, configuration: MarkdownConfiguration) -> MarkdownParser.InlineNode? {
-        parseLink(&state, configuration: configuration, useASCIIResourceMove: true)
+        parseLink(
+            &state,
+            configuration: configuration,
+            useASCIIResourceMove: true,
+            useCountedBracketedTextMove: true,
+            useCountedSimpleResourceByteCount: true,
+            useUTF8SimpleBracketedTextScan: true,
+            useUTF8BalancedBracketedTextScan: true
+        )
     }
 
     static func parseLinkByMovingResourceWithCharactersForTesting(
         _ state: inout ParserState,
         configuration: MarkdownConfiguration
     ) -> MarkdownParser.InlineNode? {
-        parseLink(&state, configuration: configuration, useASCIIResourceMove: false)
+        parseLink(
+            &state,
+            configuration: configuration,
+            useASCIIResourceMove: false,
+            useCountedBracketedTextMove: true,
+            useCountedSimpleResourceByteCount: true,
+            useUTF8SimpleBracketedTextScan: true,
+            useUTF8BalancedBracketedTextScan: true
+        )
+    }
+
+    static func parseLinkByRecountingBracketedTextMoveForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.InlineNode? {
+        parseLink(
+            &state,
+            configuration: configuration,
+            useASCIIResourceMove: true,
+            useCountedBracketedTextMove: false,
+            useCountedSimpleResourceByteCount: true,
+            useUTF8SimpleBracketedTextScan: true,
+            useUTF8BalancedBracketedTextScan: true
+        )
+    }
+
+    static func parseLinkByCharacterSimpleBracketedTextForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.InlineNode? {
+        parseLink(
+            &state,
+            configuration: configuration,
+            useASCIIResourceMove: true,
+            useCountedBracketedTextMove: true,
+            useCountedSimpleResourceByteCount: true,
+            useUTF8SimpleBracketedTextScan: false,
+            useUTF8BalancedBracketedTextScan: false
+        )
+    }
+
+    static func parseLinkByCharacterBalancedBracketedTextForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.InlineNode? {
+        parseLink(
+            &state,
+            configuration: configuration,
+            useASCIIResourceMove: true,
+            useCountedBracketedTextMove: true,
+            useCountedSimpleResourceByteCount: true,
+            useUTF8SimpleBracketedTextScan: true,
+            useUTF8BalancedBracketedTextScan: false
+        )
+    }
+
+    static func parseLinkByScanningUnresolvedReferenceLabelForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.InlineNode? {
+        parseLink(
+            &state,
+            configuration: configuration,
+            useASCIIResourceMove: true,
+            useCountedBracketedTextMove: true,
+            useCountedSimpleResourceByteCount: true,
+            useUTF8SimpleBracketedTextScan: true,
+            useUTF8BalancedBracketedTextScan: true,
+            scanUnresolvedReferenceLabel: true
+        )
+    }
+
+    static func parseLinkByRecountingSimpleResourceByteCountForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.InlineNode? {
+        parseLink(
+            &state,
+            configuration: configuration,
+            useASCIIResourceMove: true,
+            useCountedBracketedTextMove: true,
+            useCountedSimpleResourceByteCount: false,
+            useUTF8SimpleBracketedTextScan: true,
+            useUTF8BalancedBracketedTextScan: true
+        )
     }
 
     private static func parseLink(
         _ state: inout ParserState,
         configuration: MarkdownConfiguration,
-        useASCIIResourceMove: Bool
+        useASCIIResourceMove: Bool,
+        useCountedBracketedTextMove: Bool,
+        useCountedSimpleResourceByteCount: Bool,
+        useUTF8SimpleBracketedTextScan: Bool,
+        useUTF8BalancedBracketedTextScan: Bool,
+        scanUnresolvedReferenceLabel: Bool = false,
+        validateURLBeforeParsingContent: Bool = true
     ) -> MarkdownParser.InlineNode? {
         let mark = state.mark()
         guard state.current() == "[" else { return nil }
         state.advance()
 
         // Parse link text with nested brackets
-        guard let linkTextRange = parseBracketedTextRange(&state) else { state.restore(mark); return nil }
+        guard let linkTextRange = parseBracketedTextRange(
+            &state,
+            useCountedASCIIMove: useCountedBracketedTextMove,
+            useUTF8SimpleScan: useUTF8SimpleBracketedTextScan,
+            useUTF8BalancedScan: useUTF8BalancedBracketedTextScan
+        ) else {
+            state.restore(mark)
+            return nil
+        }
 
         // Inline destination: (URL [title])
         if state.current() == "(" {
@@ -1837,32 +2699,66 @@ public struct InlineParser {
             guard let resource = parseInlineLinkResource(
                 in: state.text,
                 from: state.currentIndex,
-                to: state.endIndex
+                to: state.endIndex,
+                useCountedSimpleByteCount: useCountedSimpleResourceByteCount
             ) else {
                 state.restore(mark); return nil
             }
 
-            let textContent = parseLinkTextContent(
-                in: state.text,
-                bracketedText: linkTextRange,
-                configuration: configuration,
-                asciiFastPath: state.asciiFastPath
-            )
-            movePastInlineLinkResource(&state, resource: resource, useASCIIResourceMove: useASCIIResourceMove)
-
-            if let parsedURL = URL(string: resource.destination) {
-                return .link(url: parsedURL, title: resource.title, children: textContent)
+            if validateURLBeforeParsingContent {
+                guard let url = URL(string: resource.destination) else {
+                    state.restore(mark); return nil
+                }
+                let textContent = parseLinkTextContent(
+                    in: state.text,
+                    bracketedText: linkTextRange,
+                    configuration: configuration,
+                    asciiFastPath: state.asciiFastPath
+                )
+                movePastInlineLinkResource(&state, resource: resource, useASCIIResourceMove: useASCIIResourceMove)
+                return .link(url: url, title: resource.title, children: textContent)
             } else {
+                let textContent = parseLinkTextContent(
+                    in: state.text,
+                    bracketedText: linkTextRange,
+                    configuration: configuration,
+                    asciiFastPath: state.asciiFastPath
+                )
+                movePastInlineLinkResource(&state, resource: resource, useASCIIResourceMove: useASCIIResourceMove)
+                if let parsedURL = URL(string: resource.destination) {
+                    return .link(url: parsedURL, title: resource.title, children: textContent)
+                }
+                withExtendedLifetime(textContent) {}
                 state.restore(mark); return nil
             }
         } else if state.current() == "[" {
             // Reference style link not resolved in this implementation
-            state.advance()
-            while let c = state.current(), c != "]" { state.advance() }
-            if state.current() == "]" { state.advance(); state.restore(mark); return nil }
+            if scanUnresolvedReferenceLabel {
+                state.advance()
+                while let c = state.current(), c != "]" { state.advance() }
+                if state.current() == "]" { state.advance(); state.restore(mark); return nil }
+            }
+            state.restore(mark)
+            return nil
         }
         state.restore(mark)
         return nil
+    }
+
+    static func parseLinkByParsingContentBeforeURLValidationForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.InlineNode? {
+        parseLink(
+            &state,
+            configuration: configuration,
+            useASCIIResourceMove: true,
+            useCountedBracketedTextMove: true,
+            useCountedSimpleResourceByteCount: true,
+            useUTF8SimpleBracketedTextScan: true,
+            useUTF8BalancedBracketedTextScan: true,
+            validateURLBeforeParsingContent: false
+        )
     }
 
     static func parseLinkByCopyingTextAndDestinationForTesting(
@@ -1949,12 +2845,34 @@ public struct InlineParser {
     }
 
     static func parseImage(_ state: inout ParserState, configuration: MarkdownConfiguration) -> MarkdownParser.InlineNode? {
+        parseImage(&state, configuration: configuration, validateURLBeforeParsingAltText: true)
+    }
 
+    static func parseImageByParsingAltBeforeURLValidationForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.InlineNode? {
+        parseImage(&state, configuration: configuration, validateURLBeforeParsingAltText: false)
+    }
+
+    private static func parseImage(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration,
+        validateURLBeforeParsingAltText: Bool
+    ) -> MarkdownParser.InlineNode? {
         let mark = state.mark()
         guard state.current() == "!", state.peek(1) == "[" else { return nil }
         state.advance(); state.advance() // consume ![
 
-        guard let altTextRange = parseBracketedTextRange(&state) else { state.restore(mark); return nil }
+        guard let altTextRange = parseBracketedTextRange(
+            &state,
+            useCountedASCIIMove: true,
+            useUTF8SimpleScan: true,
+            useUTF8BalancedScan: true
+        ) else {
+            state.restore(mark)
+            return nil
+        }
 
         if state.current() == "(" {
             state.advance()
@@ -1966,12 +2884,22 @@ public struct InlineParser {
                 state.restore(mark); return nil
             }
 
-            let altText = bracketedText(in: state.text, bracketedText: altTextRange)
-            movePastInlineLinkResource(&state, resource: resource, useASCIIResourceMove: true)
-            if let parsedURL = URL(string: resource.destination) {
-                return .image(url: parsedURL, alt: altText, title: resource.title)
+            if validateURLBeforeParsingAltText {
+                guard let url = URL(string: resource.destination) else {
+                    state.restore(mark); return nil
+                }
+                let altText = bracketedText(in: state.text, bracketedText: altTextRange)
+                movePastInlineLinkResource(&state, resource: resource, useASCIIResourceMove: true)
+                return .image(url: url, alt: altText, title: resource.title)
+            } else {
+                let altText = bracketedText(in: state.text, bracketedText: altTextRange)
+                movePastInlineLinkResource(&state, resource: resource, useASCIIResourceMove: true)
+                if let parsedURL = URL(string: resource.destination) {
+                    return .image(url: parsedURL, alt: altText, title: resource.title)
+                }
+                withExtendedLifetime(altText) {}
+                state.restore(mark); return nil
             }
-            state.restore(mark); return nil
         }
         state.restore(mark)
         return nil
@@ -1995,7 +2923,7 @@ public struct InlineParser {
                 to: resource.after,
                 consumedBytes: asciiByteCount,
                 lineBreaks: 0,
-                bytesAfterLastLineBreak: 0
+                bytesAfterLastLineBreak: asciiByteCount
             )
             return
         }
@@ -2011,13 +2939,25 @@ public struct InlineParser {
     private static func parseInlineLinkResource(
         in text: String,
         from start: String.Index,
-        to end: String.Index
+        to end: String.Index,
+        useCountedSimpleByteCount: Bool = true
     ) -> InlineLinkResource? {
-        if let simple = parseSimpleInlineLinkResource(in: text, from: start, to: end) {
+        if let simple = parseSimpleInlineLinkResource(
+            in: text,
+            from: start,
+            to: end,
+            useCountedSimpleByteCount: useCountedSimpleByteCount
+        ) {
             return simple
         }
 
-        return parseInlineLinkResourceWithBalancedScan(in: text, from: start, to: end)
+        return parseInlineLinkResourceWithBalancedScan(
+            in: text,
+            from: start,
+            to: end,
+            useUTF8DestinationBackslashScan: true,
+            useUTF8ResourceMetadataScan: true
+        )
     }
 
     static func parseInlineLinkResourceWithBalancedScanForTesting(
@@ -2025,7 +2965,41 @@ public struct InlineParser {
         from start: String.Index,
         to end: String.Index
     ) -> InlineLinkResource? {
-        parseInlineLinkResourceWithBalancedScan(in: text, from: start, to: end)
+        parseInlineLinkResourceWithBalancedScan(
+            in: text,
+            from: start,
+            to: end,
+            useUTF8DestinationBackslashScan: true,
+            useUTF8ResourceMetadataScan: true
+        )
+    }
+
+    static func parseInlineLinkResourceWithCharacterDestinationBackslashScanForTesting(
+        in text: String,
+        from start: String.Index,
+        to end: String.Index
+    ) -> InlineLinkResource? {
+        parseInlineLinkResourceWithBalancedScan(
+            in: text,
+            from: start,
+            to: end,
+            useUTF8DestinationBackslashScan: false,
+            useUTF8ResourceMetadataScan: true
+        )
+    }
+
+    static func parseInlineLinkResourceWithCharacterMetadataScanForTesting(
+        in text: String,
+        from start: String.Index,
+        to end: String.Index
+    ) -> InlineLinkResource? {
+        parseInlineLinkResourceWithBalancedScan(
+            in: text,
+            from: start,
+            to: end,
+            useUTF8DestinationBackslashScan: true,
+            useUTF8ResourceMetadataScan: false
+        )
     }
 
     static func parseInlineLinkResourceForTesting(
@@ -2036,10 +3010,24 @@ public struct InlineParser {
         parseInlineLinkResource(in: text, from: start, to: end)
     }
 
-    private static func parseSimpleInlineLinkResource(
+    static func parseInlineLinkResourceByRecountingSimpleByteCountForTesting(
         in text: String,
         from start: String.Index,
         to end: String.Index
+    ) -> InlineLinkResource? {
+        parseInlineLinkResource(
+            in: text,
+            from: start,
+            to: end,
+            useCountedSimpleByteCount: false
+        )
+    }
+
+    private static func parseSimpleInlineLinkResource(
+        in text: String,
+        from start: String.Index,
+        to end: String.Index,
+        useCountedSimpleByteCount: Bool
     ) -> InlineLinkResource? {
         guard let utf8Start = start.samePosition(in: text.utf8),
               let utf8End = end.samePosition(in: text.utf8) else {
@@ -2048,8 +3036,11 @@ public struct InlineParser {
 
         let utf8 = text.utf8
         var index = utf8Start
+        var consumedBytes = 0
+        var isASCIIOnly = true
         while index < utf8End && (utf8[index] == 0x20 || utf8[index] == 0x09) {
             index = utf8.index(after: index)
+            consumedBytes += 1
         }
 
         let destinationStart = index
@@ -2066,7 +3057,11 @@ public struct InlineParser {
                     destination: String(text[destinationStartIndex..<close]),
                     title: nil,
                     after: after,
-                    asciiByteCount: utf8.distance(from: utf8Start, to: utf8.index(after: index))
+                    asciiByteCount: useCountedSimpleByteCount && isASCIIOnly
+                        ? consumedBytes + 1
+                        : isASCIIOnly
+                            ? utf8.distance(from: utf8Start, to: utf8.index(after: index))
+                            : nil
                 )
 
             case 0x09, // tab
@@ -2080,7 +3075,10 @@ public struct InlineParser {
                     destinationStart: destinationStart,
                     destinationEnd: index,
                     titleStart: index,
-                    utf8End: utf8End
+                    utf8End: utf8End,
+                    bytesBeforeTitle: consumedBytes,
+                    isASCIIOnly: isASCIIOnly,
+                    useCountedSimpleByteCount: useCountedSimpleByteCount
                 )
 
             case 0x0A, // newline
@@ -2093,9 +3091,10 @@ public struct InlineParser {
 
             default:
                 if utf8[index] >= 0x80 {
-                    return nil
+                    isASCIIOnly = false
                 }
                 index = utf8.index(after: index)
+                consumedBytes += 1
             }
         }
 
@@ -2108,12 +3107,18 @@ public struct InlineParser {
         destinationStart: String.UTF8View.Index,
         destinationEnd: String.UTF8View.Index,
         titleStart: String.UTF8View.Index,
-        utf8End: String.UTF8View.Index
+        utf8End: String.UTF8View.Index,
+        bytesBeforeTitle: Int,
+        isASCIIOnly: Bool,
+        useCountedSimpleByteCount: Bool
     ) -> InlineLinkResource? {
         let utf8 = text.utf8
         var titleIndex = titleStart
+        var consumedBytes = bytesBeforeTitle
+        var isASCIIOnly = isASCIIOnly
         while titleIndex < utf8End && (utf8[titleIndex] == 0x20 || utf8[titleIndex] == 0x09) {
             titleIndex = utf8.index(after: titleIndex)
+            consumedBytes += 1
         }
 
         guard titleIndex < utf8End else {
@@ -2130,7 +3135,11 @@ public struct InlineParser {
                 destination: String(text[destinationStartIndex..<destinationEndIndex]),
                 title: nil,
                 after: after,
-                asciiByteCount: utf8.distance(from: resourceStart, to: utf8.index(after: titleIndex))
+                asciiByteCount: useCountedSimpleByteCount && isASCIIOnly
+                    ? consumedBytes + 1
+                    : isASCIIOnly
+                        ? utf8.distance(from: resourceStart, to: utf8.index(after: titleIndex))
+                        : nil
             )
         }
 
@@ -2140,13 +3149,16 @@ public struct InlineParser {
         }
 
         let titleContentStart = utf8.index(after: titleIndex)
+        consumedBytes += 1
         var scan = titleContentStart
         while scan < utf8End {
             let byte = utf8[scan]
             if byte == delimiter {
                 var closeIndex = utf8.index(after: scan)
+                var finalByteCount = consumedBytes + 1
                 while closeIndex < utf8End && (utf8[closeIndex] == 0x20 || utf8[closeIndex] == 0x09) {
                     closeIndex = utf8.index(after: closeIndex)
+                    finalByteCount += 1
                 }
 
                 guard closeIndex < utf8End,
@@ -2163,14 +3175,23 @@ public struct InlineParser {
                     destination: String(text[destinationStartIndex..<destinationEndIndex]),
                     title: String(text[titleStartIndex..<titleEndIndex]),
                     after: after,
-                    asciiByteCount: utf8.distance(from: resourceStart, to: utf8.index(after: closeIndex))
+                    asciiByteCount: useCountedSimpleByteCount && isASCIIOnly
+                        ? finalByteCount + 1
+                        : isASCIIOnly
+                            ? utf8.distance(from: resourceStart, to: utf8.index(after: closeIndex))
+                            : nil
                 )
             }
 
             if byte == 0x28 || byte == 0x29 || byte == 0x5C || byte == 0x0A || byte == 0x0D || byte >= 0x80 {
-                return nil
+                if byte >= 0x80 {
+                    isASCIIOnly = false
+                } else {
+                    return nil
+                }
             }
             scan = utf8.index(after: scan)
+            consumedBytes += 1
         }
 
         return nil
@@ -2179,7 +3200,9 @@ public struct InlineParser {
     private static func parseInlineLinkResourceWithBalancedScan(
         in text: String,
         from start: String.Index,
-        to end: String.Index
+        to end: String.Index,
+        useUTF8DestinationBackslashScan: Bool,
+        useUTF8ResourceMetadataScan: Bool
     ) -> InlineLinkResource? {
         guard let scanned = ParsingHelpers.scanBalancedRange(
             in: text,
@@ -2192,48 +3215,216 @@ public struct InlineParser {
             return nil
         }
 
-        var destinationStart = scanned.range.lowerBound
-        ParsingHelpers.skipSpaces(in: text, from: &destinationStart, end: scanned.range.upperBound)
+        if useUTF8ResourceMetadataScan,
+           let utf8Start = scanned.range.lowerBound.samePosition(in: text.utf8),
+           let utf8End = scanned.range.upperBound.samePosition(in: text.utf8) {
+            return parseInlineLinkResourceMetadataWithUTF8Scan(
+                in: text,
+                utf8Start: utf8Start,
+                utf8End: utf8End,
+                after: scanned.after,
+                useUTF8DestinationBackslashScan: useUTF8DestinationBackslashScan
+            )
+        }
+
+        return parseInlineLinkResourceMetadataWithCharacterScan(
+            in: text,
+            range: scanned.range,
+            after: scanned.after,
+            useUTF8DestinationBackslashScan: useUTF8DestinationBackslashScan
+        )
+    }
+
+    private static func parseInlineLinkResourceMetadataWithCharacterScan(
+        in text: String,
+        range: Range<String.Index>,
+        after: String.Index,
+        useUTF8DestinationBackslashScan: Bool
+    ) -> InlineLinkResource? {
+        var destinationStart = range.lowerBound
+        ParsingHelpers.skipSpaces(in: text, from: &destinationStart, end: range.upperBound)
         let destinationEnd = ParsingHelpers.firstASCIISpaceOrTab(
             in: text,
             from: destinationStart,
-            end: scanned.range.upperBound
+            end: range.upperBound
         )
-        let destination = unescapeLinkDestination(in: text, from: destinationStart, to: destinationEnd)
+        let destination = unescapeLinkDestination(
+            in: text,
+            from: destinationStart,
+            to: destinationEnd,
+            useUTF8BackslashScan: useUTF8DestinationBackslashScan
+        )
 
         var title: String?
-        if destinationEnd < scanned.range.upperBound {
+        if destinationEnd < range.upperBound {
             var titleStart = destinationEnd
-            ParsingHelpers.skipSpaces(in: text, from: &titleStart, end: scanned.range.upperBound)
-            if titleStart < scanned.range.upperBound {
+            ParsingHelpers.skipSpaces(in: text, from: &titleStart, end: range.upperBound)
+            if titleStart < range.upperBound {
                 let delimiter = text[titleStart]
                 if delimiter == Character("\"") || delimiter == Character("'") || delimiter == Character("(") {
                     let quotedStart = text.index(after: titleStart)
                     guard let (parsedTitle, afterTitle) = ParsingHelpers.scanQuoted(
                         in: text,
                         from: quotedStart,
-                        end: scanned.range.upperBound,
+                        end: range.upperBound,
                         delimiter: delimiter
                     ) else {
                         return nil
                     }
                     title = parsedTitle
                     var trailing = afterTitle
-                    ParsingHelpers.skipSpaces(in: text, from: &trailing, end: scanned.range.upperBound)
+                    ParsingHelpers.skipSpaces(in: text, from: &trailing, end: range.upperBound)
                 }
             }
         }
 
-        return InlineLinkResource(destination: destination, title: title, after: scanned.after, asciiByteCount: nil)
+        return InlineLinkResource(destination: destination, title: title, after: after, asciiByteCount: nil)
     }
 
-    private static func parseBracketedTextRange(_ state: inout ParserState) -> BracketedTextRange? {
+    private static func parseInlineLinkResourceMetadataWithUTF8Scan(
+        in text: String,
+        utf8Start: String.UTF8View.Index,
+        utf8End: String.UTF8View.Index,
+        after: String.Index,
+        useUTF8DestinationBackslashScan: Bool
+    ) -> InlineLinkResource? {
+        let utf8 = text.utf8
+        var destinationStart = utf8Start
+        while destinationStart < utf8End {
+            let byte = utf8[destinationStart]
+            guard byte == 0x20 || byte == 0x09 else { break }
+            destinationStart = utf8.index(after: destinationStart)
+        }
+
+        var destinationEnd = destinationStart
+        while destinationEnd < utf8End {
+            let byte = utf8[destinationEnd]
+            if byte == 0x20 || byte == 0x09 {
+                break
+            }
+            destinationEnd = utf8.index(after: destinationEnd)
+        }
+
+        guard let destinationStartIndex = String.Index(destinationStart, within: text),
+              let destinationEndIndex = String.Index(destinationEnd, within: text) else {
+            return nil
+        }
+
+        let destination = unescapeLinkDestination(
+            in: text,
+            from: destinationStartIndex,
+            to: destinationEndIndex,
+            useUTF8BackslashScan: useUTF8DestinationBackslashScan
+        )
+
+        var title: String?
+        if destinationEnd < utf8End {
+            var titleStart = destinationEnd
+            while titleStart < utf8End {
+                let byte = utf8[titleStart]
+                guard byte == 0x20 || byte == 0x09 else { break }
+                titleStart = utf8.index(after: titleStart)
+            }
+
+            if titleStart < utf8End {
+                let delimiter = utf8[titleStart]
+                if delimiter == 0x22 || delimiter == 0x27 || delimiter == 0x28 {
+                    guard let parsedTitle = scanLinkTitleWithUTF8(
+                        in: text,
+                        titleStart: titleStart,
+                        end: utf8End,
+                        delimiter: delimiter
+                    ) else {
+                        return nil
+                    }
+                    title = parsedTitle.title
+                }
+            }
+        }
+
+        return InlineLinkResource(destination: destination, title: title, after: after, asciiByteCount: nil)
+    }
+
+    private static func scanLinkTitleWithUTF8(
+        in text: String,
+        titleStart: String.UTF8View.Index,
+        end: String.UTF8View.Index,
+        delimiter: UInt8
+    ) -> (title: String, after: String.Index)? {
+        let closeByte = delimiter == 0x28 ? 0x29 : delimiter
+        let utf8 = text.utf8
+        let contentStart = utf8.index(after: titleStart)
+        var scan = contentStart
+
+        while scan < end {
+            let byte = utf8[scan]
+            if byte == closeByte {
+                let afterClose = utf8.index(after: scan)
+                guard let titleStartIndex = String.Index(contentStart, within: text),
+                      let titleEndIndex = String.Index(scan, within: text),
+                      let afterCloseIndex = String.Index(afterClose, within: text) else {
+                    return nil
+                }
+                return (String(text[titleStartIndex..<titleEndIndex]), afterCloseIndex)
+            }
+
+            if byte == 0x5C {
+                guard let contentStartIndex = String.Index(contentStart, within: text),
+                      let endIndex = String.Index(end, within: text) else {
+                    return nil
+                }
+                let characterDelimiter: Character = delimiter == 0x28
+                    ? Character("(")
+                    : delimiter == 0x22
+                        ? Character("\"")
+                        : Character("'")
+                return ParsingHelpers.scanQuoted(
+                    in: text,
+                    from: contentStartIndex,
+                    end: endIndex,
+                    delimiter: characterDelimiter
+                )
+            }
+
+            scan = utf8.index(after: scan)
+        }
+
+        return nil
+    }
+
+    private static func parseBracketedTextRange(
+        _ state: inout ParserState,
+        useCountedASCIIMove: Bool,
+        useUTF8SimpleScan: Bool = true,
+        useUTF8BalancedScan: Bool = true
+    ) -> BracketedTextRange? {
         let contentStartIndex = state.currentIndex
 
-        if let fastRange = parseSimpleBracketedTextRange(&state, contentStartIndex: contentStartIndex) {
+        if let fastRange = parseSimpleBracketedTextRange(
+            &state,
+            contentStartIndex: contentStartIndex,
+            useCountedASCIIMove: useCountedASCIIMove,
+            useUTF8Scan: useUTF8SimpleScan
+        ) {
             return fastRange
         }
 
+        if useUTF8BalancedScan,
+           let fastRange = parseBalancedBracketedTextRangeByUTF8Scanning(
+               &state,
+               contentStartIndex: contentStartIndex,
+               useCountedASCIIMove: useCountedASCIIMove
+           ) {
+            return fastRange
+        }
+
+        return parseBracketedTextRangeByCharacterScanning(&state, contentStartIndex: contentStartIndex)
+    }
+
+    private static func parseBracketedTextRangeByCharacterScanning(
+        _ state: inout ParserState,
+        contentStartIndex: String.Index
+    ) -> BracketedTextRange? {
         var scan = contentStartIndex
         var depth = 1
         var containsBackslash = false
@@ -2269,14 +3460,92 @@ public struct InlineParser {
         return nil
     }
 
+    private static func parseBalancedBracketedTextRangeByUTF8Scanning(
+        _ state: inout ParserState,
+        contentStartIndex: String.Index,
+        useCountedASCIIMove: Bool
+    ) -> BracketedTextRange? {
+        let utf8 = state.text.utf8
+        var scan = contentStartIndex
+        var depth = 1
+        var consumedBytes = 0
+        var isASCIIOnly = true
+        var containsBackslash = false
+        var containsLineBreak = false
+
+        while scan < state.endIndex {
+            let byte = utf8[scan]
+            switch byte {
+            case 0x5C: // backslash
+                containsBackslash = true
+                let escaped = utf8.index(after: scan)
+                guard escaped < state.endIndex else {
+                    return nil
+                }
+
+                let escapedByte = utf8[escaped]
+                if escapedByte >= 0x80 || escapedByte == 0x0A || escapedByte == 0x0D {
+                    return nil
+                }
+
+                scan = utf8.index(after: escaped)
+                consumedBytes += 2
+
+            case 0x5B: // [
+                depth += 1
+                scan = utf8.index(after: scan)
+                consumedBytes += 1
+
+            case 0x5D: // ]
+                depth -= 1
+                if depth == 0 {
+                    let afterClose = utf8.index(after: scan)
+                    if useCountedASCIIMove && isASCIIOnly && !containsLineBreak {
+                        state.moveASCII(
+                            to: afterClose,
+                            consumedBytes: consumedBytes + 1,
+                            lineBreaks: 0,
+                            bytesAfterLastLineBreak: consumedBytes + 1
+                        )
+                    } else {
+                        state.move(to: afterClose)
+                    }
+                    return BracketedTextRange(
+                        range: contentStartIndex..<scan,
+                        containsBackslash: containsBackslash
+                    )
+                }
+
+                scan = utf8.index(after: scan)
+                consumedBytes += 1
+
+            default:
+                if byte >= 0x80 {
+                    isASCIIOnly = false
+                } else if byte == 0x0A || byte == 0x0D {
+                    containsLineBreak = true
+                }
+                scan = utf8.index(after: scan)
+                consumedBytes += 1
+            }
+        }
+
+        return nil
+    }
+
     private static func parseBracketedTextContentByCopying(_ state: inout ParserState) -> String? {
         let contentStartIndex = state.currentIndex
 
-        if let fastRange = parseSimpleBracketedTextRange(&state, contentStartIndex: contentStartIndex) {
+        if let fastRange = parseSimpleBracketedTextRange(
+            &state,
+            contentStartIndex: contentStartIndex,
+            useCountedASCIIMove: false,
+            useUTF8Scan: true
+        ) {
             return String(state.text[fastRange.range])
         }
 
-        guard let range = parseBracketedTextRange(&state) else {
+        guard let range = parseBracketedTextRange(&state, useCountedASCIIMove: false) else {
             return nil
         }
 
@@ -2285,25 +3554,45 @@ public struct InlineParser {
 
     private static func parseSimpleBracketedTextRange(
         _ state: inout ParserState,
-        contentStartIndex: String.Index
+        contentStartIndex: String.Index,
+        useCountedASCIIMove: Bool,
+        useUTF8Scan: Bool
     ) -> BracketedTextRange? {
-        if state.asciiFastPath {
+        if useUTF8Scan {
             let utf8 = state.text.utf8
             let utf8Start = contentStartIndex
             let utf8End = state.endIndex
             var scan = utf8Start
+            var consumedBytes = 0
+            var isASCIIOnly = true
             while scan < utf8End {
-                switch utf8[scan] {
+                let byte = utf8[scan]
+                switch byte {
                 case 0x5D: // ]
                     let afterClose = utf8.index(after: scan)
                     let closeIndex = scan
                     let afterCloseIndex = afterClose
-                    state.moveASCII(to: afterCloseIndex)
+                    if useCountedASCIIMove && isASCIIOnly {
+                        state.moveASCII(
+                            to: afterCloseIndex,
+                            consumedBytes: consumedBytes + 1,
+                            lineBreaks: 0,
+                            bytesAfterLastLineBreak: consumedBytes + 1
+                        )
+                    } else {
+                        state.move(to: afterCloseIndex)
+                    }
                     return BracketedTextRange(range: contentStartIndex..<closeIndex, containsBackslash: false)
                 case 0x5B, 0x5C: // [ or backslash
                     return nil
+                case 0x0A, 0x0D: // newline or carriage return
+                    return nil
                 default:
+                    if byte >= 0x80 {
+                        isASCIIOnly = false
+                    }
                     scan = utf8.index(after: scan)
+                    consumedBytes += 1
                 }
             }
             return nil
@@ -2385,6 +3674,37 @@ public struct InlineParser {
         from start: String.Index,
         to end: String.Index
     ) -> String {
+        unescapeLinkDestination(in: text, from: start, to: end, useUTF8BackslashScan: true)
+    }
+
+    private static func unescapeLinkDestination(
+        in text: String,
+        from start: String.Index,
+        to end: String.Index,
+        useUTF8BackslashScan: Bool
+    ) -> String {
+        if useUTF8BackslashScan,
+           let utf8Start = start.samePosition(in: text.utf8),
+           let utf8End = end.samePosition(in: text.utf8) {
+            var scan = utf8Start
+            while scan < utf8End {
+                if text.utf8[scan] == 0x5C {
+                    guard let firstBackslash = String.Index(scan, within: text) else {
+                        return String(text[start..<end])
+                    }
+                    return unescapeLinkDestination(
+                        in: text,
+                        from: start,
+                        to: end,
+                        firstBackslash: firstBackslash
+                    )
+                }
+                scan = text.utf8.index(after: scan)
+            }
+
+            return String(text[start..<end])
+        }
+
         var scan = start
         while scan < end {
             if text[scan] == "\\" {
@@ -2427,45 +3747,148 @@ public struct InlineParser {
     }
 
     static func parseFootnoteReference(_ state: inout ParserState) -> MarkdownParser.InlineNode? {
+        parseFootnoteReference(&state, useCountedASCIIMove: true)
+    }
 
+    static func parseFootnoteReferenceByRecountingASCIIMoveForTesting(
+        _ state: inout ParserState
+    ) -> MarkdownParser.InlineNode? {
+        parseFootnoteReference(&state, useCountedASCIIMove: false)
+    }
+
+    private static func parseFootnoteReference(
+        _ state: inout ParserState,
+        useCountedASCIIMove: Bool
+    ) -> MarkdownParser.InlineNode? {
         let mark = state.mark()
         guard state.current() == "[", state.peek(1) == "^" else { return nil }
         state.advance(); state.advance()
         var idxLab = state.currentIndex
         let endLab = state.endIndex
         let label: String
+        let asciiLabelByteCount: Int?
         if state.asciiFastPath {
-            label = ParsingHelpers.scanWhileUTF8(in: state.text, from: &idxLab, end: endLab, while: { b in b != 0x5D /*]*/ && b != 0x0A /*\n*/ })
+            if useCountedASCIIMove {
+                let scanned = ParsingHelpers.scanUTF8Range(
+                    in: state.text,
+                    from: &idxLab,
+                    end: endLab,
+                    while: { b in b != 0x5D /*]*/ && b != 0x0A /*\n*/ }
+                )
+                label = String(state.text[scanned.range])
+                asciiLabelByteCount = scanned.count
+            } else {
+                label = ParsingHelpers.scanWhileUTF8(
+                    in: state.text,
+                    from: &idxLab,
+                    end: endLab,
+                    while: { b in b != 0x5D /*]*/ && b != 0x0A /*\n*/ }
+                )
+                asciiLabelByteCount = nil
+            }
         } else {
             label = ParsingHelpers.scanWhile(in: state.text, from: &idxLab, end: endLab, while: { ch in ch != "]" && ch != "\n" })
+            asciiLabelByteCount = nil
         }
-        state.move(to: idxLab)
-        guard state.current() == "]" else { state.restore(mark); return nil }
-        state.advance()
+
+        if useCountedASCIIMove, let asciiLabelByteCount {
+            guard idxLab < state.endIndex, state.text[idxLab] == "]" else { state.restore(mark); return nil }
+            let consumedBytes = asciiLabelByteCount + 1
+            state.moveASCII(
+                to: state.text.index(after: idxLab),
+                consumedBytes: consumedBytes,
+                lineBreaks: 0,
+                bytesAfterLastLineBreak: consumedBytes
+            )
+        } else {
+            state.move(to: idxLab)
+            guard state.current() == "]" else { state.restore(mark); return nil }
+            state.advance()
+        }
+
         guard !label.isEmpty else { state.restore(mark); return nil }
         return .footnoteReference(label: label)
     }
 
     static func parseHTMLTag(_ state: inout ParserState) -> MarkdownParser.InlineNode? {
+        parseHTMLTag(&state, copyTagNameScan: false, copyIgnoredAttributeScan: false)
+    }
 
+    static func parseHTMLTagByCopyingTagNameForTesting(
+        _ state: inout ParserState
+    ) -> MarkdownParser.InlineNode? {
+        parseHTMLTag(&state, copyTagNameScan: true, copyIgnoredAttributeScan: false)
+    }
+
+    static func parseHTMLTagByCopyingIgnoredAttributeScanForTesting(
+        _ state: inout ParserState
+    ) -> MarkdownParser.InlineNode? {
+        parseHTMLTag(&state, copyTagNameScan: false, copyIgnoredAttributeScan: true)
+    }
+
+    private static func parseHTMLTag(
+        _ state: inout ParserState,
+        copyTagNameScan: Bool,
+        copyIgnoredAttributeScan: Bool
+    ) -> MarkdownParser.InlineNode? {
         let mark = state.mark()
         guard state.current() == "<" else { return nil }
         state.advance()
         if state.current() == "/" { state.advance() }
         var tIdx = state.currentIndex
         let tEnd = state.endIndex
-        let tagName: String
+        let tagNameIsEmpty: Bool
         if state.asciiFastPath {
-            tagName = ParsingHelpers.scanWhileUTF8(in: state.text, from: &tIdx, end: tEnd, while: { b in ParsingHelpers.isASCIIAlpha(b) })
+            if copyTagNameScan {
+                let tagName = ParsingHelpers.scanWhileUTF8(
+                    in: state.text,
+                    from: &tIdx,
+                    end: tEnd,
+                    while: { b in ParsingHelpers.isASCIIAlpha(b) }
+                )
+                tagNameIsEmpty = tagName.isEmpty
+            } else {
+                let scanned = ParsingHelpers.scanUTF8Range(
+                    in: state.text,
+                    from: &tIdx,
+                    end: tEnd,
+                    while: { b in ParsingHelpers.isASCIIAlpha(b) }
+                )
+                tagNameIsEmpty = scanned.count == 0
+            }
         } else {
-            tagName = ParsingHelpers.scanWhile(in: state.text, from: &tIdx, end: tEnd, while: { ch in ch.isLetter })
+            if copyTagNameScan {
+                let tagName = ParsingHelpers.scanWhile(
+                    in: state.text,
+                    from: &tIdx,
+                    end: tEnd,
+                    while: { ch in ch.isLetter }
+                )
+                tagNameIsEmpty = tagName.isEmpty
+            } else {
+                tagNameIsEmpty = scanHTMLTagNameIsEmpty(in: state.text, from: &tIdx, end: tEnd)
+            }
         }
         state.move(to: tIdx)
-        guard !tagName.isEmpty else { state.restore(mark); return nil }
+        guard !tagNameIsEmpty else { state.restore(mark); return nil }
         var tmpIdx = state.currentIndex
         let tmpEnd = state.endIndex
         if state.asciiFastPath {
-            _ = ParsingHelpers.scanWhileUTF8(in: state.text, from: &tmpIdx, end: tmpEnd, while: { b in b != 0x3E /*>*/ })
+            if copyIgnoredAttributeScan {
+                _ = ParsingHelpers.scanWhileUTF8(
+                    in: state.text,
+                    from: &tmpIdx,
+                    end: tmpEnd,
+                    while: { b in b != 0x3E /*>*/ }
+                )
+            } else {
+                _ = ParsingHelpers.scanUTF8Range(
+                    in: state.text,
+                    from: &tmpIdx,
+                    end: tmpEnd,
+                    while: { b in b != 0x3E /*>*/ }
+                )
+            }
         } else {
             _ = ParsingHelpers.scanWhile(in: state.text, from: &tmpIdx, end: tmpEnd, while: { ch in ch != ">" })
         }
@@ -2476,14 +3899,36 @@ public struct InlineParser {
         return .html(html)
     }
 
+    private static func scanHTMLTagNameIsEmpty(
+        in text: String,
+        from index: inout String.Index,
+        end: String.Index
+    ) -> Bool {
+        let start = index
+        while index < end, text[index].isLetter {
+            index = text.index(after: index)
+        }
+        return index == start
+    }
+
     // (legacy OLD_ autolink helpers removed)
 
-    static func parseMention(_ state: inout ParserState) -> MarkdownParser.InlineNode? {
+    static func parseMention(
+        _ state: inout ParserState,
+        useCountedASCIIMove: Bool = true,
+        useASCIIByteBoundaryChecks: Bool = true,
+        useDeferredUsernameCopy: Bool = true
+    ) -> MarkdownParser.InlineNode? {
         let mark = state.mark()
         guard state.current() == "@" else { return nil }
 
         // Reject if preceded by [A-Za-z0-9_-]
-        if mark.index > state.text.startIndex {
+        if useASCIIByteBoundaryChecks, state.asciiFastPath {
+            if let previous = previousASCIIByte(in: state, before: mark.index),
+               ParsingHelpers.isASCIIAlnum(previous) || previous == 0x5F || previous == 0x2D { // _ -
+                return nil
+            }
+        } else if mark.index > state.text.startIndex {
             let prev = state.text[state.text.index(before: mark.index)]
             if prev.isLetter || prev.isNumber || prev == "_" || prev == "-" { return nil }
         }
@@ -2493,24 +3938,50 @@ public struct InlineParser {
         // Scan username characters
         var idx = state.currentIndex
         let end = state.endIndex
-        let scanned: String
+        let copiedUsername: String?
+        let scannedRange: Range<String.Index>?
+        let scannedByteCount: Int?
         if state.asciiFastPath {
             let range = ParsingHelpers.scanUTF8Range(in: state.text, from: &idx, end: end, while: { b in
                 ParsingHelpers.isASCIIAlnum(b) || b == 0x2D /*-*/ || b == 0x5F /*_*/
             })
-            scanned = String(state.text[range.range])
+            copiedUsername = useDeferredUsernameCopy ? nil : String(state.text[range.range])
+            scannedRange = range.range
+            scannedByteCount = range.count
         } else {
-            scanned = ParsingHelpers.scanWhile(in: state.text, from: &idx, end: end, while: { ch in
+            copiedUsername = ParsingHelpers.scanWhile(in: state.text, from: &idx, end: end, while: { ch in
                 ch.isLetter || ch.isNumber || ch == "-" || ch == "_"
             })
+            scannedRange = nil
+            scannedByteCount = nil
         }
-        let username = scanned
-        state.moveASCII(to: idx)
+        if let scannedByteCount {
+            moveASCII(&state, to: idx, consumedBytes: scannedByteCount, useCountedASCIIMove: useCountedASCIIMove)
+        } else {
+            state.moveASCII(to: idx)
+        }
 
-        guard !username.isEmpty else { state.restore(mark); return nil }
+        let usernameIsEmpty = scannedByteCount.map { $0 == 0 } ?? (copiedUsername?.isEmpty ?? true)
+        guard !usernameIsEmpty else { state.restore(mark); return nil }
 
         // Disambiguate emails: if next is '.' followed by domain-like chars, not a mention
-        if let ch = state.current(), ch == "." {
+        if useASCIIByteBoundaryChecks, state.asciiFastPath {
+            if currentASCIIByte(in: state) == 0x2E { // .
+                let utf8 = state.text.utf8
+                var index = utf8.index(after: state.currentIndex)
+                var hasDomainChars = false
+                while index < state.endIndex {
+                    let byte = utf8[index]
+                    if ParsingHelpers.isASCIIAlnum(byte) || byte == 0x2D || byte == 0x2E { // - .
+                        hasDomainChars = true
+                        index = utf8.index(after: index)
+                    } else {
+                        break
+                    }
+                }
+                if hasDomainChars { state.restore(mark); return nil }
+            }
+        } else if let ch = state.current(), ch == "." {
             var idx = state.currentIndex
             var hasDomainChars = false
             if state.asciiFastPath {
@@ -2541,14 +4012,24 @@ public struct InlineParser {
             if hasDomainChars { state.restore(mark); return nil }
         }
 
+        let username = copiedUsername ?? scannedRange.map { String(state.text[$0]) } ?? ""
         return .mention(username: username)
     }
 
-    static func parseIssueReference(_ state: inout ParserState) -> MarkdownParser.InlineNode? {
+    static func parseIssueReference(
+        _ state: inout ParserState,
+        useCountedASCIIMove: Bool = true,
+        useASCIIByteBoundaryChecks: Bool = true
+    ) -> MarkdownParser.InlineNode? {
         let mark = state.mark()
         guard state.current() == "#" else { return nil }
         // Preceded by alnum or '#' => not an issue
-        if mark.index > state.text.startIndex {
+        if useASCIIByteBoundaryChecks, state.asciiFastPath {
+            if let previous = previousASCIIByte(in: state, before: mark.index),
+               ParsingHelpers.isASCIIAlnum(previous) || previous == 0x23 { // #
+                return nil
+            }
+        } else if mark.index > state.text.startIndex {
             let prev = state.text[state.text.index(before: mark.index)]
             if prev.isLetter || prev.isNumber || prev == "#" { return nil }
         }
@@ -2556,18 +4037,29 @@ public struct InlineParser {
         var idxNum = state.currentIndex
         let endNum = state.endIndex
         let number: Int?
+        let scannedByteCount: Int?
         if state.asciiFastPath {
-            number = ParsingHelpers.scanASCIIInteger(in: state.text, from: &idxNum, end: endNum).value
+            let scanned = ParsingHelpers.scanASCIIInteger(in: state.text, from: &idxNum, end: endNum)
+            number = scanned.value
+            scannedByteCount = scanned.count
         } else {
             let digits = ParsingHelpers.scanWhile(in: state.text, from: &idxNum, end: endNum, while: { ch in ch.isNumber })
             number = Int(digits)
+            scannedByteCount = nil
         }
-        state.moveASCII(to: idxNum)
+        if let scannedByteCount {
+            moveASCII(&state, to: idxNum, consumedBytes: scannedByteCount, useCountedASCIIMove: useCountedASCIIMove)
+        } else {
+            state.moveASCII(to: idxNum)
+        }
         guard let n = number else { state.restore(mark); return nil }
         return .issueReference(number: n)
     }
 
-    static func parseEmojiShortcode(_ state: inout ParserState) -> MarkdownParser.InlineNode? {
+    static func parseEmojiShortcode(
+        _ state: inout ParserState,
+        useCountedASCIIMove: Bool = true
+    ) -> MarkdownParser.InlineNode? {
         let mark = state.mark()
         guard state.current() == ":" else { return nil }
         state.advance()
@@ -2578,7 +4070,7 @@ public struct InlineParser {
             let range = ParsingHelpers.scanUTF8Range(in: state.text, from: &idxName, end: endName, while: { b in
                 ParsingHelpers.isASCIIAlnum(b) || b == 0x5F /*_*/ || b == 0x2D /*-*/ || b == 0x2B /*+*/
             })
-            state.moveASCII(to: idxName)
+            moveASCII(&state, to: idxName, consumedBytes: range.count, useCountedASCIIMove: useCountedASCIIMove)
             guard state.current() == ":" else { state.restore(mark); return nil }
             state.advance()
             guard range.count > 0 else { state.restore(mark); return nil }
@@ -2693,10 +4185,19 @@ public struct InlineParser {
         }
     }
 
-    static func parseCommitSHA(_ state: inout ParserState) -> MarkdownParser.InlineNode? {
+    static func parseCommitSHA(
+        _ state: inout ParserState,
+        useCountedASCIIMove: Bool = true,
+        useASCIIByteBoundaryChecks: Bool = true
+    ) -> MarkdownParser.InlineNode? {
         let mark = state.mark()
         // Start boundary: previous char should not be alphanumeric
-        if mark.index > state.text.startIndex {
+        if useASCIIByteBoundaryChecks, state.asciiFastPath {
+            if let previous = previousASCIIByte(in: state, before: mark.index),
+               ParsingHelpers.isASCIIAlnum(previous) {
+                return nil
+            }
+        } else if mark.index > state.text.startIndex {
             let prev = state.text[state.text.index(before: mark.index)]
             if prev.isLetter || prev.isNumber { return nil }
         }
@@ -2704,6 +4205,7 @@ public struct InlineParser {
         let end = state.endIndex
         let sha: String
         let shaLength: Int
+        let scannedByteCount: Int?
         if state.asciiFastPath {
             let range = ParsingHelpers.scanUTF8Range(
                 in: state.text,
@@ -2714,13 +4216,27 @@ public struct InlineParser {
             )
             sha = String(state.text[range.range])
             shaLength = range.count
+            scannedByteCount = range.count
         } else {
             sha = ParsingHelpers.scanWhile(in: state.text, from: &idx, end: end, while: { ch in ParsingHelpers.isHexChar(ch) }, maxCount: 40)
             shaLength = sha.count
+            scannedByteCount = nil
         }
-        state.moveASCII(to: idx)
+        if let scannedByteCount {
+            moveASCII(&state, to: idx, consumedBytes: scannedByteCount, useCountedASCIIMove: useCountedASCIIMove)
+        } else {
+            state.moveASCII(to: idx)
+        }
         guard shaLength >= 7 && shaLength <= 40 else { state.restore(mark); return nil }
-        if let next = state.current(), (next.isLetter || next.isNumber) { state.restore(mark); return nil }
+        if useASCIIByteBoundaryChecks, state.asciiFastPath {
+            if let next = currentASCIIByte(in: state), ParsingHelpers.isASCIIAlnum(next) {
+                state.restore(mark)
+                return nil
+            }
+        } else if let next = state.current(), (next.isLetter || next.isNumber) {
+            state.restore(mark)
+            return nil
+        }
         let shortSha = String(sha.prefix(7))
         return .commitSHA(sha: sha, short: shortSha)
     }
@@ -2728,20 +4244,31 @@ public struct InlineParser {
     private static func parseCommitSHA(
         _ state: inout ParserState,
         candidate: ASCIIInlineCandidate?,
-        shouldProbe: Bool
+        shouldProbe: Bool,
+        useCountedASCIIMove: Bool,
+        useASCIIByteBoundaryChecks: Bool
     ) -> MarkdownParser.InlineNode? {
         if case .commitSHA(let shaCandidate) = candidate,
            shaCandidate.range.lowerBound == state.currentIndex,
            shaCandidate.range.upperBound <= state.endIndex {
             let sha = String(state.text[shaCandidate.range])
-            state.moveASCII(to: shaCandidate.range.upperBound)
+            moveASCII(
+                &state,
+                to: shaCandidate.range.upperBound,
+                consumedBytes: shaCandidate.byteCount,
+                useCountedASCIIMove: useCountedASCIIMove
+            )
             return .commitSHA(sha: sha, short: String(sha.prefix(7)))
         }
 
         guard shouldProbe, shouldAttemptCommitSHA(state) else {
             return nil
         }
-        return parseCommitSHA(&state)
+        return parseCommitSHA(
+            &state,
+            useCountedASCIIMove: useCountedASCIIMove,
+            useASCIIByteBoundaryChecks: useASCIIByteBoundaryChecks
+        )
     }
 
     private static func shouldAttemptCommitSHA(_ state: ParserState) -> Bool {
@@ -2787,63 +4314,116 @@ public struct InlineParser {
         return true
     }
 
-    static func parseRepositoryReference(_ state: inout ParserState) -> MarkdownParser.InlineNode? {
+    static func parseRepositoryReference(
+        _ state: inout ParserState,
+        useCountedASCIIMove: Bool = true,
+        useASCIIByteBoundaryChecks: Bool = true
+    ) -> MarkdownParser.InlineNode? {
         let mark = state.mark()
 
         // owner
         var idx = state.currentIndex
         let end = state.endIndex
-        guard let first = state.current(), first.isLetter else { return nil }
+        if useASCIIByteBoundaryChecks, state.asciiFastPath {
+            guard let first = currentASCIIByte(in: state), ParsingHelpers.isASCIIAlpha(first) else {
+                return nil
+            }
+        } else {
+            guard let first = state.current(), first.isLetter else { return nil }
+        }
         let owner: String
+        let ownerByteCount: Int?
         if state.asciiFastPath {
             let range = ParsingHelpers.scanUTF8Range(in: state.text, from: &idx, end: end, while: { b in
                 ParsingHelpers.isASCIIAlnum(b) || b == 0x2D /*-*/ || b == 0x5F /*_*/
             })
             owner = String(state.text[range.range])
+            ownerByteCount = range.count
         } else {
             owner = ParsingHelpers.scanWhile(in: state.text, from: &idx, end: end, while: { ch in
                 ch.isLetter || ch.isNumber || ch == "-" || ch == "_"
             })
+            ownerByteCount = nil
         }
-        state.moveASCII(to: idx)
+        if let ownerByteCount {
+            moveASCII(&state, to: idx, consumedBytes: ownerByteCount, useCountedASCIIMove: useCountedASCIIMove)
+        } else {
+            state.moveASCII(to: idx)
+        }
         // /
-        guard state.current() == "/" else { state.restore(mark); return nil }
+        if useASCIIByteBoundaryChecks, state.asciiFastPath {
+            guard currentASCIIByte(in: state) == 0x2F else { state.restore(mark); return nil } // /
+        } else {
+            guard state.current() == "/" else { state.restore(mark); return nil }
+        }
         state.advance()
         // repo
-        guard let r0 = state.current(), (r0.isLetter || r0.isNumber) else { state.restore(mark); return nil }
+        if useASCIIByteBoundaryChecks, state.asciiFastPath {
+            guard let firstRepoByte = currentASCIIByte(in: state),
+                  ParsingHelpers.isASCIIAlnum(firstRepoByte) else {
+                state.restore(mark)
+                return nil
+            }
+        } else {
+            guard let r0 = state.current(), (r0.isLetter || r0.isNumber) else { state.restore(mark); return nil }
+        }
         idx = state.currentIndex
         let repo: String
+        let repoByteCount: Int?
         if state.asciiFastPath {
             let range = ParsingHelpers.scanUTF8Range(in: state.text, from: &idx, end: end, while: { b in
                 ParsingHelpers.isASCIIAlnum(b) || b == 0x2D /*-*/ || b == 0x5F /*_*/ || b == 0x2E /*.*/
             })
             repo = String(state.text[range.range])
+            repoByteCount = range.count
         } else {
             repo = ParsingHelpers.scanWhile(in: state.text, from: &idx, end: end, while: { ch in
                 ch.isLetter || ch.isNumber || ch == "-" || ch == "_" || ch == "."
             })
+            repoByteCount = nil
         }
-        state.moveASCII(to: idx)
+        if let repoByteCount {
+            moveASCII(&state, to: idx, consumedBytes: repoByteCount, useCountedASCIIMove: useCountedASCIIMove)
+        } else {
+            state.moveASCII(to: idx)
+        }
         guard !owner.isEmpty && !repo.isEmpty else { state.restore(mark); return nil }
 
         // Optional #number => PR reference
-        if state.current() == "#" {
+        let hasIssueSuffix = useASCIIByteBoundaryChecks && state.asciiFastPath
+            ? currentASCIIByte(in: state) == 0x23 // #
+            : state.current() == "#"
+        if hasIssueSuffix {
             state.advance()
             var dIdx = state.currentIndex
             let dEnd = state.endIndex
             let number: Int?
+            let scannedByteCount: Int?
             if state.asciiFastPath {
-                number = ParsingHelpers.scanASCIIInteger(in: state.text, from: &dIdx, end: dEnd).value
+                let scanned = ParsingHelpers.scanASCIIInteger(in: state.text, from: &dIdx, end: dEnd)
+                number = scanned.value
+                scannedByteCount = scanned.count
             } else {
                 let digits = ParsingHelpers.scanWhile(in: state.text, from: &dIdx, end: dEnd, while: { ch in ch.isNumber })
                 number = Int(digits)
+                scannedByteCount = nil
             }
-            state.moveASCII(to: dIdx)
+            if let scannedByteCount {
+                moveASCII(&state, to: dIdx, consumedBytes: scannedByteCount, useCountedASCIIMove: useCountedASCIIMove)
+            } else {
+                state.moveASCII(to: dIdx)
+            }
             if let num = number { return .pullRequestReference(owner: owner, repo: repo, number: num) }
         }
 
         // Context check: if preceded by @ / : then not a standalone repo ref
-        if mark.index > state.text.startIndex {
+        if useASCIIByteBoundaryChecks, state.asciiFastPath {
+            if let previous = previousASCIIByte(in: state, before: mark.index),
+               previous == 0x40 || previous == 0x2F || previous == 0x3A { // @ / :
+                state.restore(mark)
+                return nil
+            }
+        } else if mark.index > state.text.startIndex {
             let prev = state.text[state.text.index(before: mark.index)]
             if prev == "@" || prev == "/" || prev == ":" { state.restore(mark); return nil }
         }
@@ -2853,23 +4433,36 @@ public struct InlineParser {
     private static func parseRepositoryReference(
         _ state: inout ParserState,
         candidate: ASCIIInlineCandidate?,
-        shouldProbe: Bool
+        shouldProbe: Bool,
+        useCountedASCIIMove: Bool,
+        useASCIIByteBoundaryChecks: Bool
     ) -> MarkdownParser.InlineNode? {
         if case .repositoryReference(let reference) = candidate,
            reference.ownerRange.lowerBound == state.currentIndex,
            reference.repoRange.upperBound <= state.endIndex {
-            return parseRepositoryReference(&state, reference: reference)
+            return parseRepositoryReference(
+                &state,
+                reference: reference,
+                useCountedASCIIMove: useCountedASCIIMove,
+                useASCIIByteBoundaryChecks: useASCIIByteBoundaryChecks
+            )
         }
 
         guard shouldProbe, shouldAttemptRepositoryReference(state) else {
             return nil
         }
-        return parseRepositoryReference(&state)
+        return parseRepositoryReference(
+            &state,
+            useCountedASCIIMove: useCountedASCIIMove,
+            useASCIIByteBoundaryChecks: useASCIIByteBoundaryChecks
+        )
     }
 
     private static func parseRepositoryReference(
         _ state: inout ParserState,
-        reference: ASCIIInlineCandidate.RepositoryReference
+        reference: ASCIIInlineCandidate.RepositoryReference,
+        useCountedASCIIMove: Bool,
+        useASCIIByteBoundaryChecks: Bool
     ) -> MarkdownParser.InlineNode? {
         let mark = state.mark()
         guard reference.ownerRange.lowerBound == mark.index,
@@ -2879,7 +4472,13 @@ public struct InlineParser {
             return nil
         }
 
-        if mark.index > state.text.startIndex {
+        if useASCIIByteBoundaryChecks, state.asciiFastPath {
+            if let previous = previousASCIIByte(in: state, before: mark.index),
+               previous == 0x40 || previous == 0x2F || previous == 0x3A { // @ / :
+                state.restore(mark)
+                return nil
+            }
+        } else if mark.index > state.text.startIndex {
             let prev = state.text[state.text.index(before: mark.index)]
             if prev == "@" || prev == "/" || prev == ":" {
                 state.restore(mark)
@@ -2889,17 +4488,26 @@ public struct InlineParser {
 
         let owner = String(state.text[reference.ownerRange])
         let repo = String(state.text[reference.repoRange])
-        state.moveASCII(to: reference.afterRepo)
+        moveASCII(
+            &state,
+            to: reference.afterRepo,
+            consumedBytes: reference.byteCount,
+            useCountedASCIIMove: useCountedASCIIMove
+        )
 
-        if state.current() == "#" {
+        let hasIssueSuffix = useASCIIByteBoundaryChecks && state.asciiFastPath
+            ? currentASCIIByte(in: state) == 0x23 // #
+            : state.current() == "#"
+        if hasIssueSuffix {
             state.advance()
             var digitIndex = state.currentIndex
-            let number = ParsingHelpers.scanASCIIInteger(
+            let scanned = ParsingHelpers.scanASCIIInteger(
                 in: state.text,
                 from: &digitIndex,
                 end: state.endIndex
-            ).value
-            state.moveASCII(to: digitIndex)
+            )
+            let number = scanned.value
+            moveASCII(&state, to: digitIndex, consumedBytes: scanned.count, useCountedASCIIMove: useCountedASCIIMove)
             if let number {
                 return .pullRequestReference(owner: owner, repo: repo, number: number)
             }
@@ -3046,7 +4654,23 @@ public struct InlineParser {
             &state,
             angleBracketMode: angleBracketMode,
             useASCIICursorMove: false,
-            useASCIISchemeDetection: true
+            useASCIICountedCursorMove: false,
+            useASCIISchemeDetection: true,
+            useASCIIByteTailTrim: true
+        )
+    }
+
+    static func parseUnifiedAutolinkByRecountingASCIIMoveForTesting(
+        _ state: inout ParserState,
+        angleBracketMode: Bool
+    ) -> MarkdownParser.InlineNode? {
+        parseUnifiedAutolink(
+            &state,
+            angleBracketMode: angleBracketMode,
+            useASCIICursorMove: true,
+            useASCIICountedCursorMove: false,
+            useASCIISchemeDetection: true,
+            useASCIIByteTailTrim: true
         )
     }
 
@@ -3058,7 +4682,38 @@ public struct InlineParser {
             &state,
             angleBracketMode: angleBracketMode,
             useASCIICursorMove: true,
-            useASCIISchemeDetection: false
+            useASCIICountedCursorMove: true,
+            useASCIISchemeDetection: false,
+            useASCIIByteTailTrim: true
+        )
+    }
+
+    static func parseUnifiedAutolinkByTrimmingTailWithCharactersForTesting(
+        _ state: inout ParserState,
+        angleBracketMode: Bool
+    ) -> MarkdownParser.InlineNode? {
+        parseUnifiedAutolink(
+            &state,
+            angleBracketMode: angleBracketMode,
+            useASCIICursorMove: true,
+            useASCIICountedCursorMove: true,
+            useASCIISchemeDetection: true,
+            useASCIIByteTailTrim: false
+        )
+    }
+
+    static func parseUnifiedAutolinkByCopyingRejectedAngleContentForTesting(
+        _ state: inout ParserState,
+        angleBracketMode: Bool
+    ) -> MarkdownParser.InlineNode? {
+        parseUnifiedAutolink(
+            &state,
+            angleBracketMode: angleBracketMode,
+            useASCIICursorMove: true,
+            useASCIICountedCursorMove: true,
+            useASCIISchemeDetection: true,
+            useASCIIByteTailTrim: true,
+            deferRejectedAngleAutolinkCopy: false
         )
     }
 
@@ -3068,7 +4723,10 @@ public struct InlineParser {
             &state,
             angleBracketMode: angleBracketMode,
             useASCIICursorMove: true,
-            useASCIISchemeDetection: true
+            useASCIICountedCursorMove: true,
+            useASCIISchemeDetection: true,
+            useASCIIByteTailTrim: true,
+            deferRejectedAngleAutolinkCopy: true
         )
     }
 
@@ -3076,7 +4734,10 @@ public struct InlineParser {
         _ state: inout ParserState,
         angleBracketMode: Bool,
         useASCIICursorMove: Bool,
-        useASCIISchemeDetection: Bool
+        useASCIICountedCursorMove: Bool,
+        useASCIISchemeDetection: Bool,
+        useASCIIByteTailTrim: Bool,
+        deferRejectedAngleAutolinkCopy: Bool = true
     ) -> MarkdownParser.InlineNode? {
         let startMark = state.mark()
         if angleBracketMode {
@@ -3168,6 +4829,7 @@ public struct InlineParser {
         }
 
         enum Scheme { case httpLike, www, mailto, angle }
+        enum AngleAutolinkClassification { case email, url, invalid }
         let scheme: Scheme?
         if angleBracketMode {
             scheme = .angle
@@ -3196,14 +4858,80 @@ public struct InlineParser {
             return domain.contains(".") && !domain.hasPrefix(".") && !domain.hasSuffix(".")
         }
 
+        @inline(__always)
+        func isValidASCIIAngleScheme(to colon: String.Index) -> Bool {
+            let utf8 = state.text.utf8
+            guard startIndex < colon,
+                  ParsingHelpers.isASCIIAlpha(utf8[startIndex]) else {
+                return false
+            }
+
+            var scan = utf8.index(after: startIndex)
+            while scan < colon {
+                let byte = utf8[scan]
+                guard ParsingHelpers.isASCIIAlnum(byte) ||
+                        byte == 0x2B || // +
+                        byte == 0x2E || // .
+                        byte == 0x2D else { // -
+                    return false
+                }
+                scan = utf8.index(after: scan)
+            }
+            return true
+        }
+
+        @inline(__always)
+        func classifyASCIIAngleAutolinkContent(to end: String.Index) -> AngleAutolinkClassification {
+            let utf8 = state.text.utf8
+            guard startIndex < end else { return .invalid }
+
+            var scan = startIndex
+            var firstColon: String.Index?
+            var firstAt: String.Index?
+            while scan < end {
+                switch utf8[scan] {
+                case 0x3A: // :
+                    if firstColon == nil { firstColon = scan }
+                case 0x40: // @
+                    if firstAt == nil { firstAt = scan }
+                default:
+                    break
+                }
+                scan = utf8.index(after: scan)
+            }
+
+            if let firstColon {
+                return isValidASCIIAngleScheme(to: firstColon) ? .url : .invalid
+            }
+
+            guard let firstAt, firstAt > startIndex else { return .invalid }
+            let domainStart = utf8.index(after: firstAt)
+            guard domainStart < end,
+                  utf8[domainStart] != 0x2E, // .
+                  utf8[utf8.index(before: end)] != 0x2E else {
+                return .invalid
+            }
+
+            var domainScan = domainStart
+            while domainScan < end {
+                if utf8[domainScan] == 0x2E { // .
+                    return .email
+                }
+                domainScan = utf8.index(after: domainScan)
+            }
+            return .invalid
+        }
+
         var idx = startIndex
         var openParens = 0, closeParens = 0
         var openBrackets = 0, closeBrackets = 0
+        var asciiScannedByteCount: Int?
         if state.asciiFastPath {
             let utf8 = state.text.utf8
             let uStart = startIndex
             let uEnd = state.endIndex
             var uidx = uStart
+            var consumedBytes = 0
             scanLoopASCII: while uidx < uEnd {
                 let b = utf8[uidx]
                 switch b {
@@ -3213,18 +4941,19 @@ public struct InlineParser {
                     // Angle bracket breaks regardless
                     break scanLoopASCII
                 case 0x28: // (
-                    openParens &+= 1; uidx = utf8.index(after: uidx)
+                    openParens &+= 1; uidx = utf8.index(after: uidx); consumedBytes += 1
                 case 0x29: // )
-                    closeParens &+= 1; uidx = utf8.index(after: uidx)
+                    closeParens &+= 1; uidx = utf8.index(after: uidx); consumedBytes += 1
                 case 0x5B: // [
-                    openBrackets &+= 1; uidx = utf8.index(after: uidx)
+                    openBrackets &+= 1; uidx = utf8.index(after: uidx); consumedBytes += 1
                 case 0x5D: // ]
-                    closeBrackets &+= 1; uidx = utf8.index(after: uidx)
+                    closeBrackets &+= 1; uidx = utf8.index(after: uidx); consumedBytes += 1
                 default:
-                    uidx = utf8.index(after: uidx)
+                    uidx = utf8.index(after: uidx); consumedBytes += 1
                 }
             }
             idx = uidx
+            asciiScannedByteCount = consumedBytes
         } else {
             scanLoop: while idx < state.endIndex {
                 let ch = state.text[idx]
@@ -3243,6 +4972,7 @@ public struct InlineParser {
         }
 
         var endIndex = idx
+        var endASCIIByteCount = asciiScannedByteCount
         if angleBracketMode {
             if idx >= state.endIndex || state.text[idx] != ">" {
                 state.restore(startMark)
@@ -3250,24 +4980,81 @@ public struct InlineParser {
             }
         }
 
-        while endIndex > startIndex {
-            let prev = state.text[state.text.index(before: endIndex)]
-            if prev == "." || prev == "," || prev == ";" || prev == ":" || prev == "?" || prev == "!" {
+        if useASCIIByteTailTrim, endASCIIByteCount != nil {
+            let utf8 = state.text.utf8
+
+            @inline(__always)
+            func dropLastASCIIByte() {
+                endIndex = utf8.index(before: endIndex)
+                if let count = endASCIIByteCount {
+                    endASCIIByteCount = max(0, count - 1)
+                }
+            }
+
+            tailPunctuationLoop: while endIndex > startIndex {
+                let prev = utf8[utf8.index(before: endIndex)]
+                switch prev {
+                case 0x2E, 0x2C, 0x3B, 0x3A, 0x3F, 0x21: // . , ; : ? !
+                    dropLastASCIIByte()
+                default:
+                    break tailPunctuationLoop
+                }
+            }
+            var extraCloseParens = max(0, closeParens - openParens)
+            while extraCloseParens > 0,
+                  endIndex > startIndex,
+                  utf8[utf8.index(before: endIndex)] == 0x29 { // )
+                dropLastASCIIByte()
+                extraCloseParens -= 1
+            }
+            var extraCloseBrackets = max(0, closeBrackets - openBrackets)
+            while extraCloseBrackets > 0,
+                  endIndex > startIndex,
+                  utf8[utf8.index(before: endIndex)] == 0x5D { // ]
+                dropLastASCIIByte()
+                extraCloseBrackets -= 1
+            }
+        } else {
+            while endIndex > startIndex {
+                let prev = state.text[state.text.index(before: endIndex)]
+                if prev == "." || prev == "," || prev == ";" || prev == ":" || prev == "?" || prev == "!" {
+                    endIndex = state.text.index(before: endIndex)
+                    if let count = endASCIIByteCount {
+                        endASCIIByteCount = max(0, count - 1)
+                    }
+                } else { break }
+            }
+            var extraCloseParens = max(0, closeParens - openParens)
+            while extraCloseParens > 0 && endIndex > startIndex && state.text[state.text.index(before: endIndex)] == ")" {
                 endIndex = state.text.index(before: endIndex)
-            } else { break }
-        }
-        var extraCloseParens = max(0, closeParens - openParens)
-        while extraCloseParens > 0 && endIndex > startIndex && state.text[state.text.index(before: endIndex)] == ")" {
-            endIndex = state.text.index(before: endIndex)
-            extraCloseParens -= 1
-        }
-        var extraCloseBrackets = max(0, closeBrackets - openBrackets)
-        while extraCloseBrackets > 0 && endIndex > startIndex && state.text[state.text.index(before: endIndex)] == "]" {
-            endIndex = state.text.index(before: endIndex)
-            extraCloseBrackets -= 1
+                if let count = endASCIIByteCount {
+                    endASCIIByteCount = max(0, count - 1)
+                }
+                extraCloseParens -= 1
+            }
+            var extraCloseBrackets = max(0, closeBrackets - openBrackets)
+            while extraCloseBrackets > 0 && endIndex > startIndex && state.text[state.text.index(before: endIndex)] == "]" {
+                endIndex = state.text.index(before: endIndex)
+                if let count = endASCIIByteCount {
+                    endASCIIByteCount = max(0, count - 1)
+                }
+                extraCloseBrackets -= 1
+            }
         }
 
         if endIndex <= startIndex { state.restore(startMark); return nil }
+
+        let asciiAngleClassification: AngleAutolinkClassification?
+        if angleBracketMode, deferRejectedAngleAutolinkCopy, state.asciiFastPath {
+            let classification = classifyASCIIAngleAutolinkContent(to: endIndex)
+            if case .invalid = classification {
+                state.restore(startMark)
+                return nil
+            }
+            asciiAngleClassification = classification
+        } else {
+            asciiAngleClassification = nil
+        }
 
         let urlText = state.substring(from: startIndex, to: endIndex)
         // Determine autolink type and destination URL
@@ -3290,7 +5077,14 @@ public struct InlineParser {
             linkURL = URL(string: urlText)
         case .angle:
             // Angle-bracket: decide by content
-            if isLikelyAngleEmail(urlText) {
+            if case .email = asciiAngleClassification {
+                linkType = .email
+                displayText = urlText
+                linkURL = URL(string: "mailto:\(urlText)")
+            } else if case .url = asciiAngleClassification {
+                linkType = .url
+                linkURL = URL(string: urlText)
+            } else if isLikelyAngleEmail(urlText) {
                 linkType = .email
                 displayText = urlText
                 linkURL = URL(string: "mailto:\(urlText)")
@@ -3316,14 +5110,33 @@ public struct InlineParser {
         if angleBracketMode {
             let afterAngle = state.text.index(after: idx)
             if useASCIICursorMove {
-                state.moveASCII(to: afterAngle)
+                if useASCIICountedCursorMove, let asciiScannedByteCount {
+                    let consumedBytes = asciiScannedByteCount + 1
+                    state.moveASCII(
+                        to: afterAngle,
+                        consumedBytes: consumedBytes,
+                        lineBreaks: 0,
+                        bytesAfterLastLineBreak: consumedBytes
+                    )
+                } else {
+                    state.moveASCII(to: afterAngle)
+                }
             } else {
                 state.move(to: idx)
                 if state.current() == ">" { state.advance() }
             }
         } else {
             if useASCIICursorMove {
-                state.moveASCII(to: endIndex)
+                if useASCIICountedCursorMove, let endASCIIByteCount {
+                    state.moveASCII(
+                        to: endIndex,
+                        consumedBytes: endASCIIByteCount,
+                        lineBreaks: 0,
+                        bytesAfterLastLineBreak: endASCIIByteCount
+                    )
+                } else {
+                    state.moveASCII(to: endIndex)
+                }
             } else {
                 state.move(to: endIndex)
             }

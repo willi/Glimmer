@@ -5,9 +5,72 @@ public struct BlockParser {
     private struct TableStartProbe {
         let headerRange: Range<String.Index>
         let separatorRange: Range<String.Index>
+        let separatorAlignments: [MarkdownParser.TableAlignment]?
         let afterSeparatorLine: String.Index
         let lineBreaksToAfterSeparatorLine: Int
         let columnAfterSeparatorLine: Int
+    }
+
+    private struct TableSeparatorAlignmentScan {
+        private var alignments: [MarkdownParser.TableAlignment] = []
+        private var containsNonASCII = false
+        private var cellHasContent = false
+        private var cellContainsDash = false
+        private var firstNonWhitespaceByte: UInt8 = 0
+        private var lastNonWhitespaceByte: UInt8 = 0
+
+        mutating func scan(_ byte: UInt8) {
+            if byte == 0x7C { // |
+                finishCell()
+                return
+            }
+
+            if byte >= 0x80 {
+                containsNonASCII = true
+            }
+
+            guard byte != 0x20 && byte != 0x09 else { // space, tab
+                return
+            }
+
+            if !cellHasContent {
+                firstNonWhitespaceByte = byte
+                cellHasContent = true
+            }
+            lastNonWhitespaceByte = byte
+
+            if byte == 0x2D { // -
+                cellContainsDash = true
+            }
+        }
+
+        mutating func finishLine() -> [MarkdownParser.TableAlignment]? {
+            finishCell()
+            return containsNonASCII ? nil : alignments
+        }
+
+        private mutating func finishCell() {
+            defer {
+                cellHasContent = false
+                cellContainsDash = false
+                firstNonWhitespaceByte = 0
+                lastNonWhitespaceByte = 0
+            }
+
+            guard cellHasContent, cellContainsDash else {
+                return
+            }
+
+            let startsWithColon = firstNonWhitespaceByte == 0x3A // :
+            let endsWithColon = lastNonWhitespaceByte == 0x3A // :
+            if startsWithColon && endsWithColon {
+                alignments.append(.center)
+            } else if endsWithColon {
+                alignments.append(.right)
+            } else {
+                alignments.append(.left)
+            }
+        }
     }
 
     private struct SetextHeadingProbe {
@@ -52,7 +115,15 @@ public struct BlockParser {
 
     private struct ListMarkerParse {
         let marker: String
+        let markerWidth: Int
         let isOrdered: Bool
+    }
+
+    private struct ListContinuationPrefixScan {
+        let spaces: Int
+        let afterLeadingSpaces: String.Index
+        let contentStart: String.Index
+        let startsNewListItem: Bool
     }
 
     private struct TableRowLineScan {
@@ -63,10 +134,30 @@ public struct BlockParser {
 
     private struct ASCIIListMarkerProbe {
         let marker: String
+        let markerWidth: Int
+        let consumedBytes: Int
         let isOrdered: Bool
-        let start: String.UTF8View.Index
-        let contentStart: String.UTF8View.Index
         let stringContentStart: String.Index
+    }
+
+    private struct FootnoteDefinitionHeader {
+        let labelRange: Range<String.Index>
+        let contentStart: String.Index
+        let columnAdvance: Int
+    }
+
+    private struct FootnoteContinuationPrefixScan {
+        let spaces: Int
+        let contentStart: String.Index
+        let columnAdvance: Int
+    }
+
+    private struct BlockquoteLineScan {
+        let range: Range<String.Index>
+        let utf8Count: Int
+        let isBlank: Bool
+        let canUseParagraphFastPath: Bool
+        let startsLazyNewBlock: Bool
     }
 
     
@@ -86,8 +177,8 @@ public struct BlockParser {
             }
             
             // Skip empty lines
-            while !state.isAtEnd && state.isAtEmptyLine() {
-                state.advanceLine()
+            while !state.isAtEnd {
+                if !state.advanceIfAtEmptyLine() { break }
             }
             
             if state.isAtEnd {
@@ -116,8 +207,8 @@ public struct BlockParser {
             iterationCount += 1
             if iterationCount > maxIterations { break }
 
-            while !state.isAtEnd && state.isAtEmptyLine() {
-                state.advanceLine()
+            while !state.isAtEnd {
+                if !state.advanceIfAtEmptyLine() { break }
             }
             if state.isAtEnd { break }
 
@@ -132,99 +223,252 @@ public struct BlockParser {
     }
     
     static func parseBlock(_ state: inout ParserState, configuration: MarkdownConfiguration) -> MarkdownParser.BlockNode? {
-        parseBlock(&state, configuration: configuration, paragraphStartProbeMode: .shared)
+        parseBlock(
+            &state,
+            configuration: configuration,
+            paragraphStartProbeMode: .shared,
+            useUTF8BlockStartDispatch: true,
+            useMarkRestoreForFailedCandidates: true
+        )
     }
 
     static func parseBlockByAlwaysProbingParagraphStartForTesting(
         _ state: inout ParserState,
         configuration: MarkdownConfiguration
     ) -> MarkdownParser.BlockNode? {
-        parseBlock(&state, configuration: configuration, paragraphStartProbeMode: .always)
+        parseBlock(
+            &state,
+            configuration: configuration,
+            paragraphStartProbeMode: .always,
+            useUTF8BlockStartDispatch: true,
+            useMarkRestoreForFailedCandidates: true
+        )
     }
 
     static func parseBlockBySeparateParagraphStartProbesForTesting(
         _ state: inout ParserState,
         configuration: MarkdownConfiguration
     ) -> MarkdownParser.BlockNode? {
-        parseBlock(&state, configuration: configuration, paragraphStartProbeMode: .gated)
+        parseBlock(
+            &state,
+            configuration: configuration,
+            paragraphStartProbeMode: .gated,
+            useUTF8BlockStartDispatch: true,
+            useMarkRestoreForFailedCandidates: true
+        )
+    }
+
+    static func parseBlockByCharacterDispatchForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.BlockNode? {
+        parseBlock(
+            &state,
+            configuration: configuration,
+            paragraphStartProbeMode: .shared,
+            useUTF8BlockStartDispatch: false,
+            useMarkRestoreForFailedCandidates: true
+        )
+    }
+
+    static func parseBlockByIndexMoveCandidateRestoreForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.BlockNode? {
+        parseBlock(
+            &state,
+            configuration: configuration,
+            paragraphStartProbeMode: .shared,
+            useUTF8BlockStartDispatch: true,
+            useMarkRestoreForFailedCandidates: false
+        )
     }
 
     private static func parseBlock(
         _ state: inout ParserState,
         configuration: MarkdownConfiguration,
-        paragraphStartProbeMode: ParagraphStartProbeMode
+        paragraphStartProbeMode: ParagraphStartProbeMode,
+        useUTF8BlockStartDispatch: Bool,
+        useMarkRestoreForFailedCandidates: Bool
     ) -> MarkdownParser.BlockNode? {
         
-        let savedIndex = state.currentIndex
+        let savedMark = state.mark()
         guard !state.isAtEmptyLine() else {
             return nil
         }
-        
-        // Skip leading whitespace (up to 3 spaces for block elements)
-        var leadingSpaces = 0
-        while let ch = state.current(), ch == " ", leadingSpaces < 3 {
-            state.advance()
-            leadingSpaces += 1
+
+        let blockStartByte: UInt8?
+        if useUTF8BlockStartDispatch {
+            blockStartByte = moveToBlockStartByUTF8Scanning(&state)
+        } else {
+            blockStartByte = nil
+
+            // Skip leading whitespace (up to 3 spaces for block elements)
+            var leadingSpaces = 0
+            while let ch = state.current(), ch == " ", leadingSpaces < 3 {
+                state.advance()
+                leadingSpaces += 1
+            }
+
+            // Check for indented code block (4+ spaces)
+            if leadingSpaces >= 3, let ch = state.current(), ch == " " {
+                restoreFailedBlockCandidate(
+                    &state,
+                    to: savedMark,
+                    useMarkRestore: useMarkRestoreForFailedCandidates
+                )
+                return parseIndentedCodeBlock(&state)
+            }
         }
-        
-        // Check for indented code block (4+ spaces)
-        if leadingSpaces >= 3, let ch = state.current(), ch == " " {
-            state.move(to: savedIndex)
+
+        if blockStartByte == 0x20 {
+            restoreFailedBlockCandidate(
+                &state,
+                to: savedMark,
+                useMarkRestore: useMarkRestoreForFailedCandidates
+            )
             return parseIndentedCodeBlock(&state)
         }
-        
-        let blockStart = state.current()
 
         // Try parsing different block types
-        if blockStart == "#",
-           let heading = parseATXHeading(&state, configuration: configuration) {
-            return heading
-        }
+        if let blockStartByte, blockStartByte < 0x80 {
+            if blockStartByte == 0x23, // #
+               let heading = parseATXHeading(&state, configuration: configuration) {
+                return heading
+            }
 
-        if (blockStart == "`" || blockStart == "~"),
-           let codeBlock = parseFencedCodeBlock(&state) {
-            return codeBlock
-        }
+            if (blockStartByte == 0x60 || blockStartByte == 0x7E), // ` ~
+               let codeBlock = parseFencedCodeBlock(&state) {
+                return codeBlock
+            }
 
-        if blockStart == ">",
-           let blockquote = parseBlockquote(&state, configuration: configuration) {
-            return blockquote
-        }
+            if blockStartByte == 0x3E, // >
+               let blockquote = parseBlockquote(&state, configuration: configuration) {
+                return blockquote
+            }
 
-        if shouldAttemptListMarker(blockStart),
-           let list = parseList(&state, configuration: configuration) {
-            return list
+            if shouldAttemptListMarker(blockStartByte),
+               let list = parseList(&state, configuration: configuration) {
+                return list
+            }
+        } else {
+            let blockStart = state.current()
+
+            if blockStart == "#",
+               let heading = parseATXHeading(&state, configuration: configuration) {
+                return heading
+            }
+
+            if (blockStart == "`" || blockStart == "~"),
+               let codeBlock = parseFencedCodeBlock(&state) {
+                return codeBlock
+            }
+
+            if blockStart == ">",
+               let blockquote = parseBlockquote(&state, configuration: configuration) {
+                return blockquote
+            }
+
+            if shouldAttemptListMarker(blockStart),
+               let list = parseList(&state, configuration: configuration) {
+                return list
+            }
         }
 
         let paragraphStartProbes = paragraphStartProbes(state, mode: paragraphStartProbeMode)
 
         if let tableStart = paragraphStartProbes.tableStart {
-            if let table = parseTable(&state, configuration: configuration, startProbe: tableStart) {
+            if let table = parseTable(
+                &state,
+                configuration: configuration,
+                startProbe: tableStart,
+                useMarkRestoreForFailedCandidates: useMarkRestoreForFailedCandidates
+            ) {
                 return table
             }
         }
         
-        if shouldAttemptHorizontalRule(blockStart),
-           let hr = parseHorizontalRule(&state) {
-            return hr
+        if let blockStartByte, blockStartByte < 0x80 {
+            if shouldAttemptHorizontalRule(blockStartByte),
+               let hr = parseHorizontalRule(&state) {
+                return hr
+            }
+        } else {
+            let blockStart = state.current()
+            if shouldAttemptHorizontalRule(blockStart),
+               let hr = parseHorizontalRule(&state) {
+                return hr
+            }
         }
 
         if let setextProbe = paragraphStartProbes.setextHeading {
-            if let setextHeading = parseSetextHeading(&state, configuration: configuration, probe: setextProbe) {
+            if let setextHeading = parseSetextHeading(
+                &state,
+                configuration: configuration,
+                probe: setextProbe,
+                useMarkRestoreForFailedCandidates: useMarkRestoreForFailedCandidates
+            ) {
                 return setextHeading
             }
         }
         
         if configuration.enableFootnotes {
             if shouldAttemptFootnoteDefinition(state),
-               let footnote = parseFootnoteDefinition(&state, configuration: configuration) {
+               let footnote = parseFootnoteDefinition(
+                &state,
+                configuration: configuration,
+                useMarkRestoreForFailedCandidates: useMarkRestoreForFailedCandidates
+               ) {
                 return footnote
             }
         }
         
         // Default to paragraph
-        state.move(to: savedIndex)
+        restoreFailedBlockCandidate(
+            &state,
+            to: savedMark,
+            useMarkRestore: useMarkRestoreForFailedCandidates
+        )
         return parseParagraph(&state, configuration: configuration, skipKnownFirstParagraphBreak: true)
+    }
+
+    @inline(__always)
+    private static func restoreFailedBlockCandidate(
+        _ state: inout ParserState,
+        to mark: ParserState.Mark,
+        useMarkRestore: Bool
+    ) {
+        if useMarkRestore {
+            state.restore(mark)
+        } else {
+            state.move(to: mark.index)
+        }
+    }
+
+    private static func moveToBlockStartByUTF8Scanning(_ state: inout ParserState) -> UInt8? {
+        guard let start = state.currentIndex.samePosition(in: state.text.utf8),
+              let end = state.endIndex.samePosition(in: state.text.utf8) else {
+            return nil
+        }
+
+        let utf8 = state.text.utf8
+        var index = start
+        var leadingSpaces = 0
+        while index < end, utf8[index] == 0x20, leadingSpaces < 3 { // space
+            index = utf8.index(after: index)
+            leadingSpaces += 1
+        }
+
+        if leadingSpaces > 0 {
+            state.currentIndex = index
+            state.column += leadingSpaces
+        }
+
+        guard index < end else {
+            return nil
+        }
+
+        return utf8[index]
     }
     
     // MARK: - Specific Block Parsers
@@ -316,7 +560,8 @@ public struct BlockParser {
             in: state.text,
             from: headingRange.lowerBound,
             to: headingRange.upperBound,
-            configuration: configuration
+            configuration: configuration,
+            asciiFastPath: state.inlineRangeASCIIFastPath
         )
         
         // Advance past the newline
@@ -407,7 +652,8 @@ public struct BlockParser {
             in: state.text,
             from: headingRange.lowerBound,
             to: headingRange.upperBound,
-            configuration: configuration
+            configuration: configuration,
+            asciiFastPath: state.inlineRangeASCIIFastPath
         )
 
         if lineEnd < end, utf8[lineEnd] == 0x0A { // newline
@@ -423,7 +669,7 @@ public struct BlockParser {
     }
     
     static func parseFencedCodeBlock(_ state: inout ParserState) -> MarkdownParser.BlockNode? {
-        if let codeBlock = parseFencedCodeBlockByUTF8Scanning(&state) {
+        if let codeBlock = parseFencedCodeBlockByUTF8Scanning(&state, useCountedStateMove: true) {
             return codeBlock
         }
 
@@ -434,6 +680,16 @@ public struct BlockParser {
         _ state: inout ParserState
     ) -> MarkdownParser.BlockNode? {
         parseFencedCodeBlockByCharacterScanning(&state)
+    }
+
+    static func parseFencedCodeBlockByRescanningUTF8StateForTesting(
+        _ state: inout ParserState
+    ) -> MarkdownParser.BlockNode? {
+        if let codeBlock = parseFencedCodeBlockByUTF8Scanning(&state, useCountedStateMove: false) {
+            return codeBlock
+        }
+
+        return parseFencedCodeBlockByCharacterScanning(&state)
     }
 
     private static func parseFencedCodeBlockByCharacterScanning(
@@ -516,7 +772,8 @@ public struct BlockParser {
     }
 
     private static func parseFencedCodeBlockByUTF8Scanning(
-        _ state: inout ParserState
+        _ state: inout ParserState,
+        useCountedStateMove: Bool
     ) -> MarkdownParser.BlockNode? {
         guard let start = state.currentIndex.samePosition(in: state.text.utf8),
               let end = state.endIndex.samePosition(in: state.text.utf8) else {
@@ -534,9 +791,11 @@ public struct BlockParser {
         }
 
         var index = start
+        var stateMoveCounts = ASCIIStateMoveCounts()
         var fenceLength = 0
         while index < end, utf8[index] == fence {
             fenceLength += 1
+            stateMoveCounts.record(utf8[index])
             index = utf8.index(after: index)
         }
 
@@ -550,9 +809,7 @@ public struct BlockParser {
             if byte == 0x0A { // newline
                 break
             }
-            if byte >= 0x80 {
-                return nil
-            }
+            stateMoveCounts.record(byte)
             index = utf8.index(after: index)
         }
 
@@ -569,6 +826,7 @@ public struct BlockParser {
         }
 
         if index < end, utf8[index] == 0x0A { // newline
+            stateMoveCounts.record(utf8[index])
             index = utf8.index(after: index)
         }
 
@@ -583,30 +841,32 @@ public struct BlockParser {
                 if byte == 0x0A { // newline
                     break
                 }
-                if byte >= 0x80 {
-                    return nil
-                }
+                stateMoveCounts.record(byte)
                 lineEnd = utf8.index(after: lineEnd)
             }
 
             contentEnd = lineEnd
             if lineEnd < end, utf8[lineEnd] == 0x0A {
+                stateMoveCounts.record(utf8[lineEnd])
                 let nextLineStart = utf8.index(after: lineEnd)
                 if let closingFenceEnd = closingFenceEnd(in: utf8, from: nextLineStart, end: end, fence: fence, fenceLength: fenceLength) {
-                    var afterClosingLine = closingFenceEnd
+                    var afterClosingLine = nextLineStart
                     while afterClosingLine < end {
                         let byte = utf8[afterClosingLine]
                         if byte == 0x0A { // newline
                             break
                         }
-                        if byte >= 0x80 {
-                            return nil
-                        }
+                        stateMoveCounts.record(byte)
                         afterClosingLine = utf8.index(after: afterClosingLine)
+                    }
+
+                    guard afterClosingLine >= closingFenceEnd else {
+                        return nil
                     }
 
                     finalIndex = afterClosingLine
                     if finalIndex < end, utf8[finalIndex] == 0x0A {
+                        stateMoveCounts.record(utf8[finalIndex])
                         finalIndex = utf8.index(after: finalIndex)
                     }
                     return finishFencedCodeBlockUTF8(
@@ -615,7 +875,9 @@ public struct BlockParser {
                         finalIndex: finalIndex,
                         contentStart: contentStart,
                         contentEnd: contentEnd,
-                        language: language
+                        language: language,
+                        useCountedStateMove: useCountedStateMove,
+                        stateMoveCounts: stateMoveCounts
                     )
                 }
 
@@ -633,7 +895,9 @@ public struct BlockParser {
             finalIndex: finalIndex,
             contentStart: contentStart,
             contentEnd: contentEnd,
-            language: language
+            language: language,
+            useCountedStateMove: useCountedStateMove,
+            stateMoveCounts: stateMoveCounts
         )
     }
 
@@ -643,7 +907,9 @@ public struct BlockParser {
         finalIndex: String.UTF8View.Index,
         contentStart: String.UTF8View.Index,
         contentEnd: String.UTF8View.Index,
-        language: String?
+        language: String?,
+        useCountedStateMove: Bool,
+        stateMoveCounts: ASCIIStateMoveCounts
     ) -> MarkdownParser.BlockNode? {
         guard let stringContentStart = String.Index(contentStart, within: state.text),
               let stringContentEnd = String.Index(contentEnd, within: state.text),
@@ -652,8 +918,50 @@ public struct BlockParser {
         }
 
         let code = String(state.text[stringContentStart..<stringContentEnd])
-        moveASCIIState(&state, from: start, to: finalIndex, stringFinalIndex: stringFinalIndex)
+        if stateMoveCounts.requiresCharacterStateMove {
+            state.move(to: stringFinalIndex)
+        } else if useCountedStateMove {
+            moveASCIIState(&state, to: stringFinalIndex, counts: stateMoveCounts)
+        } else {
+            moveASCIIState(&state, from: start, to: finalIndex, stringFinalIndex: stringFinalIndex)
+        }
         return .codeBlock(language: language, content: code)
+    }
+
+    private struct ASCIIStateMoveCounts {
+        var consumedBytes = 0
+        var lineBreaks = 0
+        var bytesAfterLastLineBreak = 0
+        var requiresCharacterStateMove = false
+
+        @inline(__always)
+        mutating func record(_ byte: UInt8) {
+            consumedBytes += 1
+            if byte == 0x0A {
+                lineBreaks += 1
+                bytesAfterLastLineBreak = 0
+                requiresCharacterStateMove = false
+            } else {
+                if byte >= 0x80 {
+                    requiresCharacterStateMove = true
+                }
+                bytesAfterLastLineBreak += 1
+            }
+        }
+    }
+
+    private static func moveASCIIState(
+        _ state: inout ParserState,
+        to stringFinalIndex: String.Index,
+        counts: ASCIIStateMoveCounts
+    ) {
+        if counts.lineBreaks == 0 {
+            state.column += counts.consumedBytes
+        } else {
+            state.line += counts.lineBreaks
+            state.column = counts.bytesAfterLastLineBreak + 1
+        }
+        state.currentIndex = stringFinalIndex
     }
 
     private static func moveASCIIState(
@@ -690,7 +998,7 @@ public struct BlockParser {
     }
     
     static func parseIndentedCodeBlock(_ state: inout ParserState) -> MarkdownParser.BlockNode? {
-        if let codeBlock = parseIndentedCodeBlockByUTF8Scanning(&state) {
+        if let codeBlock = parseIndentedCodeBlockByUTF8Scanning(&state, useCountedStateMove: true) {
             return codeBlock
         }
 
@@ -701,6 +1009,16 @@ public struct BlockParser {
         _ state: inout ParserState
     ) -> MarkdownParser.BlockNode? {
         parseIndentedCodeBlockByCharacterScanning(&state)
+    }
+
+    static func parseIndentedCodeBlockByRescanningUTF8StateForTesting(
+        _ state: inout ParserState
+    ) -> MarkdownParser.BlockNode? {
+        if let codeBlock = parseIndentedCodeBlockByUTF8Scanning(&state, useCountedStateMove: false) {
+            return codeBlock
+        }
+
+        return parseIndentedCodeBlockByCharacterScanning(&state)
     }
 
     private static func parseIndentedCodeBlockByCharacterScanning(
@@ -769,7 +1087,8 @@ public struct BlockParser {
     }
 
     private static func parseIndentedCodeBlockByUTF8Scanning(
-        _ state: inout ParserState
+        _ state: inout ParserState,
+        useCountedStateMove: Bool
     ) -> MarkdownParser.BlockNode? {
         guard let start = state.currentIndex.samePosition(in: state.text.utf8),
               let end = state.endIndex.samePosition(in: state.text.utf8) else {
@@ -779,6 +1098,7 @@ public struct BlockParser {
         let utf8 = state.text.utf8
         var index = start
         var finalIndex = start
+        var stateMoveCounts = ASCIIStateMoveCounts()
         var code = ""
         code.reserveCapacity(256)
         var appendedLine = false
@@ -796,6 +1116,10 @@ public struct BlockParser {
                 break
             }
 
+            for _ in 0..<spaces {
+                stateMoveCounts.record(0x20)
+            }
+
             let contentStart = index
             while index < end {
                 let byte = utf8[index]
@@ -805,6 +1129,7 @@ public struct BlockParser {
                 if byte >= 0x80 {
                     return nil
                 }
+                stateMoveCounts.record(byte)
                 index = utf8.index(after: index)
             }
 
@@ -815,6 +1140,7 @@ public struct BlockParser {
             appendCodeLine(state.text[stringContentStart..<stringContentEnd], to: &code, appendedLine: &appendedLine)
 
             if index < end, utf8[index] == 0x0A { // newline
+                stateMoveCounts.record(utf8[index])
                 index = utf8.index(after: index)
             }
             finalIndex = index
@@ -829,6 +1155,10 @@ public struct BlockParser {
 
             if lookahead < end, utf8[lookahead] == 0x0A { // newline
                 appendEmptyCodeLine(to: &code, appendedLine: &appendedLine)
+                for _ in 0..<nextSpaces {
+                    stateMoveCounts.record(0x20)
+                }
+                stateMoveCounts.record(utf8[lookahead])
                 index = utf8.index(after: lookahead)
                 finalIndex = index
             } else if nextSpaces < 4 {
@@ -845,7 +1175,13 @@ public struct BlockParser {
             return nil
         }
 
-        moveASCIIState(&state, from: start, to: finalIndex, stringFinalIndex: stringFinalIndex)
+        if stateMoveCounts.requiresCharacterStateMove {
+            state.move(to: stringFinalIndex)
+        } else if useCountedStateMove {
+            moveASCIIState(&state, to: stringFinalIndex, counts: stateMoveCounts)
+        } else {
+            moveASCIIState(&state, from: start, to: finalIndex, stringFinalIndex: stringFinalIndex)
+        }
         return .codeBlock(language: nil, content: code)
     }
     
@@ -856,7 +1192,8 @@ public struct BlockParser {
             useParagraphFastPath: true,
             useSingleRangeParagraphFastPath: true,
             useSingleRangeRecursiveFastPath: true,
-            usePlainTextParagraphFastPath: true
+            usePlainTextParagraphFastPath: true,
+            useCombinedLineScan: true
         )
     }
 
@@ -870,7 +1207,8 @@ public struct BlockParser {
             useParagraphFastPath: false,
             useSingleRangeParagraphFastPath: false,
             useSingleRangeRecursiveFastPath: false,
-            usePlainTextParagraphFastPath: false
+            usePlainTextParagraphFastPath: false,
+            useCombinedLineScan: false
         )
     }
 
@@ -884,7 +1222,23 @@ public struct BlockParser {
             useParagraphFastPath: true,
             useSingleRangeParagraphFastPath: false,
             useSingleRangeRecursiveFastPath: true,
-            usePlainTextParagraphFastPath: false
+            usePlainTextParagraphFastPath: false,
+            useCombinedLineScan: false
+        )
+    }
+
+    static func parseBlockquoteBySeparateLineClassificationForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.BlockNode? {
+        parseBlockquote(
+            &state,
+            configuration: configuration,
+            useParagraphFastPath: true,
+            useSingleRangeParagraphFastPath: true,
+            useSingleRangeRecursiveFastPath: true,
+            usePlainTextParagraphFastPath: true,
+            useCombinedLineScan: false
         )
     }
 
@@ -894,7 +1248,8 @@ public struct BlockParser {
         useParagraphFastPath: Bool,
         useSingleRangeParagraphFastPath: Bool,
         useSingleRangeRecursiveFastPath: Bool,
-        usePlainTextParagraphFastPath: Bool
+        usePlainTextParagraphFastPath: Bool,
+        useCombinedLineScan: Bool
     ) -> MarkdownParser.BlockNode? {
         let savedIndex = state.currentIndex
         
@@ -917,21 +1272,36 @@ public struct BlockParser {
                 
                 // Collect the line
                 let lineStartIndex = state.currentIndex
-                state.advanceToLineEnd()
-                quoteLineRanges.append(lineStartIndex..<state.currentIndex)
-                quoteLineUTF8Count += state.text.utf8.distance(from: lineStartIndex, to: state.currentIndex)
-
-                let lineRange = lineStartIndex..<state.currentIndex
-                if isBlankLine(in: state.text, range: lineRange) {
-                    currentParagraphHasContent = false
+                if useCombinedLineScan,
+                   let lineScan = scanBlockquoteContentLine(
+                    &state,
+                    isFirstLine: !currentParagraphHasContent
+                   ) {
+                    quoteLineRanges.append(lineScan.range)
+                    quoteLineUTF8Count += lineScan.utf8Count
+                    if lineScan.isBlank {
+                        currentParagraphHasContent = false
+                    } else {
+                        canUseParagraphFastPath = canUseParagraphFastPath && lineScan.canUseParagraphFastPath
+                        currentParagraphHasContent = true
+                    }
                 } else {
-                    canUseParagraphFastPath = canUseParagraphFastPath &&
-                        !lineStartsBlockParserCandidate(
-                            in: state.text,
-                            range: lineRange,
-                            isFirstLine: !currentParagraphHasContent
-                        )
-                    currentParagraphHasContent = true
+                    state.advanceToLineEnd()
+                    quoteLineRanges.append(lineStartIndex..<state.currentIndex)
+                    quoteLineUTF8Count += state.text.utf8.distance(from: lineStartIndex, to: state.currentIndex)
+
+                    let lineRange = lineStartIndex..<state.currentIndex
+                    if isBlankLine(in: state.text, range: lineRange) {
+                        currentParagraphHasContent = false
+                    } else {
+                        canUseParagraphFastPath = canUseParagraphFastPath &&
+                            !lineStartsBlockParserCandidate(
+                                in: state.text,
+                                range: lineRange,
+                                isFirstLine: !currentParagraphHasContent
+                            )
+                        currentParagraphHasContent = true
+                    }
                 }
                 
                 // Skip newline
@@ -944,28 +1314,48 @@ public struct BlockParser {
             } else {
                 // Lazy continuation line (part of blockquote without >)
                 let lineStart = state.currentIndex
-                state.advanceToLineEnd()
-                let lineRange = lineStart..<state.currentIndex
+                if useCombinedLineScan,
+                   let lineScan = scanBlockquoteContentLine(
+                    &state,
+                    isFirstLine: !currentParagraphHasContent
+                   ) {
+                    if lineScan.startsLazyNewBlock {
+                        state.move(to: lineStart)
+                        break
+                    }
 
-                // Check if this line starts a new block element
-                if lazyBlockquoteContinuationStartsNewBlock(in: state.text, range: lineRange) {
-                    // This line starts a new block element, end blockquote
-                    state.move(to: lineStart)
-                    break
-                }
-
-                quoteLineRanges.append(lineRange)
-                quoteLineUTF8Count += state.text.utf8.distance(from: lineRange.lowerBound, to: lineRange.upperBound)
-                if isBlankLine(in: state.text, range: lineRange) {
-                    currentParagraphHasContent = false
+                    quoteLineRanges.append(lineScan.range)
+                    quoteLineUTF8Count += lineScan.utf8Count
+                    if lineScan.isBlank {
+                        currentParagraphHasContent = false
+                    } else {
+                        canUseParagraphFastPath = canUseParagraphFastPath && lineScan.canUseParagraphFastPath
+                        currentParagraphHasContent = true
+                    }
                 } else {
-                    canUseParagraphFastPath = canUseParagraphFastPath &&
-                        !lineStartsBlockParserCandidate(
-                            in: state.text,
-                            range: lineRange,
-                            isFirstLine: !currentParagraphHasContent
-                        )
-                    currentParagraphHasContent = true
+                    state.advanceToLineEnd()
+                    let lineRange = lineStart..<state.currentIndex
+
+                    // Check if this line starts a new block element
+                    if lazyBlockquoteContinuationStartsNewBlock(in: state.text, range: lineRange) {
+                        // This line starts a new block element, end blockquote
+                        state.move(to: lineStart)
+                        break
+                    }
+
+                    quoteLineRanges.append(lineRange)
+                    quoteLineUTF8Count += state.text.utf8.distance(from: lineRange.lowerBound, to: lineRange.upperBound)
+                    if isBlankLine(in: state.text, range: lineRange) {
+                        currentParagraphHasContent = false
+                    } else {
+                        canUseParagraphFastPath = canUseParagraphFastPath &&
+                            !lineStartsBlockParserCandidate(
+                                in: state.text,
+                                range: lineRange,
+                                isFirstLine: !currentParagraphHasContent
+                            )
+                        currentParagraphHasContent = true
+                    }
                 }
 
                 // Skip newline
@@ -985,6 +1375,7 @@ public struct BlockParser {
                 from: quoteLineRanges,
                 in: state.text,
                 configuration: configuration,
+                sourceASCIIFastPath: state.inlineRangeASCIIFastPath,
                 useSingleRangeParagraphFastPath: useSingleRangeParagraphFastPath,
                 usePlainTextParagraphFastPath: usePlainTextParagraphFastPath
             )
@@ -995,7 +1386,8 @@ public struct BlockParser {
            let blocks = parseSingleRangeBlockquoteContent(
             from: quoteLineRanges,
             in: state.text,
-            configuration: configuration
+            configuration: configuration,
+            sourceASCIIFastPath: state.inlineRangeASCIIFastPath
            ) {
             return .blockquote(children: blocks)
         }
@@ -1015,7 +1407,8 @@ public struct BlockParser {
     private static func parseSingleRangeBlockquoteContent(
         from ranges: [Range<String.Index>],
         in source: String,
-        configuration: MarkdownConfiguration
+        configuration: MarkdownConfiguration,
+        sourceASCIIFastPath: Bool?
     ) -> [MarkdownParser.BlockNode]? {
         guard ranges.count == 1 else {
             return nil
@@ -1026,19 +1419,26 @@ public struct BlockParser {
             return []
         }
 
-        return parseBlocksInSingleSourceRange(range, in: source, configuration: configuration)
+        return parseBlocksInSingleSourceRange(
+            range,
+            in: source,
+            configuration: configuration,
+            sourceASCIIFastPath: sourceASCIIFastPath
+        )
     }
 
     private static func parseBlocksInSingleSourceRange(
         _ range: Range<String.Index>,
         in source: String,
-        configuration: MarkdownConfiguration
+        configuration: MarkdownConfiguration,
+        sourceASCIIFastPath: Bool?
     ) -> [MarkdownParser.BlockNode] {
         var state = ParserState(
             text: source,
             currentIndex: range.lowerBound,
             endIndex: range.upperBound,
-            asciiFastPath: false
+            asciiFastPath: false,
+            sourceASCIIFastPath: sourceASCIIFastPath
         )
         return parseBlocks(&state, configuration: configuration)
     }
@@ -1108,6 +1508,136 @@ public struct BlockParser {
         return .blockquote(children: blocks)
     }
 
+    private static func scanBlockquoteContentLine(
+        _ state: inout ParserState,
+        isFirstLine: Bool
+    ) -> BlockquoteLineScan? {
+        let lineStart = state.currentIndex
+        guard let start = state.currentIndex.samePosition(in: state.text.utf8),
+              let end = state.endIndex.samePosition(in: state.text.utf8) else {
+            return nil
+        }
+
+        let utf8 = state.text.utf8
+        var index = start
+        var byteCount = 0
+        var leadingSpaces = 0
+        var isBlank = true
+        var sawTabBeforeContent = false
+        var canUseParagraphFastPath = false
+        var containsPipe = false
+        var firstTrimmedByte: UInt8?
+
+        while index < end {
+            let byte = utf8[index]
+            if byte == 0x0A { // newline
+                break
+            }
+            if byte >= 0x80 {
+                return nil
+            }
+
+            if byte == 0x7C { // |
+                containsPipe = true
+            }
+
+            if firstTrimmedByte == nil, !isASCIIWhitespaceForTrimming(byte) {
+                firstTrimmedByte = byte
+            }
+
+            if isBlank {
+                switch byte {
+                case 0x20: // space
+                    if leadingSpaces < 4 {
+                        leadingSpaces += 1
+                    }
+                case 0x09...0x0D: // ASCII whitespace except newline, which breaks above
+                    sawTabBeforeContent = sawTabBeforeContent || byte == 0x09
+                default:
+                    isBlank = false
+                    if leadingSpaces >= 4 {
+                        canUseParagraphFastPath = false
+                    } else if sawTabBeforeContent {
+                        canUseParagraphFastPath = true
+                    } else {
+                        canUseParagraphFastPath = contentFirstByteCanUseParagraphFastPath(
+                            byte,
+                            in: utf8,
+                            at: index,
+                            end: end,
+                            isFirstLine: isFirstLine
+                        )
+                    }
+                }
+            }
+
+            index = utf8.index(after: index)
+            byteCount += 1
+        }
+
+        guard let lineEnd = String.Index(index, within: state.text) else {
+            return nil
+        }
+
+        state.currentIndex = lineEnd
+        state.column += byteCount
+
+        let startsLazyNewBlock: Bool
+        if containsPipe {
+            startsLazyNewBlock = true
+        } else {
+            switch firstTrimmedByte {
+            case 0x23, 0x2A, 0x2D: // # * -
+                startsLazyNewBlock = true
+            default:
+                startsLazyNewBlock = false
+            }
+        }
+
+        return BlockquoteLineScan(
+            range: lineStart..<lineEnd,
+            utf8Count: byteCount,
+            isBlank: isBlank,
+            canUseParagraphFastPath: !isBlank && canUseParagraphFastPath,
+            startsLazyNewBlock: startsLazyNewBlock
+        )
+    }
+
+    @inline(__always)
+    private static func isASCIIWhitespaceForTrimming(_ byte: UInt8) -> Bool {
+        (byte >= 0x09 && byte <= 0x0D) || byte == 0x20
+    }
+
+    private static func contentFirstByteCanUseParagraphFastPath(
+        _ byte: UInt8,
+        in utf8: String.UTF8View,
+        at index: String.UTF8View.Index,
+        end: String.UTF8View.Index,
+        isFirstLine: Bool
+    ) -> Bool {
+        switch byte {
+        case 0x23, // #
+             0x3E, // >
+             0x60, // `
+             0x7E, // ~
+             0x7C, // |
+             0x2D, // -
+             0x2A, // *
+             0x2B: // +
+            return false
+        case 0x30...0x39:
+            var probe = index
+            while probe < end, utf8[probe] >= 0x30, utf8[probe] <= 0x39 {
+                probe = utf8.index(after: probe)
+            }
+            return !(probe < end && (utf8[probe] == 0x2E || utf8[probe] == 0x29)) // . )
+        case 0x3D where !isFirstLine: // =
+            return false
+        default:
+            return true
+        }
+    }
+
     private static func lazyBlockquoteContinuationStartsNewBlock(
         in text: String,
         range: Range<String.Index>
@@ -1147,6 +1677,7 @@ public struct BlockParser {
         from ranges: [Range<String.Index>],
         in source: String,
         configuration: MarkdownConfiguration,
+        sourceASCIIFastPath: Bool?,
         useSingleRangeParagraphFastPath: Bool,
         usePlainTextParagraphFastPath: Bool
     ) -> [MarkdownParser.BlockNode] {
@@ -1181,7 +1712,8 @@ public struct BlockParser {
                     in: source,
                     from: singleRange.lowerBound,
                     to: singleRange.upperBound,
-                    configuration: configuration
+                    configuration: configuration,
+                    asciiFastPath: sourceASCIIFastPath
                 )
                 blocks.append(.paragraph(children: inlines))
                 paragraphRanges.removeAll(keepingCapacity: true)
@@ -1219,33 +1751,74 @@ public struct BlockParser {
     }
     
     static func parseList(_ state: inout ParserState, configuration: MarkdownConfiguration) -> MarkdownParser.BlockNode? {
-        parseList(&state, configuration: configuration, useASCIIListMarkerFastPath: true)
+        parseList(
+            &state,
+            configuration: configuration,
+            useASCIIListMarkerFastPath: true,
+            useASCIIListIndentFastPath: true,
+            useCountedASCIIListMarkerMove: true
+        )
     }
 
     static func parseListByCharacterMarkerParsingForTesting(
         _ state: inout ParserState,
         configuration: MarkdownConfiguration
     ) -> MarkdownParser.BlockNode? {
-        parseList(&state, configuration: configuration, useASCIIListMarkerFastPath: false)
+        parseList(
+            &state,
+            configuration: configuration,
+            useASCIIListMarkerFastPath: false,
+            useASCIIListIndentFastPath: true,
+            useCountedASCIIListMarkerMove: true
+        )
+    }
+
+    static func parseListByCharacterIndentScanningForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.BlockNode? {
+        parseList(
+            &state,
+            configuration: configuration,
+            useASCIIListMarkerFastPath: true,
+            useASCIIListIndentFastPath: false,
+            useCountedASCIIListMarkerMove: true
+        )
+    }
+
+    static func parseListByRecountingASCIIListMarkerMoveForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.BlockNode? {
+        parseList(
+            &state,
+            configuration: configuration,
+            useASCIIListMarkerFastPath: true,
+            useASCIIListIndentFastPath: true,
+            useCountedASCIIListMarkerMove: false
+        )
     }
 
     private static func parseList(
         _ state: inout ParserState,
         configuration: MarkdownConfiguration,
-        useASCIIListMarkerFastPath: Bool
+        useASCIIListMarkerFastPath: Bool,
+        useASCIIListIndentFastPath: Bool,
+        useCountedASCIIListMarkerMove: Bool
     ) -> MarkdownParser.BlockNode? {
         let savedIndex = state.currentIndex
         
         // Skip up to 3 spaces of indentation
-        var indent = 0
-        while let ch = state.current(), ch == " ", indent < 3 {
-            state.advance()
-            indent += 1
-        }
+        let indent = skipListIndent(
+            &state,
+            limit: 3,
+            useASCIIListIndentFastPath: useASCIIListIndentFastPath
+        )
         
         guard let parsedMarker = parseListMarker(
             &state,
-            useASCIIListMarkerFastPath: useASCIIListMarkerFastPath
+            useASCIIListMarkerFastPath: useASCIIListMarkerFastPath,
+            useCountedASCIIListMarkerMove: useCountedASCIIListMarkerMove
         ) else {
             state.move(to: savedIndex)
             return nil
@@ -1257,7 +1830,13 @@ public struct BlockParser {
         var items: [MarkdownParser.ListItem] = []
 
         // Parse first item
-        let firstItemContent = parseListItemContent(&state, indent: indent, marker: marker, configuration: configuration)
+        let firstItemContent = parseListItemContent(
+            &state,
+            indent: indent,
+            marker: marker,
+            markerWidth: parsedMarker.markerWidth,
+            configuration: configuration
+        )
         items.append(firstItemContent)
 
         // Parse subsequent items
@@ -1265,15 +1844,16 @@ public struct BlockParser {
             let itemPositionIndex = state.currentIndex
 
             // Skip indent
-            var itemIndent = 0
-            while let ch = state.current(), ch == " ", itemIndent < indent + 4 {
-                state.advance()
-                itemIndent += 1
-            }
+            let itemIndent = skipListIndent(
+                &state,
+                limit: indent + 4,
+                useASCIIListIndentFastPath: useASCIIListIndentFastPath
+            )
 
             guard let itemMarker = parseListMarker(
                 &state,
-                useASCIIListMarkerFastPath: useASCIIListMarkerFastPath
+                useASCIIListMarkerFastPath: useASCIIListMarkerFastPath,
+                useCountedASCIIListMarkerMove: useCountedASCIIListMarkerMove
             ) else {
                 state.move(to: itemPositionIndex)
                 break
@@ -1289,6 +1869,7 @@ public struct BlockParser {
                 &state,
                 indent: itemIndent,
                 marker: itemMarker.marker,
+                markerWidth: itemMarker.markerWidth,
                 configuration: configuration
             )
             items.append(itemContent)
@@ -1297,28 +1878,79 @@ public struct BlockParser {
         return .list(ordered: isOrdered, tight: true, items: items)
     }
 
+    private static func skipListIndent(
+        _ state: inout ParserState,
+        limit: Int,
+        useASCIIListIndentFastPath: Bool
+    ) -> Int {
+        if useASCIIListIndentFastPath {
+            return skipASCIIListIndent(&state, limit: limit)
+        }
+
+        var indent = 0
+        while let ch = state.current(), ch == " ", indent < limit {
+            state.advance()
+            indent += 1
+        }
+        return indent
+    }
+
+    private static func skipASCIIListIndent(_ state: inout ParserState, limit: Int) -> Int {
+        guard limit > 0, state.currentIndex < state.endIndex else {
+            return 0
+        }
+
+        let utf8 = state.text.utf8
+        var scan = state.currentIndex
+        var indent = 0
+
+        while scan < state.endIndex, indent < limit, utf8[scan] == 0x20 {
+            indent += 1
+            scan = utf8.index(after: scan)
+        }
+
+        guard indent > 0 else {
+            return 0
+        }
+
+        state.column += indent
+        state.currentIndex = scan
+        return indent
+    }
+
     private static func parseListMarker(
         _ state: inout ParserState,
-        useASCIIListMarkerFastPath: Bool
+        useASCIIListMarkerFastPath: Bool,
+        useCountedASCIIListMarkerMove: Bool
     ) -> ListMarkerParse? {
         if useASCIIListMarkerFastPath,
            let probe = parseASCIIListMarker(in: state) {
-            moveASCIIState(
-                &state,
-                from: probe.start,
-                to: probe.contentStart,
-                stringFinalIndex: probe.stringContentStart
+            if useCountedASCIIListMarkerMove {
+                state.column += probe.consumedBytes
+                state.currentIndex = probe.stringContentStart
+            } else {
+                let start = state.currentIndex
+                moveASCIIState(
+                    &state,
+                    from: start,
+                    to: probe.stringContentStart,
+                    stringFinalIndex: probe.stringContentStart
+                )
+            }
+            return ListMarkerParse(
+                marker: probe.marker,
+                markerWidth: probe.markerWidth,
+                isOrdered: probe.isOrdered
             )
-            return ListMarkerParse(marker: probe.marker, isOrdered: probe.isOrdered)
         }
 
         return parseListMarkerByCharacterScanning(&state)
     }
 
     private static func parseASCIIListMarker(in state: ParserState) -> ASCIIListMarkerProbe? {
-        guard let start = state.currentIndex.samePosition(in: state.text.utf8),
-              let end = state.endIndex.samePosition(in: state.text.utf8),
-              start < end else {
+        let start = state.currentIndex
+        let end = state.endIndex
+        guard start < end else {
             return nil
         }
 
@@ -1331,9 +1963,6 @@ public struct BlockParser {
             }
 
             let contentStart = utf8.index(after: markerEnd)
-            guard let stringContentStart = String.Index(contentStart, within: state.text) else {
-                return nil
-            }
 
             let marker: String
             switch first {
@@ -1344,10 +1973,10 @@ public struct BlockParser {
 
             return ASCIIListMarkerProbe(
                 marker: marker,
+                markerWidth: 1,
+                consumedBytes: 2,
                 isOrdered: false,
-                start: start,
-                contentStart: contentStart,
-                stringContentStart: stringContentStart
+                stringContentStart: contentStart
             )
         }
 
@@ -1356,7 +1985,9 @@ public struct BlockParser {
         }
 
         var markerEnd = start
+        var digitCount = 0
         while markerEnd < end, utf8[markerEnd] >= 0x30, utf8[markerEnd] <= 0x39 {
+            digitCount += 1
             markerEnd = utf8.index(after: markerEnd)
         }
 
@@ -1375,18 +2006,14 @@ public struct BlockParser {
         }
 
         let contentStart = utf8.index(after: afterDelimiter)
-        guard let stringMarkerStart = String.Index(start, within: state.text),
-              let stringMarkerEnd = String.Index(afterDelimiter, within: state.text),
-              let stringContentStart = String.Index(contentStart, within: state.text) else {
-            return nil
-        }
+        let markerWidth = digitCount + 1
 
         return ASCIIListMarkerProbe(
-            marker: String(state.text[stringMarkerStart..<stringMarkerEnd]),
+            marker: String(state.text[start..<afterDelimiter]),
+            markerWidth: markerWidth,
+            consumedBytes: markerWidth + 1,
             isOrdered: true,
-            start: start,
-            contentStart: contentStart,
-            stringContentStart: stringContentStart
+            stringContentStart: contentStart
         )
     }
 
@@ -1427,22 +2054,47 @@ public struct BlockParser {
         }
         state.advance()
 
-        return ListMarkerParse(marker: marker, isOrdered: isOrdered)
+        return ListMarkerParse(marker: marker, markerWidth: marker.count, isOrdered: isOrdered)
     }
 
     static func parseListMarkerSignatureForTesting(
         _ state: inout ParserState,
-        useASCIIListMarkerFastPath: Bool
+        useASCIIListMarkerFastPath: Bool,
+        useCountedASCIIListMarkerMove: Bool = true
     ) -> String? {
         guard let marker = parseListMarker(
             &state,
-            useASCIIListMarkerFastPath: useASCIIListMarkerFastPath
+            useASCIIListMarkerFastPath: useASCIIListMarkerFastPath,
+            useCountedASCIIListMarkerMove: useCountedASCIIListMarkerMove
         ) else {
             return nil
         }
 
         let offset = state.text.utf8.distance(from: state.text.utf8.startIndex, to: state.currentIndex)
-        return "\(marker.isOrdered ? "ordered" : "unordered")|\(marker.marker)|\(offset)|\(state.line)|\(state.column)"
+        return "\(marker.isOrdered ? "ordered" : "unordered")|\(marker.marker)|\(marker.markerWidth)|\(offset)|\(state.line)|\(state.column)"
+    }
+
+    static func parseIndentedListMarkerSignatureForTesting(
+        _ state: inout ParserState,
+        limit: Int,
+        useASCIIListIndentFastPath: Bool
+    ) -> String? {
+        let indent = skipListIndent(
+            &state,
+            limit: limit,
+            useASCIIListIndentFastPath: useASCIIListIndentFastPath
+        )
+
+        guard let marker = parseListMarker(
+            &state,
+            useASCIIListMarkerFastPath: true,
+            useCountedASCIIListMarkerMove: true
+        ) else {
+            return nil
+        }
+
+        let offset = state.text.utf8.distance(from: state.text.utf8.startIndex, to: state.currentIndex)
+        return "\(indent)|\(marker.isOrdered ? "ordered" : "unordered")|\(marker.marker)|\(marker.markerWidth)|\(offset)|\(state.line)|\(state.column)"
     }
     
     static func parseListItemContent(_ state: inout ParserState, indent: Int, marker: String, configuration: MarkdownConfiguration) -> MarkdownParser.ListItem {
@@ -1450,9 +2102,30 @@ public struct BlockParser {
             &state,
             indent: indent,
             marker: marker,
+            markerWidth: marker.count,
+            configuration: configuration
+        )
+    }
+
+    private static func parseListItemContent(
+        _ state: inout ParserState,
+        indent: Int,
+        marker: String,
+        markerWidth: Int,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.ListItem {
+        parseListItemContent(
+            &state,
+            indent: indent,
+            marker: marker,
+            markerWidth: markerWidth,
             configuration: configuration,
             useSingleRangeParagraphFastPath: true,
-            usePlainTextParagraphFastPath: true
+            usePlainTextParagraphFastPath: true,
+            useUTF8LineEndScan: true,
+            reuseSingleTrimmedContentRange: true,
+            useUTF8TaskMarkerFastPath: true,
+            useUTF8ContinuationPrefixScan: true
         )
     }
 
@@ -1466,9 +2139,98 @@ public struct BlockParser {
             &state,
             indent: indent,
             marker: marker,
+            markerWidth: marker.count,
             configuration: configuration,
             useSingleRangeParagraphFastPath: false,
-            usePlainTextParagraphFastPath: false
+            usePlainTextParagraphFastPath: false,
+            useUTF8LineEndScan: true,
+            reuseSingleTrimmedContentRange: true,
+            useUTF8TaskMarkerFastPath: true,
+            useUTF8ContinuationPrefixScan: true
+        )
+    }
+
+    static func parseListItemContentByCharacterLineEndScanningForTesting(
+        _ state: inout ParserState,
+        indent: Int,
+        marker: String,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.ListItem {
+        parseListItemContent(
+            &state,
+            indent: indent,
+            marker: marker,
+            markerWidth: marker.count,
+            configuration: configuration,
+            useSingleRangeParagraphFastPath: true,
+            usePlainTextParagraphFastPath: true,
+            useUTF8LineEndScan: false,
+            reuseSingleTrimmedContentRange: true,
+            useUTF8TaskMarkerFastPath: true,
+            useUTF8ContinuationPrefixScan: true
+        )
+    }
+
+    static func parseListItemContentByRecomputingSingleTrimmedRangeForTesting(
+        _ state: inout ParserState,
+        indent: Int,
+        marker: String,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.ListItem {
+        parseListItemContent(
+            &state,
+            indent: indent,
+            marker: marker,
+            markerWidth: marker.count,
+            configuration: configuration,
+            useSingleRangeParagraphFastPath: true,
+            usePlainTextParagraphFastPath: true,
+            useUTF8LineEndScan: true,
+            reuseSingleTrimmedContentRange: false,
+            useUTF8TaskMarkerFastPath: true,
+            useUTF8ContinuationPrefixScan: true
+        )
+    }
+
+    static func parseListItemContentByPeekingTaskMarkerForTesting(
+        _ state: inout ParserState,
+        indent: Int,
+        marker: String,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.ListItem {
+        parseListItemContent(
+            &state,
+            indent: indent,
+            marker: marker,
+            markerWidth: marker.count,
+            configuration: configuration,
+            useSingleRangeParagraphFastPath: true,
+            usePlainTextParagraphFastPath: true,
+            useUTF8LineEndScan: true,
+            reuseSingleTrimmedContentRange: true,
+            useUTF8TaskMarkerFastPath: false,
+            useUTF8ContinuationPrefixScan: true
+        )
+    }
+
+    static func parseListItemContentByCharacterContinuationPrefixForTesting(
+        _ state: inout ParserState,
+        indent: Int,
+        marker: String,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.ListItem {
+        parseListItemContent(
+            &state,
+            indent: indent,
+            marker: marker,
+            markerWidth: marker.count,
+            configuration: configuration,
+            useSingleRangeParagraphFastPath: true,
+            usePlainTextParagraphFastPath: true,
+            useUTF8LineEndScan: true,
+            reuseSingleTrimmedContentRange: true,
+            useUTF8TaskMarkerFastPath: true,
+            useUTF8ContinuationPrefixScan: false
         )
     }
 
@@ -1476,21 +2238,22 @@ public struct BlockParser {
         _ state: inout ParserState,
         indent: Int,
         marker: String,
+        markerWidth: Int,
         configuration: MarkdownConfiguration,
         useSingleRangeParagraphFastPath: Bool,
-        usePlainTextParagraphFastPath: Bool
+        usePlainTextParagraphFastPath: Bool,
+        useUTF8LineEndScan: Bool,
+        reuseSingleTrimmedContentRange: Bool,
+        useUTF8TaskMarkerFastPath: Bool,
+        useUTF8ContinuationPrefixScan: Bool
     ) -> MarkdownParser.ListItem {
         // Check for task list marker
         var isTask = false
         var isChecked = false
         
-        if let c0 = state.current(), c0 == "[",
-           let c1 = state.peek(1), (c1 == " " || c1 == "x" || c1 == "X"),
-           let c2 = state.peek(2), c2 == "]",
-           let c3 = state.peek(3), c3 == " " {
+        if let checked = parseTaskMarker(&state, useUTF8FastPath: useUTF8TaskMarkerFastPath) {
             isTask = true
-            isChecked = (c1 != " ")
-            state.advance(by: 4) // Skip [x] and space
+            isChecked = checked
         }
         
         // Collect item content ranges after marker/continuation indentation.
@@ -1500,9 +2263,7 @@ public struct BlockParser {
         
         // First line of item
         let firstLineStart = state.currentIndex
-        while let ch = state.current(), ch != "\n" {
-            state.advance()
-        }
+        advanceContainerContentLineEnd(&state, useUTF8LineEndScan: useUTF8LineEndScan)
         let firstLineRange = firstLineStart..<state.currentIndex
         contentLineRanges.append(firstLineRange)
         contentLineUTF8Count += state.text.utf8.distance(from: firstLineStart, to: state.currentIndex)
@@ -1516,34 +2277,62 @@ public struct BlockParser {
         // Continuation lines
         while !state.isAtEnd {
             let lineStartIndex = state.currentIndex
+            let minIndent = markerWidth + 1
             
-            // Check indentation
-            var spaces = 0
-            while let ch = state.current(), ch == " " {
-                spaces += 1
-                state.advance()
-            }
-            
-            // Need at least marker width + 1 space of indentation for continuation
-            let minIndent = marker.count + 1
-            if spaces < minIndent {
-                state.move(to: lineStartIndex)
-                break
-            }
-            
-            // Check if this is a new list item
-            if spaces < indent + 4 {
-                let char = state.current() ?? "\n"
-                if char == "-" || char == "*" || char == "+" || char.isNumber {
+            let prefixScan = useUTF8ContinuationPrefixScan
+                ? scanListContinuationPrefix(
+                    state,
+                    lineStart: lineStartIndex,
+                    minIndent: minIndent,
+                    indent: indent
+                )
+                : nil
+
+            let spaces: Int
+            let contentStart: String.Index
+
+            if let prefixScan {
+                if prefixScan.spaces < minIndent || prefixScan.startsNewListItem {
+                    break
+                }
+
+                spaces = prefixScan.spaces
+                contentStart = prefixScan.contentStart
+                state.currentIndex = prefixScan.afterLeadingSpaces
+                state.column += prefixScan.spaces
+            } else {
+                // Check indentation
+                var scannedSpaces = 0
+                while let ch = state.current(), ch == " " {
+                    scannedSpaces += 1
+                    state.advance()
+                }
+                spaces = scannedSpaces
+
+                // Need at least marker width + 1 space of indentation for continuation
+                if spaces < minIndent {
                     state.move(to: lineStartIndex)
                     break
                 }
+
+                // Check if this is a new list item
+                if spaces < indent + 4 {
+                    let char = state.current() ?? "\n"
+                    if char == "-" || char == "*" || char == "+" || char.isNumber {
+                        state.move(to: lineStartIndex)
+                        break
+                    }
+                }
+
+                contentStart = state.text.index(
+                    lineStartIndex,
+                    offsetBy: min(spaces, minIndent),
+                    limitedBy: state.endIndex
+                ) ?? state.endIndex
             }
             
             // Collect the line
-            while let ch = state.current(), ch != "\n" {
-                state.advance()
-            }
+            advanceContainerContentLineEnd(&state, useUTF8LineEndScan: useUTF8LineEndScan)
             
             let lineEnd = state.currentIndex
             if isBlankLine(in: state.text, range: lineStartIndex..<lineEnd) {
@@ -1553,14 +2342,10 @@ public struct BlockParser {
                 canUseParagraphFastPath = false
             } else {
                 // Remove the indentation from continuation lines
-                let contentStart = state.text.index(
-                    lineStartIndex,
-                    offsetBy: min(spaces, minIndent),
-                    limitedBy: lineEnd
-                ) ?? lineEnd
-                let lineRange = contentStart..<lineEnd
+                let effectiveContentStart = min(contentStart, lineEnd)
+                let lineRange = effectiveContentStart..<lineEnd
                 contentLineRanges.append(lineRange)
-                contentLineUTF8Count += state.text.utf8.distance(from: contentStart, to: lineEnd)
+                contentLineUTF8Count += state.text.utf8.distance(from: effectiveContentStart, to: lineEnd)
                 canUseParagraphFastPath = canUseParagraphFastPath &&
                     contentLineCanUseParagraphFastPath(in: state.text, range: lineRange, isFirstLine: false)
             }
@@ -1570,25 +2355,33 @@ public struct BlockParser {
             }
         }
         
-        if useSingleRangeParagraphFastPath,
-           let singleRange = singleTrimmedContentRange(from: contentLineRanges, in: state.text),
+        let singleTrimmedRange = useSingleRangeParagraphFastPath
+            ? singleTrimmedContentRange(from: contentLineRanges, in: state.text)
+            : nil
+
+        if let singleRange = singleTrimmedRange,
            canUseParagraphFastPath || isSingleLineListHeadingLiteral(in: state.text, range: singleRange) {
             let inlines = InlineParser.parseInlineElements(
                 in: state.text,
                 from: singleRange.lowerBound,
                 to: singleRange.upperBound,
-                configuration: configuration
+                configuration: configuration,
+                asciiFastPath: state.inlineRangeASCIIFastPath
             )
             let blocks = [MarkdownParser.BlockNode.paragraph(children: inlines)]
             return MarkdownParser.ListItem(marker: marker, content: blocks, isTask: isTask, isChecked: isChecked)
         }
 
-        if useSingleRangeParagraphFastPath,
-           let singleRange = singleTrimmedContentRange(from: contentLineRanges, in: state.text) {
+        let singleRangeForNestedParse = reuseSingleTrimmedContentRange
+            ? singleTrimmedRange
+            : (useSingleRangeParagraphFastPath ? singleTrimmedContentRange(from: contentLineRanges, in: state.text) : nil)
+
+        if let singleRange = singleRangeForNestedParse {
             let blocks = parseBlocksInSingleSourceRange(
                 singleRange,
                 in: state.text,
-                configuration: configuration
+                configuration: configuration,
+                sourceASCIIFastPath: state.inlineRangeASCIIFastPath
             )
             return MarkdownParser.ListItem(marker: marker, content: blocks, isTask: isTask, isChecked: isChecked)
         }
@@ -1648,6 +2441,107 @@ public struct BlockParser {
         let blocks = parseBlocks(&contentState, configuration: configuration)
         
         return MarkdownParser.ListItem(marker: marker, content: blocks, isTask: isTask, isChecked: isChecked)
+    }
+
+    private static func scanListContinuationPrefix(
+        _ state: ParserState,
+        lineStart: String.Index,
+        minIndent: Int,
+        indent: Int
+    ) -> ListContinuationPrefixScan? {
+        let utf8 = state.text.utf8
+        var index = lineStart
+        var spaces = 0
+        var contentStart: String.UTF8View.Index?
+
+        while index < state.endIndex, utf8[index] == 0x20 { // space
+            spaces += 1
+            index = utf8.index(after: index)
+            if spaces == minIndent {
+                contentStart = index
+            }
+        }
+
+        let startsNewListItem: Bool
+        if spaces < indent + 4, index < state.endIndex {
+            let byte = utf8[index]
+            switch byte {
+            case 0x2A, 0x2B, 0x2D, // * + -
+                 0x30...0x39: // 0-9
+                startsNewListItem = true
+            case 0x80...0xFF:
+                return nil
+            default:
+                startsNewListItem = false
+            }
+        } else {
+            startsNewListItem = false
+        }
+
+        let contentStartIndex = contentStart ?? index
+        return ListContinuationPrefixScan(
+            spaces: spaces,
+            afterLeadingSpaces: index,
+            contentStart: contentStartIndex,
+            startsNewListItem: startsNewListItem
+        )
+    }
+
+    private static func parseTaskMarker(
+        _ state: inout ParserState,
+        useUTF8FastPath: Bool
+    ) -> Bool? {
+        if useUTF8FastPath, let checked = parseTaskMarkerByUTF8(&state) {
+            return checked
+        }
+        if useUTF8FastPath {
+            return nil
+        }
+        return parseTaskMarkerByPeeking(&state)
+    }
+
+    private static func parseTaskMarkerByUTF8(_ state: inout ParserState) -> Bool? {
+        let utf8 = state.text.utf8
+        guard var index = state.currentIndex.samePosition(in: utf8),
+              let end = state.endIndex.samePosition(in: utf8),
+              index < end,
+              utf8[index] == 0x5B else { // [
+            return nil
+        }
+
+        index = utf8.index(after: index)
+        guard index < end else { return nil }
+        let markerByte = utf8[index]
+        guard markerByte == 0x20 || markerByte == 0x78 || markerByte == 0x58 else { // space x X
+            return nil
+        }
+
+        index = utf8.index(after: index)
+        guard index < end, utf8[index] == 0x5D else { return nil } // ]
+
+        index = utf8.index(after: index)
+        guard index < end, utf8[index] == 0x20 else { return nil } // space
+
+        let afterMarker = utf8.index(after: index)
+        guard let stringAfterMarker = String.Index(afterMarker, within: state.text) else {
+            return nil
+        }
+
+        state.currentIndex = stringAfterMarker
+        state.column += 4
+        return markerByte != 0x20
+    }
+
+    private static func parseTaskMarkerByPeeking(_ state: inout ParserState) -> Bool? {
+        guard let c0 = state.current(), c0 == "[",
+              let c1 = state.peek(1), (c1 == " " || c1 == "x" || c1 == "X"),
+              let c2 = state.peek(2), c2 == "]",
+              let c3 = state.peek(3), c3 == " " else {
+            return nil
+        }
+
+        state.advance(by: 4)
+        return c1 != " "
     }
 
     static func parseListItemContentByCopyingLinesForTesting(
@@ -1769,6 +2663,21 @@ public struct BlockParser {
         parseTable(&state, configuration: configuration, startProbe: nil)
     }
 
+    static func parseTableByIndexMoveCandidateRestoreForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.BlockNode? {
+        guard let startProbe = tableStartProbe(state) else {
+            return nil
+        }
+        return parseTable(
+            &state,
+            configuration: configuration,
+            startProbe: startProbe,
+            useMarkRestoreForFailedCandidates: false
+        )
+    }
+
     static func parseTableByCheckingRowsWithSubstringContainsForTesting(
         _ state: inout ParserState,
         configuration: MarkdownConfiguration
@@ -1800,15 +2709,49 @@ public struct BlockParser {
         )
     }
 
+    static func parseTableByReparsingSeparatorAlignmentsForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.BlockNode? {
+        guard let startProbe = tableStartProbe(state) else {
+            return nil
+        }
+        return parseTable(
+            &state,
+            configuration: configuration,
+            startProbe: startProbe,
+            useStartProbeSeparatorAlignments: false
+        )
+    }
+
+    static func parseTableByEagerFailedRowStateMoveForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.BlockNode? {
+        guard let startProbe = tableStartProbe(state) else {
+            return nil
+        }
+        return parseTable(
+            &state,
+            configuration: configuration,
+            startProbe: startProbe,
+            useDeferredFailedRowStateMove: false
+        )
+    }
+
     private static func parseTable(
         _ state: inout ParserState,
         configuration: MarkdownConfiguration,
         startProbe: TableStartProbe?,
         useSharedRowLineScan: Bool = true,
-        useUTF8RowPipeScan: Bool = true
+        useUTF8RowPipeScan: Bool = true,
+        useMarkRestoreForFailedCandidates: Bool = true,
+        useStartProbeSeparatorAlignments: Bool = true,
+        useDeferredFailedRowStateMove: Bool = true
     ) -> MarkdownParser.BlockNode? {
-        let savedIndex = state.currentIndex
+        let savedMark = state.mark()
         var lineRanges: [Range<String.Index>] = []
+        let precomputedAlignments = useStartProbeSeparatorAlignments ? startProbe?.separatorAlignments : nil
 
         if let startProbe {
             lineRanges.append(startProbe.headerRange)
@@ -1820,7 +2763,11 @@ public struct BlockParser {
             state.advanceToLineEnd()
             let headerEnd = state.currentIndex
             guard state.text[headerStart..<headerEnd].contains("|") else {
-                state.move(to: savedIndex)
+                restoreFailedBlockCandidate(
+                    &state,
+                    to: savedMark,
+                    useMarkRestore: useMarkRestoreForFailedCandidates
+                )
                 return nil
             }
 
@@ -1828,7 +2775,11 @@ public struct BlockParser {
 
             // Require a separator line immediately after the header line.
             guard let ch = state.current(), ch == "\n" else {
-                state.move(to: savedIndex)
+                restoreFailedBlockCandidate(
+                    &state,
+                    to: savedMark,
+                    useMarkRestore: useMarkRestoreForFailedCandidates
+                )
                 return nil
             }
             state.advance()
@@ -1838,7 +2789,11 @@ public struct BlockParser {
             let separatorEnd = state.currentIndex
             let separatorLine = state.text[separatorStart..<separatorEnd]
             guard separatorLine.contains("|") && separatorLine.contains("-") else {
-                state.move(to: savedIndex)
+                restoreFailedBlockCandidate(
+                    &state,
+                    to: savedMark,
+                    useMarkRestore: useMarkRestoreForFailedCandidates
+                )
                 return nil
             }
 
@@ -1854,13 +2809,18 @@ public struct BlockParser {
             let rowStart = state.currentIndex
             let rowRange: Range<String.Index>
             let rowContainsPipe: Bool
+            var rowStateAdvanced = true
 
             if useSharedRowLineScan,
                let rowScan = scanTableRowLine(state) {
                 rowRange = rowScan.range
                 rowContainsPipe = rowScan.containsPipe
-                state.currentIndex = rowRange.upperBound
-                state.column += rowScan.columnAdvance
+                if useDeferredFailedRowStateMove && !rowContainsPipe {
+                    rowStateAdvanced = false
+                } else {
+                    state.currentIndex = rowRange.upperBound
+                    state.column += rowScan.columnAdvance
+                }
             } else {
                 state.advanceToLineEnd()
                 let rowEnd = state.currentIndex
@@ -1869,7 +2829,9 @@ public struct BlockParser {
             }
 
             guard rowContainsPipe else {
-                state.move(to: rowStart)
+                if rowStateAdvanced {
+                    state.move(to: rowStart)
+                }
                 break
             }
 
@@ -1884,9 +2846,14 @@ public struct BlockParser {
         guard let (headers, rows, _) = GFMExtensions.parseTable(
             source: state.text,
             lineRanges: lineRanges,
-            configuration: configuration
+            configuration: configuration,
+            precomputedAlignments: precomputedAlignments
         ) else {
-            state.move(to: savedIndex)
+            restoreFailedBlockCandidate(
+                &state,
+                to: savedMark,
+                useMarkRestore: useMarkRestoreForFailedCandidates
+            )
             return nil
         }
         
@@ -1969,7 +2936,7 @@ public struct BlockParser {
     }
     
     static func parseHorizontalRule(_ state: inout ParserState) -> MarkdownParser.BlockNode? {
-        if let horizontalRule = parseHorizontalRuleByUTF8Scanning(&state) {
+        if let horizontalRule = parseHorizontalRuleByUTF8Scanning(&state, useCountedStateMove: true) {
             return horizontalRule
         }
 
@@ -1980,6 +2947,16 @@ public struct BlockParser {
         _ state: inout ParserState
     ) -> MarkdownParser.BlockNode? {
         parseHorizontalRuleByCharacterScanning(&state)
+    }
+
+    static func parseHorizontalRuleByRescanningUTF8StateForTesting(
+        _ state: inout ParserState
+    ) -> MarkdownParser.BlockNode? {
+        if let horizontalRule = parseHorizontalRuleByUTF8Scanning(&state, useCountedStateMove: false) {
+            return horizontalRule
+        }
+
+        return parseHorizontalRuleByCharacterScanning(&state)
     }
 
     private static func parseHorizontalRuleByCharacterScanning(
@@ -2039,7 +3016,8 @@ public struct BlockParser {
     }
 
     private static func parseHorizontalRuleByUTF8Scanning(
-        _ state: inout ParserState
+        _ state: inout ParserState,
+        useCountedStateMove: Bool
     ) -> MarkdownParser.BlockNode? {
         guard let start = state.currentIndex.samePosition(in: state.text.utf8),
               let end = state.endIndex.samePosition(in: state.text.utf8) else {
@@ -2048,9 +3026,11 @@ public struct BlockParser {
 
         let utf8 = state.text.utf8
         var index = start
+        var stateMoveCounts = ASCIIStateMoveCounts()
         var spaces = 0
         while index < end, utf8[index] == 0x20, spaces < 3 { // space
             spaces += 1
+            stateMoveCounts.record(0x20)
             index = utf8.index(after: index)
         }
 
@@ -2068,8 +3048,10 @@ public struct BlockParser {
             let byte = utf8[index]
             if byte == rule {
                 count += 1
+                stateMoveCounts.record(byte)
                 index = utf8.index(after: index)
             } else if byte == 0x20 { // space
+                stateMoveCounts.record(byte)
                 index = utf8.index(after: index)
             } else if byte == 0x0A { // newline
                 break
@@ -2083,13 +3065,20 @@ public struct BlockParser {
         }
 
         if index < end, utf8[index] == 0x0A { // newline
+            stateMoveCounts.record(utf8[index])
             index = utf8.index(after: index)
         }
 
         guard let stringFinalIndex = String.Index(index, within: state.text) else {
             return nil
         }
-        moveASCIIState(&state, from: start, to: index, stringFinalIndex: stringFinalIndex)
+        if stateMoveCounts.requiresCharacterStateMove {
+            state.move(to: stringFinalIndex)
+        } else if useCountedStateMove {
+            moveASCIIState(&state, to: stringFinalIndex, counts: stateMoveCounts)
+        } else {
+            moveASCIIState(&state, from: start, to: index, stringFinalIndex: stringFinalIndex)
+        }
         return .horizontalRule
     }
     
@@ -2124,12 +3113,28 @@ public struct BlockParser {
         parseSetextHeading(&state, configuration: configuration, probe: nil)
     }
 
+    static func parseSetextHeadingByIndexMoveCandidateRestoreForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.BlockNode? {
+        guard let probe = setextHeadingProbe(state) else {
+            return nil
+        }
+        return parseSetextHeading(
+            &state,
+            configuration: configuration,
+            probe: probe,
+            useMarkRestoreForFailedCandidates: false
+        )
+    }
+
     private static func parseSetextHeading(
         _ state: inout ParserState,
         configuration: MarkdownConfiguration,
-        probe: SetextHeadingProbe?
+        probe: SetextHeadingProbe?,
+        useMarkRestoreForFailedCandidates: Bool = true
     ) -> MarkdownParser.BlockNode? {
-        let savedIndex = state.currentIndex
+        let savedMark = state.mark()
         let headingRange: Range<String.Index>
         let level: Int
 
@@ -2147,26 +3152,49 @@ public struct BlockParser {
             let headingLineEnd = state.currentIndex
             headingRange = whitespaceTrimmedRange(in: state.text, range: headingStart..<headingLineEnd)
             guard headingRange.lowerBound < headingRange.upperBound else {
-                state.move(to: savedIndex)
+                restoreFailedBlockCandidate(
+                    &state,
+                    to: savedMark,
+                    useMarkRestore: useMarkRestoreForFailedCandidates
+                )
                 return nil
             }
 
             // Skip newline
             guard state.current() == "\n" else {
-                state.move(to: savedIndex)
+                restoreFailedBlockCandidate(
+                    &state,
+                    to: savedMark,
+                    useMarkRestore: useMarkRestoreForFailedCandidates
+                )
                 return nil
             }
             state.advance()
 
             // Check for underline
             guard !state.isAtEnd else {
-                state.move(to: savedIndex)
+                restoreFailedBlockCandidate(
+                    &state,
+                    to: savedMark,
+                    useMarkRestore: useMarkRestoreForFailedCandidates
+                )
                 return nil
             }
 
-            guard let underlineChar = state.current() else { state.move(to: savedIndex); return nil }
+            guard let underlineChar = state.current() else {
+                restoreFailedBlockCandidate(
+                    &state,
+                    to: savedMark,
+                    useMarkRestore: useMarkRestoreForFailedCandidates
+                )
+                return nil
+            }
             guard underlineChar == "=" || underlineChar == "-" else {
-                state.move(to: savedIndex)
+                restoreFailedBlockCandidate(
+                    &state,
+                    to: savedMark,
+                    useMarkRestore: useMarkRestoreForFailedCandidates
+                )
                 return nil
             }
 
@@ -2182,7 +3210,11 @@ public struct BlockParser {
 
             // Must end with newline or end of text
             if let ch = state.current(), ch != "\n" {
-                state.move(to: savedIndex)
+                restoreFailedBlockCandidate(
+                    &state,
+                    to: savedMark,
+                    useMarkRestore: useMarkRestoreForFailedCandidates
+                )
                 return nil
             }
 
@@ -2202,7 +3234,8 @@ public struct BlockParser {
             in: state.text,
             from: headingRange.lowerBound,
             to: headingRange.upperBound,
-            configuration: configuration
+            configuration: configuration,
+            asciiFastPath: state.inlineRangeASCIIFastPath
         )
         
         return .heading(level: level, children: inlines, id: headingId.isEmpty ? nil : headingId)
@@ -2214,7 +3247,8 @@ public struct BlockParser {
             configuration: configuration,
             skipKnownFirstParagraphBreak: false,
             useRangeBackedInlineParsing: true,
-            useSharedContinuationLineScan: true
+            useSharedContinuationLineScan: true,
+            useMarkRestoreForContinuationBreak: true
         )
     }
 
@@ -2227,7 +3261,8 @@ public struct BlockParser {
             configuration: configuration,
             skipKnownFirstParagraphBreak: false,
             useRangeBackedInlineParsing: false,
-            useSharedContinuationLineScan: true
+            useSharedContinuationLineScan: true,
+            useMarkRestoreForContinuationBreak: true
         )
     }
 
@@ -2240,7 +3275,8 @@ public struct BlockParser {
             configuration: configuration,
             skipKnownFirstParagraphBreak: true,
             useRangeBackedInlineParsing: true,
-            useSharedContinuationLineScan: true
+            useSharedContinuationLineScan: true,
+            useMarkRestoreForContinuationBreak: true
         )
     }
 
@@ -2253,7 +3289,22 @@ public struct BlockParser {
             configuration: configuration,
             skipKnownFirstParagraphBreak: false,
             useRangeBackedInlineParsing: true,
-            useSharedContinuationLineScan: false
+            useSharedContinuationLineScan: false,
+            useMarkRestoreForContinuationBreak: true
+        )
+    }
+
+    static func parseParagraphByMovingBackToContinuationBreakForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.BlockNode? {
+        parseParagraph(
+            &state,
+            configuration: configuration,
+            skipKnownFirstParagraphBreak: false,
+            useRangeBackedInlineParsing: true,
+            useSharedContinuationLineScan: true,
+            useMarkRestoreForContinuationBreak: false
         )
     }
 
@@ -2267,7 +3318,8 @@ public struct BlockParser {
             configuration: configuration,
             skipKnownFirstParagraphBreak: skipKnownFirstParagraphBreak,
             useRangeBackedInlineParsing: true,
-            useSharedContinuationLineScan: true
+            useSharedContinuationLineScan: true,
+            useMarkRestoreForContinuationBreak: true
         )
     }
 
@@ -2276,7 +3328,8 @@ public struct BlockParser {
         configuration: MarkdownConfiguration,
         skipKnownFirstParagraphBreak: Bool,
         useRangeBackedInlineParsing: Bool,
-        useSharedContinuationLineScan: Bool
+        useSharedContinuationLineScan: Bool,
+        useMarkRestoreForContinuationBreak: Bool
     ) -> MarkdownParser.BlockNode? {
         var paragraphStart: String.Index?
         var paragraphEnd = state.currentIndex
@@ -2290,6 +3343,9 @@ public struct BlockParser {
             }
             
             let lineStart = state.currentIndex
+            let lineStartMark = useMarkRestoreForContinuationBreak && acceptedLineCount > 0
+                ? state.mark()
+                : nil
             let lineScan = useSharedContinuationLineScan && acceptedLineCount > 0
                 ? scanParagraphContinuationLine(state)
                 : nil
@@ -2308,7 +3364,11 @@ public struct BlockParser {
                 let startsParagraphBreakingBlock = lineScan?.startsParagraphBreakingBlock ??
                     lineStartsParagraphBreakingBlock(in: state.text, range: lineStart..<state.currentIndex)
                 if startsParagraphBreakingBlock {
-                    state.move(to: lineStart)
+                    if let lineStartMark {
+                        state.restore(lineStartMark)
+                    } else {
+                        state.move(to: lineStart)
+                    }
                     break
                 }
             }
@@ -2347,23 +3407,40 @@ public struct BlockParser {
                 in: state.text,
                 from: textRange.lowerBound,
                 to: textRange.upperBound,
-                configuration: configuration
+                configuration: configuration,
+                asciiFastPath: state.inlineRangeASCIIFastPath
             )
         } else {
             let text = String(state.text[textRange])
             var tempState = ParserState(text: text)
             inlines = InlineParser.parseInlineElements(&tempState, configuration: configuration)
         }
-        
+
         return .paragraph(children: inlines)
     }
-    
+
     static func parseFootnoteDefinition(_ state: inout ParserState, configuration: MarkdownConfiguration) -> MarkdownParser.BlockNode? {
         parseFootnoteDefinition(
             &state,
             configuration: configuration,
+            useMarkRestoreForFailedCandidates: true
+        )
+    }
+
+    private static func parseFootnoteDefinition(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration,
+        useMarkRestoreForFailedCandidates: Bool
+    ) -> MarkdownParser.BlockNode? {
+        parseFootnoteDefinition(
+            &state,
+            configuration: configuration,
             useSingleRangeParagraphFastPath: true,
-            usePlainTextParagraphFastPath: true
+            usePlainTextParagraphFastPath: true,
+            useUTF8HeaderScan: true,
+            useUTF8LineEndScan: true,
+            useUTF8ContinuationPrefixScan: true,
+            useMarkRestoreForFailedCandidates: useMarkRestoreForFailedCandidates
         )
     }
 
@@ -2375,7 +3452,75 @@ public struct BlockParser {
             &state,
             configuration: configuration,
             useSingleRangeParagraphFastPath: false,
-            usePlainTextParagraphFastPath: false
+            usePlainTextParagraphFastPath: false,
+            useUTF8HeaderScan: true,
+            useUTF8LineEndScan: true,
+            useUTF8ContinuationPrefixScan: true,
+            useMarkRestoreForFailedCandidates: true
+        )
+    }
+
+    static func parseFootnoteDefinitionByCharacterHeaderScanningForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.BlockNode? {
+        parseFootnoteDefinition(
+            &state,
+            configuration: configuration,
+            useSingleRangeParagraphFastPath: true,
+            usePlainTextParagraphFastPath: true,
+            useUTF8HeaderScan: false,
+            useUTF8LineEndScan: true,
+            useUTF8ContinuationPrefixScan: true,
+            useMarkRestoreForFailedCandidates: true
+        )
+    }
+
+    static func parseFootnoteDefinitionByCharacterLineEndScanningForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.BlockNode? {
+        parseFootnoteDefinition(
+            &state,
+            configuration: configuration,
+            useSingleRangeParagraphFastPath: true,
+            usePlainTextParagraphFastPath: true,
+            useUTF8HeaderScan: true,
+            useUTF8LineEndScan: false,
+            useUTF8ContinuationPrefixScan: true,
+            useMarkRestoreForFailedCandidates: true
+        )
+    }
+
+    static func parseFootnoteDefinitionByCharacterContinuationPrefixForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.BlockNode? {
+        parseFootnoteDefinition(
+            &state,
+            configuration: configuration,
+            useSingleRangeParagraphFastPath: true,
+            usePlainTextParagraphFastPath: true,
+            useUTF8HeaderScan: true,
+            useUTF8LineEndScan: true,
+            useUTF8ContinuationPrefixScan: false,
+            useMarkRestoreForFailedCandidates: true
+        )
+    }
+
+    static func parseFootnoteDefinitionByIndexMoveCandidateRestoreForTesting(
+        _ state: inout ParserState,
+        configuration: MarkdownConfiguration
+    ) -> MarkdownParser.BlockNode? {
+        parseFootnoteDefinition(
+            &state,
+            configuration: configuration,
+            useSingleRangeParagraphFastPath: true,
+            usePlainTextParagraphFastPath: true,
+            useUTF8HeaderScan: true,
+            useUTF8LineEndScan: true,
+            useUTF8ContinuationPrefixScan: true,
+            useMarkRestoreForFailedCandidates: false
         )
     }
 
@@ -2383,47 +3528,75 @@ public struct BlockParser {
         _ state: inout ParserState,
         configuration: MarkdownConfiguration,
         useSingleRangeParagraphFastPath: Bool,
-        usePlainTextParagraphFastPath: Bool
+        usePlainTextParagraphFastPath: Bool,
+        useUTF8HeaderScan: Bool,
+        useUTF8LineEndScan: Bool,
+        useUTF8ContinuationPrefixScan: Bool,
+        useMarkRestoreForFailedCandidates: Bool
     ) -> MarkdownParser.BlockNode? {
-        let savedIndex = state.currentIndex
-        
-        // Check for [^
-        guard let c0 = state.current(), c0 == "[",
-              let c1 = state.peek(1), c1 == "^" else {
-            return nil
-        }
-        
-        state.advance(by: 2)
-        
-        // Collect label
-        let labelStart = state.currentIndex
-        while let ch = state.current(), ch != "]", ch != "\n" {
-            state.advance()
-        }
-        
-        guard state.current() == "]" else {
-            state.move(to: savedIndex)
-            return nil
-        }
-        
-        let label = state.substring(from: labelStart, to: state.currentIndex)
-        guard !label.isEmpty else {
-            state.move(to: savedIndex)
-            return nil
-        }
-        
-        state.advance() // Skip ]
-        
-        // Must be followed by :
-        guard state.current() == ":" else {
-            state.move(to: savedIndex)
-            return nil
-        }
-        state.advance() // Skip :
-        
-        // Skip optional space
-        if state.current() == " " {
-            state.advance()
+        let savedMark = state.mark()
+
+        let label: String
+        if useUTF8HeaderScan,
+           let header = scanFootnoteDefinitionHeaderByUTF8(
+            in: state.text,
+            from: state.currentIndex,
+            to: state.endIndex
+           ) {
+            label = String(state.text[header.labelRange])
+            state.currentIndex = header.contentStart
+            state.column += header.columnAdvance
+        } else {
+            // Check for [^
+            guard let c0 = state.current(), c0 == "[",
+                  let c1 = state.peek(1), c1 == "^" else {
+                return nil
+            }
+
+            state.advance(by: 2)
+
+            // Collect label
+            let labelStart = state.currentIndex
+            while let ch = state.current(), ch != "]", ch != "\n" {
+                state.advance()
+            }
+
+            guard state.current() == "]" else {
+                restoreFailedBlockCandidate(
+                    &state,
+                    to: savedMark,
+                    useMarkRestore: useMarkRestoreForFailedCandidates
+                )
+                return nil
+            }
+
+            label = state.substring(from: labelStart, to: state.currentIndex)
+            guard !label.isEmpty else {
+                restoreFailedBlockCandidate(
+                    &state,
+                    to: savedMark,
+                    useMarkRestore: useMarkRestoreForFailedCandidates
+                )
+                return nil
+            }
+
+            state.advance() // Skip ]
+
+            // Must be followed by :
+            guard state.current() == ":" else {
+                restoreFailedBlockCandidate(
+                    &state,
+                    to: savedMark,
+                    useMarkRestore: useMarkRestoreForFailedCandidates
+                )
+                return nil
+            }
+            state.advance() // Skip :
+
+            // Skip optional space
+            if state.current() == " " {
+                state.advance()
+            }
         }
         
         // Collect footnote content ranges after marker/continuation indentation.
@@ -2433,9 +3606,7 @@ public struct BlockParser {
         
         // First line
         let firstLineStart = state.currentIndex
-        while let ch = state.current(), ch != "\n" {
-            state.advance()
-        }
+        advanceContainerContentLineEnd(&state, useUTF8LineEndScan: useUTF8LineEndScan)
         let firstLineRange = firstLineStart..<state.currentIndex
         contentLineRanges.append(firstLineRange)
         contentLineUTF8Count += state.text.utf8.distance(from: firstLineStart, to: state.currentIndex)
@@ -2449,35 +3620,44 @@ public struct BlockParser {
         // Continuation lines (must be indented with 4 spaces or a tab)
         while !state.isAtEnd {
             let lineStart = state.currentIndex
-            var spaces = 0
-            
-            // Check indentation
-            while let ch = state.current(), (ch == " " || ch == "\t") {
-                if ch == "\t" {
-                    spaces = 4 // Tab counts as 4 spaces
-                    state.advance()
+
+            if useUTF8ContinuationPrefixScan,
+               let prefix = scanFootnoteContinuationPrefix(state, lineStart: lineStart) {
+                if prefix.spaces < 4 {
                     break
-                } else {
-                    spaces += 1
-                    state.advance()
                 }
-                
-                if spaces >= 4 {
+
+                state.currentIndex = prefix.contentStart
+                state.column += prefix.columnAdvance
+            } else {
+                var spaces = 0
+
+                // Check indentation
+                while let ch = state.current(), (ch == " " || ch == "\t") {
+                    if ch == "\t" {
+                        spaces = 4 // Tab counts as 4 spaces
+                        state.advance()
+                        break
+                    } else {
+                        spaces += 1
+                        state.advance()
+                    }
+
+                    if spaces >= 4 {
+                        break
+                    }
+                }
+
+                if spaces < 4 {
+                    // Not a continuation line
+                    state.move(to: lineStart)
                     break
                 }
             }
-            
-            if spaces < 4 {
-                // Not a continuation line
-                state.move(to: lineStart)
-                break
-            }
-            
+
             // Collect the line
             let contentStart = state.currentIndex
-            while let ch = state.current(), ch != "\n" {
-                state.advance()
-            }
+            advanceContainerContentLineEnd(&state, useUTF8LineEndScan: useUTF8LineEndScan)
             
             let lineRange = contentStart..<state.currentIndex
             contentLineRanges.append(lineRange)
@@ -2497,7 +3677,8 @@ public struct BlockParser {
                 in: state.text,
                 from: singleRange.lowerBound,
                 to: singleRange.upperBound,
-                configuration: configuration
+                configuration: configuration,
+                asciiFastPath: state.inlineRangeASCIIFastPath
             )
             return .footnoteDefinition(label: label, children: [.paragraph(children: inlines)])
         }
@@ -2528,6 +3709,146 @@ public struct BlockParser {
         let blocks = parseBlocks(&contentState, configuration: configuration)
         
         return .footnoteDefinition(label: label, children: blocks)
+    }
+
+    private static func scanFootnoteContinuationPrefix(
+        _ state: ParserState,
+        lineStart: String.Index
+    ) -> FootnoteContinuationPrefixScan? {
+        let utf8 = state.text.utf8
+        var index = lineStart
+        var spaces = 0
+        var columnAdvance = 0
+
+        while index < state.endIndex {
+            switch utf8[index] {
+            case 0x20: // space
+                spaces += 1
+                columnAdvance += 1
+                index = utf8.index(after: index)
+                if spaces >= 4 {
+                    return FootnoteContinuationPrefixScan(
+                        spaces: spaces,
+                        contentStart: index,
+                        columnAdvance: columnAdvance
+                    )
+                }
+            case 0x09: // tab
+                columnAdvance += 1
+                index = utf8.index(after: index)
+                return FootnoteContinuationPrefixScan(
+                    spaces: 4,
+                    contentStart: index,
+                    columnAdvance: columnAdvance
+                )
+            case 0x00...0x7F:
+                return FootnoteContinuationPrefixScan(
+                    spaces: spaces,
+                    contentStart: index,
+                    columnAdvance: columnAdvance
+                )
+            default:
+                return nil
+            }
+        }
+
+        return FootnoteContinuationPrefixScan(
+            spaces: spaces,
+            contentStart: index,
+            columnAdvance: columnAdvance
+        )
+    }
+
+    @inline(__always)
+    private static func scanFootnoteDefinitionHeaderByUTF8(
+        in text: String,
+        from start: String.Index,
+        to end: String.Index
+    ) -> FootnoteDefinitionHeader? {
+        let utf8 = text.utf8
+        guard start < end, utf8[start] == 0x5B else { return nil } // [
+
+        var index = utf8.index(after: start)
+        guard index < end, utf8[index] == 0x5E else { return nil } // ^
+
+        index = utf8.index(after: index)
+        let labelStart = index
+        var labelByteCount = 0
+
+        while index < end {
+            switch utf8[index] {
+            case 0x5D: // ]
+                guard labelStart < index else { return nil }
+                let afterCloseBracket = utf8.index(after: index)
+                guard afterCloseBracket < end, utf8[afterCloseBracket] == 0x3A else { return nil } // :
+
+                var contentStart = utf8.index(after: afterCloseBracket)
+                var columnAdvance = 4 + labelByteCount // [ ^ label ] :
+                if contentStart < end, utf8[contentStart] == 0x20 {
+                    contentStart = utf8.index(after: contentStart)
+                    columnAdvance += 1
+                }
+
+                return FootnoteDefinitionHeader(
+                    labelRange: labelStart..<index,
+                    contentStart: contentStart,
+                    columnAdvance: columnAdvance
+                )
+            case 0x0A:
+                return nil
+            case 0x00...0x7F:
+                labelByteCount += 1
+                index = utf8.index(after: index)
+            default:
+                return nil
+            }
+        }
+
+        return nil
+    }
+
+    @inline(__always)
+    private static func advanceContainerContentLineEnd(
+        _ state: inout ParserState,
+        useUTF8LineEndScan: Bool
+    ) {
+        if useUTF8LineEndScan {
+            advanceContainerContentLineEndByUTF8Scanning(&state)
+            return
+        }
+
+        advanceContainerContentLineEndByCharacterScanning(&state)
+    }
+
+    private static func advanceContainerContentLineEndByUTF8Scanning(_ state: inout ParserState) {
+        guard !state.isAtEnd else { return }
+
+        let utf8 = state.text.utf8
+        let start = state.currentIndex
+        var index = start
+
+        while index < state.endIndex {
+            let byte = utf8[index]
+            if byte == 0x0A { // newline
+                state.column += utf8.distance(from: start, to: index)
+                state.currentIndex = index
+                return
+            }
+            if byte == 0x0D || byte >= 0x80 {
+                advanceContainerContentLineEndByCharacterScanning(&state)
+                return
+            }
+            index = utf8.index(after: index)
+        }
+
+        state.column += utf8.distance(from: start, to: state.endIndex)
+        state.currentIndex = state.endIndex
+    }
+
+    private static func advanceContainerContentLineEndByCharacterScanning(_ state: inout ParserState) {
+        while let ch = state.current(), ch != "\n" {
+            state.advance()
+        }
     }
 
     static func parseFootnoteDefinitionByCopyingLinesForTesting(
@@ -2903,12 +4224,72 @@ public struct BlockParser {
         in source: String,
         reservedUTF8Count: Int
     ) -> String {
+        joinedTrimmedContentInSinglePass(from: ranges, in: source, reservedUTF8Count: reservedUTF8Count)
+    }
+
+    static func joinedTrimmedContentForTesting(
+        from ranges: [Range<String.Index>],
+        in source: String,
+        reservedUTF8Count: Int,
+        materializeRanges: Bool
+    ) -> String {
+        if materializeRanges {
+            return joinedTrimmedContentByMaterializingRanges(
+                from: ranges,
+                in: source,
+                reservedUTF8Count: reservedUTF8Count
+            )
+        }
+
+        return joinedTrimmedContentInSinglePass(
+            from: ranges,
+            in: source,
+            reservedUTF8Count: reservedUTF8Count
+        )
+    }
+
+    private static func joinedTrimmedContentByMaterializingRanges(
+        from ranges: [Range<String.Index>],
+        in source: String,
+        reservedUTF8Count: Int
+    ) -> String {
         let trimmedRanges = trimmedContentRanges(from: ranges, in: source)
         guard !trimmedRanges.isEmpty else {
             return ""
         }
 
         return joinedContent(from: trimmedRanges, in: source, reservedUTF8Count: reservedUTF8Count)
+    }
+
+    private static func joinedTrimmedContentInSinglePass(
+        from ranges: [Range<String.Index>],
+        in source: String,
+        reservedUTF8Count: Int
+    ) -> String {
+        guard let firstContentIndex = ranges.firstIndex(where: { rangeContainsNonWhitespace(in: source, range: $0) }),
+              let lastContentIndex = ranges.lastIndex(where: { rangeContainsNonWhitespace(in: source, range: $0) }) else {
+            return ""
+        }
+
+        var content = ""
+        content.reserveCapacity(reservedUTF8Count + max(0, lastContentIndex - firstContentIndex))
+
+        for index in firstContentIndex...lastContentIndex {
+            var range = ranges[index]
+            if index == firstContentIndex {
+                range = leadingWhitespaceTrimmedRange(in: source, range: range)
+            }
+            if index == lastContentIndex {
+                range = trailingWhitespaceTrimmedRange(in: source, range: range)
+            }
+
+            if index > firstContentIndex {
+                content.append("\n")
+            }
+            content.append(contentsOf: source[range])
+        }
+
+        return content
     }
 
     private static func plainTextParagraphInlinesFromSourceRanges(
@@ -3647,6 +5028,7 @@ public struct BlockParser {
         var secondLineHasDash = false
         var setextLineIsValid = setextCandidate
         var setextTrailingSpaces = false
+        var tableSeparatorAlignmentScan = TableSeparatorAlignmentScan()
 
         while secondLineEnd < end {
             let byte = utf8[secondLineEnd]
@@ -3660,6 +5042,10 @@ public struct BlockParser {
                 secondLineHasPipe = true
             } else if byte == 0x2D { // -
                 secondLineHasDash = true
+            }
+
+            if firstLineHasPipe {
+                tableSeparatorAlignmentScan.scan(byte)
             }
 
             if setextLineIsValid {
@@ -3690,9 +5076,11 @@ public struct BlockParser {
 
         let tableStart: TableStartProbe?
         if firstLineHasPipe && secondLineHasPipe && secondLineHasDash {
+            let separatorAlignments = tableSeparatorAlignmentScan.finishLine()
             tableStart = TableStartProbe(
                 headerRange: state.currentIndex..<firstLineEnd,
                 separatorRange: secondLineStart..<secondLineEnd,
+                separatorAlignments: separatorAlignments,
                 afterSeparatorLine: afterSecondLine,
                 lineBreaksToAfterSeparatorLine: lineBreaksToAfterSecondLine,
                 columnAfterSeparatorLine: columnAfterSecondLine
@@ -3766,6 +5154,7 @@ public struct BlockParser {
         let separatorStart = index
         var separatorHasPipe = false
         var separatorHasDash = false
+        var separatorAlignmentScan = TableSeparatorAlignmentScan()
         while index < end {
             let byte = utf8[index]
             if byte == 0x0A { // newline
@@ -3779,6 +5168,7 @@ public struct BlockParser {
             } else if byte == 0x2D { // -
                 separatorHasDash = true
             }
+            separatorAlignmentScan.scan(byte)
             index = utf8.index(after: index)
         }
 
@@ -3803,6 +5193,7 @@ public struct BlockParser {
         return TableStartProbe(
             headerRange: state.currentIndex..<headerEnd,
             separatorRange: separatorStart..<separatorEnd,
+            separatorAlignments: separatorAlignmentScan.finishLine(),
             afterSeparatorLine: afterSeparator,
             lineBreaksToAfterSeparatorLine: lineBreaks,
             columnAfterSeparatorLine: column
@@ -3842,6 +5233,7 @@ public struct BlockParser {
         return TableStartProbe(
             headerRange: headerRange,
             separatorRange: separatorRange,
+            separatorAlignments: nil,
             afterSeparatorLine: afterSeparator,
             lineBreaksToAfterSeparatorLine: lineBreaks,
             columnAfterSeparatorLine: column
@@ -4590,9 +5982,17 @@ public struct BlockParser {
         return character == "-" || character == "*" || character == "+" || character.isNumber
     }
 
+    private static func shouldAttemptListMarker(_ byte: UInt8) -> Bool {
+        byte == 0x2D || byte == 0x2A || byte == 0x2B || (byte >= 0x30 && byte <= 0x39) // - * + 0...9
+    }
+
     private static func shouldAttemptHorizontalRule(_ character: Character?) -> Bool {
         guard let character else { return false }
         return character == "-" || character == "*" || character == "_"
+    }
+
+    private static func shouldAttemptHorizontalRule(_ byte: UInt8) -> Bool {
+        byte == 0x2D || byte == 0x2A || byte == 0x5F // - * _
     }
 
     private static func shouldAttemptFootnoteDefinition(_ state: ParserState) -> Bool {
