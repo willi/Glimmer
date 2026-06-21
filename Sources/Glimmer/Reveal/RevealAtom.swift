@@ -9,7 +9,7 @@ public struct RevealAtom: Identifiable, Sendable {
         case space(AttributedString)
         /// Forced line break (soft/hard break, or after a line-granularity row).
         case lineBreak
-        /// Whole-unit block (code/table/image/hr/...) — see `RevealBlock.node`.
+        /// Whole-unit block (image/hr/html/...) — see `RevealBlock.node`.
         case block
     }
 
@@ -45,14 +45,14 @@ public struct RevealBlock: Identifiable, Sendable {
     public let kind: BlockKindTag
     /// Inline layout units; empty when `kind == .wholeBlock`... (see node).
     public let words: [RevealWord]
-    /// The parsed node, set only for `.wholeBlock`, rendered via Glimmer's
-    /// existing block view when revealed.
+    /// The parsed node, rendered via Glimmer's existing block view once the
+    /// reveal treatment allows settled rendering.
     public let node: MarkdownParser.BlockNode?
     /// The block becomes visible once `revealedCount >= firstRevealIndex`.
     public let firstRevealIndex: Int
 
     /// Identity for SwiftUI diffing: changes when a streaming block changes
-    /// shape (e.g. paragraph → wholeBlock once a code fence completes), so
+    /// shape (e.g. paragraph -> codeBlock once a code fence completes), so
     /// the new representation transitions in instead of mutating in place.
     public var viewIdentity: String {
         switch kind {
@@ -60,6 +60,8 @@ public struct RevealBlock: Identifiable, Sendable {
         case .heading(let level): "\(id)-h\(level)"
         case .listItem(let marker, let depth): "\(id)-li\(depth)-\(marker)"
         case .blockquote(let depth): "\(id)-q\(depth)"
+        case .codeBlock(let language): "\(id)-code-\(language ?? "")"
+        case .table: "\(id)-table"
         case .wholeBlock: "\(id)-b"
         }
     }

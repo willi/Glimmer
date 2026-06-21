@@ -60,7 +60,10 @@ final class RevealSessionTests: XCTestCase {
         }
 
         let finalSummary = summarize(finalModel)
-        XCTAssertEqual(finalSummary.filter { $0.kind == .wholeBlock && $0.hasWholeBlockNode }.count, 1)
+        XCTAssertEqual(
+            finalSummary.filter { $0.kind == .codeBlock(language: "swift") && $0.hasWholeBlockNode }.count,
+            1
+        )
         XCTAssertEqual(session.stats.fullRebuilds, 1)
         XCTAssertGreaterThan(session.stats.incrementalUpdates, 0)
     }

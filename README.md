@@ -353,6 +353,15 @@ GlimmerRevealView(
     onComplete: { /* reveal finished */ }
 )
 
+// If the final text is already known, parse it up front while `markdown`
+// remains the currently streamed prefix. This keeps links/emphasis/code styled
+// during the reveal instead of briefly exposing incomplete markdown syntax.
+GlimmerRevealView(
+    markdown: message.visiblePrefix,
+    completeMarkdown: message.fullText,
+    reveal: RevealConfiguration(style: .trailFade, isStreaming: message.isStreaming)
+)
+
 // One-shot mode for previews/demos (fits long inputs into a duration cap):
 GlimmerRevealView.demo("# Hello **world**", style: .shimmer, durationCap: 6)
 ```

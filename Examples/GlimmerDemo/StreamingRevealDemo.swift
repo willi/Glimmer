@@ -6,7 +6,7 @@ import Glimmer
 /// text one-shot. Rich markdown (headings, lists, code, links, quotes)
 /// reveals styled from frame one and settles with no engine swap.
 struct StreamingRevealDemo: View {
-    @State private var style: RevealStyle = .wordFade
+    @State private var style: RevealStyle = .trailFade
     @State private var buffer = ""
     @State private var isStreaming = false
     @State private var runID = 0
@@ -27,7 +27,7 @@ struct StreamingRevealDemo: View {
     ```swift
     GlimmerRevealView(
         markdown: message.text,
-        reveal: RevealConfiguration(style: .wordFade)
+        reveal: RevealConfiguration(style: .trailFade)
     )
     ```
 
@@ -54,6 +54,7 @@ struct StreamingRevealDemo: View {
                 if !buffer.isEmpty {
                     GlimmerRevealView(
                         markdown: buffer,
+                        completeMarkdown: sample,
                         reveal: RevealConfiguration(
                             style: style,
                             catchUp: .adaptive(maxLagSeconds: 1.5),
@@ -87,7 +88,8 @@ struct StreamingRevealDemo: View {
     }
 
     /// Feeds the buffer in random 2–8 char chunks every 30–80 ms, like an LLM
-    /// token stream. The reveal cadence is independent of this (spec R3).
+    /// token stream. The reveal animation parses the known complete sample so
+    /// incomplete inline markdown does not flash as raw syntax mid-stream.
     private func startStreaming() {
         streamTask?.cancel()
         runID += 1

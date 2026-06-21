@@ -69,6 +69,10 @@ extension RevealTreatment {
         case .glow: .easeOut(duration: 0.6)
         }
     }
+
+    func shouldRenderSettledBlock(isFullyRevealed: Bool) -> Bool {
+        isFullyRevealed
+    }
 }
 
 // MARK: - Single reveal unit

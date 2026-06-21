@@ -66,13 +66,22 @@ struct RevealFlattener {
 
     // MARK: - Block walk
 
-    private mutating func emit(_ nodes: [MarkdownParser.BlockNode]) {
+    private mutating func emit(
+        _ nodes: [MarkdownParser.BlockNode],
+        quoteDepth: Int = 0,
+        listDepth: Int = 0
+    ) {
         for node in nodes {
             switch node {
             case .heading(let level, let children, _):
                 let font = level - 1 < configuration.headingFonts.count
                     ? configuration.headingFonts[level - 1] : .headline
-                appendInlineBlock(kind: .heading(level: level), children: children, baseFont: font, node: node)
+                appendInlineBlock(
+                    kind: quoteDepth > 0 ? .blockquote(depth: quoteDepth) : .heading(level: level),
+                    children: children,
+                    baseFont: font,
+                    node: quoteDepth > 0 ? nil : node
+                )
 
             case .paragraph(let children):
                 if children.contains(where: { if case .image = $0 { return true } else { return false } }) {
@@ -80,26 +89,219 @@ struct RevealFlattener {
                     appendWholeBlock(node)
                 } else {
                     appendInlineBlock(
-                        kind: .paragraph,
+                        kind: quoteDepth > 0 ? .blockquote(depth: quoteDepth) : .paragraph,
                         children: children,
                         baseFont: configuration.baseFont,
-                        node: node
+                        node: quoteDepth > 0 ? nil : node
                     )
                 }
 
-            case .blockquote:
-                appendWholeBlock(node)
+            case .blockquote(let children):
+                emit(children, quoteDepth: quoteDepth + 1, listDepth: listDepth)
 
-            case .list:
-                appendWholeBlock(node)
+            case .list(let ordered, let tight, let items):
+                appendList(ordered: ordered, tight: tight, items: items, depth: listDepth, quoteDepth: quoteDepth)
 
-            case .codeBlock, .table, .taskList, .horizontalRule, .html:
+            case .codeBlock(let language, let content):
+                appendCodeBlock(language: language, content: content, node: quoteDepth > 0 ? nil : node)
+
+            case .taskList(let items):
+                appendTaskList(items, depth: listDepth, quoteDepth: quoteDepth)
+
+            case .table(let header, let rows):
+                appendTable(header: header, rows: rows, node: quoteDepth > 0 ? nil : node)
+
+            case .horizontalRule, .html:
                 appendWholeBlock(node)
 
             case .footnoteDefinition:
                 continue // footnote sections are not revealed (documented limitation)
             }
         }
+    }
+
+    private mutating func appendList(
+        ordered: Bool,
+        tight: Bool,
+        items: [MarkdownParser.ListItem],
+        depth: Int,
+        quoteDepth: Int
+    ) {
+        _ = tight
+        for (index, item) in items.enumerated() {
+            let marker: String
+            if item.isTask {
+                marker = (item.isChecked == true ? "☑" : "☐") + " "
+            } else {
+                marker = ListFormatting.listMarker(ordered: ordered, index: index, depth: depth) + " "
+            }
+            appendListItem(item, marker: marker, depth: depth, quoteDepth: quoteDepth)
+        }
+    }
+
+    private mutating func appendListItem(
+        _ item: MarkdownParser.ListItem,
+        marker: String,
+        depth: Int,
+        quoteDepth: Int
+    ) {
+        var didUseMarker = false
+        for node in item.content {
+            switch node {
+            case .paragraph(let children):
+                appendInlineBlock(
+                    kind: quoteDepth > 0
+                        ? .blockquote(depth: quoteDepth)
+                        : .listItem(marker: didUseMarker ? "" : marker, depth: depth),
+                    children: children,
+                    baseFont: configuration.baseFont,
+                    node: nil
+                )
+                didUseMarker = true
+
+            case .heading(let level, let children, _):
+                let font = level - 1 < configuration.headingFonts.count
+                    ? configuration.headingFonts[level - 1] : .headline
+                appendInlineBlock(
+                    kind: quoteDepth > 0
+                        ? .blockquote(depth: quoteDepth)
+                        : .listItem(marker: didUseMarker ? "" : marker, depth: depth),
+                    children: children,
+                    baseFont: font,
+                    node: nil
+                )
+                didUseMarker = true
+
+            case .list(let ordered, let tight, let nestedItems):
+                appendList(ordered: ordered, tight: tight, items: nestedItems, depth: depth + 1, quoteDepth: quoteDepth)
+
+            case .taskList(let items):
+                appendTaskList(items, depth: depth + 1, quoteDepth: quoteDepth)
+
+            case .blockquote(let children):
+                emit(children, quoteDepth: quoteDepth + 1, listDepth: depth + 1)
+
+            case .codeBlock(let language, let content):
+                appendCodeBlock(language: language, content: content, node: nil)
+                didUseMarker = true
+
+            case .table(let header, let rows):
+                appendTable(header: header, rows: rows, node: nil)
+                didUseMarker = true
+
+            case .horizontalRule, .html:
+                appendWholeBlock(node)
+                didUseMarker = true
+
+            case .footnoteDefinition:
+                continue
+            }
+        }
+    }
+
+    private mutating func appendTaskList(
+        _ items: [MarkdownParser.TaskListItem],
+        depth: Int,
+        quoteDepth: Int
+    ) {
+        for item in items {
+            appendInlineBlock(
+                kind: quoteDepth > 0
+                    ? .blockquote(depth: quoteDepth)
+                    : .listItem(marker: item.isChecked ? "☑ " : "☐ ", depth: depth),
+                children: item.content,
+                baseFont: configuration.baseFont,
+                node: nil
+            )
+        }
+    }
+
+    private mutating func appendCodeBlock(
+        language: String?,
+        content: String,
+        node: MarkdownParser.BlockNode? = nil
+    ) {
+        appendInlineBlock(kind: .codeBlock(language: language), tokens: codeTokens(content), node: node)
+    }
+
+    private func codeTokens(_ content: String) -> [InlineRevealToken] {
+        var tokens: [InlineRevealToken] = []
+        var index = content.startIndex
+
+        while index < content.endIndex {
+            let start = index
+            let kind = codeRunKind(content[index])
+            index = content.index(after: index)
+
+            while index < content.endIndex, codeRunKind(content[index]) == kind {
+                index = content.index(after: index)
+            }
+
+            var attributed = AttributedString(String(content[start..<index]))
+            attributed.font = configuration.codeFont
+            tokens.append(InlineRevealToken(
+                content: attributed,
+                isWhitespace: kind != .text,
+                containsNewline: kind == .newline,
+                url: nil
+            ))
+        }
+
+        return tokens
+    }
+
+    private func codeRunKind(_ character: Character) -> CodeRunKind {
+        if character.isNewline { return .newline }
+        if character.isWhitespace { return .space }
+        return .text
+    }
+
+    private mutating func appendTable(
+        header: [MarkdownParser.TableCell],
+        rows: [[MarkdownParser.TableCell]],
+        node: MarkdownParser.BlockNode? = nil
+    ) {
+        var tokens: [InlineRevealToken] = []
+        let bodyFont = configuration.baseFont
+        let headerFont = bodyFont.bold()
+
+        func appendLiteral(_ text: String, baseFont: Font, isWhitespace: Bool) {
+            var attributed = AttributedString(text)
+            attributed.font = baseFont
+            tokens.append(InlineRevealToken(
+                content: attributed,
+                isWhitespace: isWhitespace,
+                containsNewline: text.contains { $0.isNewline },
+                url: nil
+            ))
+        }
+
+        func appendCells(_ cells: [MarkdownParser.TableCell], isHeader: Bool) {
+            for (index, cell) in cells.enumerated() {
+                if index > 0 {
+                    appendLiteral(" | ", baseFont: bodyFont, isWhitespace: true)
+                }
+                var builder = InlineTokenBuilder(
+                    configuration: configuration,
+                    baseFont: isHeader ? headerFont : bodyFont
+                )
+                builder.append(cell.content)
+                tokens.append(contentsOf: builder.finish())
+            }
+        }
+
+        appendCells(header, isHeader: true)
+        if !rows.isEmpty {
+            appendLiteral("\n", baseFont: bodyFont, isWhitespace: true)
+        }
+        for (index, row) in rows.enumerated() {
+            appendCells(row, isHeader: false)
+            if index < rows.count - 1 {
+                appendLiteral("\n", baseFont: bodyFont, isWhitespace: true)
+            }
+        }
+
+        appendInlineBlock(kind: .table, tokens: tokens, node: node)
     }
 
     // MARK: - Inline flattening
@@ -386,6 +588,12 @@ struct RevealFlattener {
         let isWhitespace: Bool
         var containsNewline: Bool
         var url: URL?
+    }
+
+    private enum CodeRunKind {
+        case text
+        case space
+        case newline
     }
 
     private struct InlineRenderContext {
