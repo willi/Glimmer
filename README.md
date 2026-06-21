@@ -570,6 +570,47 @@ xcodebuild -scheme Glimmer -configuration Release ENABLE_TESTABILITY=YES -destin
 ```
 
 ### Benchmark Results
+
+The full parser comparison suite benchmarks Glimmer against popular iOS Markdown libraries:
+
+```bash
+sh Benchmarks/run-markdown-parser-comparison.sh
+```
+
+Latest local run: Release, `platform=iOS Simulator,name=iPhone 17 Pro`, 40 generated sections per corpus, 5 timed repeats, 1 warmup. All tests passed. Median times are shown in milliseconds. Compare relative timings only within the same operation group: AST/tree, HTML, or Attributed.
+
+#### AST and HTML Median Times
+
+| Corpus | Size | Glimmer AST | Apple `swift-markdown` AST | Down HTML | Ink HTML |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| plain | 16 KB | 0.13 | 0.44 | 0.09 | 2.33 |
+| inline | 19 KB | 0.51 | 3.07 | 0.50 | 3.39 |
+| titles | 27 KB | 0.52 | 1.72 | 0.38 | 3.71 |
+| gfm | 18 KB | 0.20 | 0.83 | 0.42 | 2.85 |
+| tables | 12 KB | 0.27 | 2.48 | 0.48 | 2.21 |
+| setext | 21 KB | 0.22 | 0.82 | 0.17 | 2.67 |
+| code | 13 KB | 0.10 | 0.47 | 0.48 | 0.99 |
+| mixed | 47 KB | 0.91 | 6.11 | 0.84 | 6.82 |
+| progit | 86 KB | 0.97 | 4.94 | 1.00 | 11.39 |
+| commonmark-samples | 18 KB | 0.67 | 1.26 | 0.32 | 0.65 |
+
+`Glimmer AST` uses the default parser configuration with caches off. `Down HTML` is measured in a separate benchmark package because Down's bundled `libcmark` conflicts with Apple's `swift-cmark` in one SwiftPM graph.
+
+#### Attributed Median Times
+
+| Corpus | Glimmer Attributed | Foundation `AttributedString(markdown:)` | MarkdownKit | SwiftyMarkdown |
+| --- | ---: | ---: | ---: | ---: |
+| plain | 1.19 | 2.62 | 8.37 | 362.01 |
+| inline | 5.97 | 12.33 | 19.57 | 443.95 |
+| titles | 4.74 | 9.06 | 25.20 | 348.41 |
+| gfm | 2.66 | 3.83 | 10.61 | 256.91 |
+| tables | 4.14 | 5.09 | 9.01 | 261.29 |
+| setext | 1.82 | 4.29 | 12.07 | 222.39 |
+| code | 1.73 | 2.40 | 84.60 | 540.89 |
+| mixed | 12.57 | 21.80 | 90.05 | 1014.59 |
+| progit | 13.47 | 19.33 | 121.34 | 1302.96 |
+| commonmark-samples | 3.99 | 3.92 | 98.29 | 357.94 |
+
 - **Large documents**: Optimized for fast parsing
 - **Memory usage**: Efficient memory management with consolidated parsers
 - **Cache hit rate**: 95%+ for repeated parsing
