@@ -151,14 +151,14 @@ final class RevealModelTests: XCTestCase {
         XCTAssertEqual(joinedText(m.blocks[0]), "one two three four\nfive six\n")
     }
 
-    func testRevealModelAtomCountIncludesSpacesLineBreaksAndWholeBlocks() {
+    func testRevealModelAtomCountIncludesSpacesLineBreaksAndStructuralText() {
         let lineModel = model("one two three four five", style: .lineSlide)
         XCTAssertEqual(lineModel.atomCount, allAtoms(lineModel).count)
         XCTAssertEqual(lineModel.atomCount, 4)
 
-        let wholeBlockModel = model("Before words\n\n```swift\nlet x = 1\n```")
-        XCTAssertEqual(wholeBlockModel.atomCount, allAtoms(wholeBlockModel).count)
-        XCTAssertEqual(wholeBlockModel.atomCount, 4)
+        let structuralModel = model("Before words\n\n```swift\nlet x = 1\n```")
+        XCTAssertEqual(structuralModel.atomCount, allAtoms(structuralModel).count)
+        XCTAssertGreaterThan(structuralModel.atomCount, 4)
     }
 
     func testRevealIndexGatesSpacesWithPrecedingWord() {
@@ -167,17 +167,25 @@ final class RevealModelTests: XCTestCase {
         XCTAssertEqual(allAtoms(m).map(\.isCountable), [true, false, true])
     }
 
-    func testCodeBlockIsWholeBlockAtom() {
+    func testCodeBlockRevealsWords() {
         let m = model("Before\n\n```swift\nlet x = 1\n```")
         XCTAssertEqual(m.blocks.count, 2)
-        XCTAssertEqual(m.blocks[1].kind, .wholeBlock)
+        XCTAssertEqual(m.blocks[1].kind, .codeBlock(language: "swift"))
         XCTAssertNotNil(m.blocks[1].node)
-        XCTAssertEqual(m.countableCount, 2) // "Before" word + 1 block atom
+        XCTAssertEqual(joinedText(m.blocks[1]), "let x = 1")
+        XCTAssertEqual(m.countableCount, 5) // "Before" word + 4 code words
     }
 
-    func testTableIsWholeBlockAtom() {
+    func testCodeBlockRevealPreservesIndentationAfterLineBreak() {
+        let m = model("```swift\nfunc demo() {\n    print(\"hi\")\n}\n```")
+        XCTAssertEqual(joinedText(m.blocks[0]), "func demo() {\n    print(\"hi\")\n}")
+    }
+
+    func testTableRevealsCellText() {
         let m = model("| a | b |\n|---|---|\n| 1 | 2 |")
-        XCTAssertEqual(m.blocks.first?.kind, .wholeBlock)
+        XCTAssertEqual(m.blocks.first?.kind, .table)
+        XCTAssertEqual(m.blocks.first.map(joinedText), "a | b\n1 | 2")
+        XCTAssertNotNil(m.blocks.first?.node)
     }
 
     func testImageParagraphBecomesWholeBlock() {
@@ -185,31 +193,39 @@ final class RevealModelTests: XCTestCase {
         XCTAssertEqual(m.blocks.first?.kind, .wholeBlock)
     }
 
-    func testListsRevealAsCanonicalWholeBlocks() {
+    func testListsRevealItems() {
         let m = model("- alpha\n- beta")
-        XCTAssertEqual(m.blocks.count, 1)
-        XCTAssertEqual(m.blocks[0].kind, .wholeBlock)
-        XCTAssertNotNil(m.blocks[0].node)
-        XCTAssertEqual(m.countableCount, 1)
+        XCTAssertEqual(m.blocks.count, 2)
+        XCTAssertEqual(m.blocks[0].kind, .listItem(marker: "• ", depth: 0))
+        XCTAssertEqual(m.blocks[1].kind, .listItem(marker: "• ", depth: 0))
+        XCTAssertNil(m.blocks[0].node)
+        XCTAssertEqual(m.countableCount, 2)
     }
 
-    func testOrderedListsRevealAsCanonicalWholeBlocks() {
+    func testOrderedListsRevealItems() {
         let m = model("1. first\n2. second")
-        XCTAssertEqual(m.blocks[0].kind, .wholeBlock)
-        XCTAssertNotNil(m.blocks[0].node)
+        XCTAssertEqual(m.blocks[0].kind, .listItem(marker: "1. ", depth: 0))
+        XCTAssertEqual(m.blocks[1].kind, .listItem(marker: "2. ", depth: 0))
     }
 
-    func testNestedListsRevealAsCanonicalWholeBlocks() {
+    func testNestedListsRevealItems() {
         let m = model("- outer\n    - inner")
-        XCTAssertEqual(m.blocks[0].kind, .wholeBlock)
-        XCTAssertNotNil(m.blocks[0].node)
+        XCTAssertEqual(m.blocks[0].kind, .listItem(marker: "• ", depth: 0))
+        XCTAssertEqual(m.blocks[1].kind, .listItem(marker: "◦ ", depth: 1))
     }
 
-    func testBlockquotesRevealAsCanonicalWholeBlocks() {
+    func testBlockquotesRevealText() {
         let m = model("> quoted words here")
-        XCTAssertEqual(m.blocks[0].kind, .wholeBlock)
-        XCTAssertNotNil(m.blocks[0].node)
-        XCTAssertEqual(m.countableCount, 1)
+        XCTAssertEqual(m.blocks[0].kind, .blockquote(depth: 1))
+        XCTAssertNil(m.blocks[0].node)
+        XCTAssertEqual(joinedText(m.blocks[0]), "quoted words here")
+        XCTAssertEqual(m.countableCount, 3)
+    }
+
+    func testTaskListsRevealItems() {
+        let m = model("- [x] done\n- [ ] todo")
+        XCTAssertEqual(m.blocks[0].kind, .listItem(marker: "☑ ", depth: 0))
+        XCTAssertEqual(m.blocks[1].kind, .listItem(marker: "☐ ", depth: 0))
     }
 
     func testLinkAtomCarriesURL() {

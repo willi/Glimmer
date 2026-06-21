@@ -100,7 +100,9 @@ final class RevealDriverTests: XCTestCase {
 
     func testTrailOpacityRampsToFullWithDistance() {
         let halfway = RevealTrail.opacity(revealIndex: 4, revealedCount: 10, isComplete: false)
-        XCTAssertEqual(halfway, RevealTrail.floor + (1 - RevealTrail.floor) * (6 / RevealTrail.length), accuracy: 1e-9)
+        let progress = 6 / RevealTrail.length
+        let eased = 1 - pow(1 - progress, 2)
+        XCTAssertEqual(halfway, RevealTrail.floor + (1 - RevealTrail.floor) * eased, accuracy: 1e-9)
         XCTAssertEqual(RevealTrail.opacity(revealIndex: 1, revealedCount: 100, isComplete: false), 1.0)
     }
 

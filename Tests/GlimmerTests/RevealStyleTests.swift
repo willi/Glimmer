@@ -32,6 +32,13 @@ final class RevealStyleTests: XCTestCase {
         XCTAssertEqual(RevealStyle.trailFade.treatment, .trailFade)
     }
 
+    func testSettledBlockRenderingRequiresFullyRevealedBlock() {
+        XCTAssertFalse(RevealTreatment.trailFade.shouldRenderSettledBlock(isFullyRevealed: false))
+        XCTAssertTrue(RevealTreatment.trailFade.shouldRenderSettledBlock(isFullyRevealed: true))
+        XCTAssertFalse(RevealTreatment.fade.shouldRenderSettledBlock(isFullyRevealed: false))
+        XCTAssertTrue(RevealTreatment.fade.shouldRenderSettledBlock(isFullyRevealed: true))
+    }
+
     func testCadencesMatchSpecAppendix() {
         XCTAssertEqual(RevealStyle.typewriter.nominalUnitIntervalMs, 18...42)
         XCTAssertEqual(RevealStyle.llmTokens.nominalUnitIntervalMs, 60...140)
@@ -43,13 +50,12 @@ final class RevealStyleTests: XCTestCase {
         XCTAssertEqual(RevealStyle.tracking.nominalUnitIntervalMs, 100...100)
         XCTAssertEqual(RevealStyle.diffusion.nominalUnitIntervalMs, 22...40)
         XCTAssertEqual(RevealStyle.waveGlow.nominalUnitIntervalMs, 105...105)
-        XCTAssertEqual(RevealStyle.trailFade.nominalUnitIntervalMs, 24...36)
+        XCTAssertEqual(RevealStyle.trailFade.nominalUnitIntervalMs, 75...75)
     }
 
     func testUnitsPerStep() {
         XCTAssertEqual(RevealStyle.llmTokens.unitsPerStep, 1...4)
-        XCTAssertEqual(RevealStyle.trailFade.unitsPerStep, 1...2)
-        for style in RevealStyle.allCases where style != .llmTokens && style != .trailFade {
+        for style in RevealStyle.allCases where style != .llmTokens {
             XCTAssertEqual(style.unitsPerStep, 1...1, "\(style) should unlock one unit per step")
         }
     }

@@ -5,6 +5,7 @@ import SwiftUI
 /// path IS the settled path (spec settle strategy A).
 public struct GlimmerRevealView: View {
     private let markdown: String
+    private let completeMarkdown: String?
     private let reveal: RevealConfiguration
     private let configuration: MarkdownConfiguration
     private let onLinkTap: ((URL) -> Void)?
@@ -25,14 +26,20 @@ public struct GlimmerRevealView: View {
     ///   view a new identity (e.g. `.id(style)`). Hosts that re-mount the view
     ///   (lazy lists, optimistic→final message swaps) should set `revealID` so
     ///   progress resumes instead of replaying (spec R6).
+    /// - Parameter completeMarkdown: Optional complete final markdown to parse
+    ///   for the reveal while `markdown` may remain a streaming prefix. Use
+    ///   this when the final text is known up front so incomplete inline syntax
+    ///   does not appear during the animation.
     public init(
         markdown: String,
+        completeMarkdown: String? = nil,
         reveal: RevealConfiguration,
         configuration: MarkdownConfiguration = .default,
         onLinkTap: ((URL) -> Void)? = nil,
         onComplete: (() -> Void)? = nil
     ) {
         self.markdown = markdown
+        self.completeMarkdown = completeMarkdown
         self.reveal = reveal
         self.configuration = configuration
         self.onLinkTap = onLinkTap
@@ -62,7 +69,7 @@ public struct GlimmerRevealView: View {
         // Opt-out/settled rendering uses Glimmer's canonical interactive block
         // tree so the final animated state is identical to normal markdown.
         InteractiveMarkdownContent(
-            blocks: Glimmer.parse(markdown, configuration: configuration),
+            blocks: Glimmer.parse(revealMarkdown, configuration: configuration),
             configuration: configuration,
             onLinkTap: handleLink,
             onMentionTap: nil,
@@ -75,9 +82,13 @@ public struct GlimmerRevealView: View {
         reduceMotion ? .plain : reveal.style.treatment
     }
 
+    private var revealMarkdown: String {
+        completeMarkdown ?? markdown
+    }
+
     private var revealBody: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            ForEach(visibleBlocks, id: \.viewIdentity) { block in
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(visibleBlocks.enumerated()), id: \.element.viewIdentity) { index, block in
                 RevealBlockView(
                     block: block,
                     revealedCount: driver.revealedCount,
@@ -88,12 +99,13 @@ public struct GlimmerRevealView: View {
                     configuration: configuration,
                     onLinkTap: handleLink
                 )
+                .padding(.bottom, spacingAfterVisibleBlock(at: index))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(fullPlainText))
-        .onChange(of: markdown, initial: true) { _, newValue in
+        .onChange(of: revealMarkdown, initial: true) { _, newValue in
             rebuild(newValue)
         }
         .onChange(of: reveal.isStreaming) { _, streaming in
@@ -116,6 +128,17 @@ public struct GlimmerRevealView: View {
     private func showCaret(for block: RevealBlock) -> Bool {
         guard effectiveTreatment == .caret, !driver.isComplete else { return false }
         return block.id == visibleBlocks.last?.id
+    }
+
+    private func spacingAfterVisibleBlock(at index: Int) -> CGFloat {
+        let nextIndex = visibleBlocks.index(after: index)
+        guard visibleBlocks.indices.contains(nextIndex) else { return 0 }
+
+        let current = visibleBlocks[index].kind
+        let next = visibleBlocks[nextIndex].kind
+        if current.isListItem && next.isListItem { return 8 }
+        if current.isBlockquote && next.isBlockquote { return 12 }
+        return 16
     }
 
     private func rebuild(_ markdown: String) {
@@ -147,6 +170,18 @@ public struct GlimmerRevealView: View {
         } else {
             openURL(url)
         }
+    }
+}
+
+private extension BlockKindTag {
+    var isListItem: Bool {
+        if case .listItem = self { return true }
+        return false
+    }
+
+    var isBlockquote: Bool {
+        if case .blockquote = self { return true }
+        return false
     }
 }
 
@@ -186,7 +221,7 @@ struct RevealBlockView: View {
     let onLinkTap: (URL) -> Void
 
     var body: some View {
-        if isFullyRevealed, let node = block.node {
+        if shouldRenderSettledBlock, let node = block.node {
             InteractiveBlockView(
                 block: node,
                 configuration: configuration,
@@ -205,9 +240,11 @@ struct RevealBlockView: View {
         case .paragraph, .heading:
             inlineContent
         case .listItem(let marker, let depth):
-            HStack(alignment: .top, spacing: 0) {
-                Text(marker).font(configuration.baseFont)
+            HStack(alignment: .top, spacing: 8) {
+                listMarker(marker, depth: depth)
                 inlineContent
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.leading, CGFloat(depth) * 16)
         case .blockquote(let depth):
@@ -216,8 +253,37 @@ struct RevealBlockView: View {
                     .fill(configuration.blockquoteColor)
                     .frame(width: 4)
                 inlineContent
+                    .foregroundColor(configuration.blockquoteColor)
             }
-            .padding(.leading, CGFloat(max(0, depth - 1)) * 16)
+            .padding(.leading, 8 + CGFloat(max(0, depth - 1)) * 16)
+        case .codeBlock(let language):
+            VStack(alignment: .leading, spacing: 8) {
+                if let language, !language.isEmpty {
+                    Text(language)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    inlineContent
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(configuration.codeBackgroundColor)
+                        .cornerRadius(8)
+                }
+            }
+        case .table:
+            ScrollView(.horizontal, showsIndicators: false) {
+                inlineContent
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+            }
+            .background(configuration.codeBackgroundColor.opacity(0.55))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+            )
+            .cornerRadius(8)
         case .wholeBlock:
             if let node = block.node {
                 // Whole-unit blocks use the same renderer as settled markdown,
@@ -235,12 +301,36 @@ struct RevealBlockView: View {
         }
     }
 
+    @ViewBuilder private func listMarker(_ marker: String, depth: Int) -> some View {
+        let trimmedMarker = marker.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedMarker == "☑" || trimmedMarker == "☐" {
+            let isChecked = trimmedMarker == "☑"
+            Image(systemName: isChecked ? "checkmark.square.fill" : "square")
+                .foregroundColor(isChecked ? .green : .secondary)
+                .font(.system(size: 16))
+        } else {
+            let ordered = trimmedMarker.last == "." || trimmedMarker.last == ")"
+            Text(trimmedMarker)
+                .font(ListFormatting.listMarkerFont(
+                    ordered: ordered,
+                    depth: depth,
+                    baseFont: configuration.baseFont
+                ))
+                .foregroundColor(.primary)
+                .frame(minWidth: 20, alignment: ordered ? .trailing : .center)
+        }
+    }
+
     private var isFullyRevealed: Bool {
         !block.words.contains { word in
             word.atoms.contains { atom in
                 atom.isCountable && atom.revealIndex > revealedCount
             }
         }
+    }
+
+    private var shouldRenderSettledBlock: Bool {
+        treatment.shouldRenderSettledBlock(isFullyRevealed: isFullyRevealed)
     }
 
     @ViewBuilder private var inlineContent: some View {
@@ -253,7 +343,7 @@ struct RevealBlockView: View {
             RevealTrailTextView(
                 block: block,
                 revealedCount: revealedCount,
-                isComplete: isComplete,
+                isComplete: isComplete || isFullyRevealed,
                 onLinkTap: onLinkTap
             )
         default:
@@ -353,11 +443,10 @@ struct RevealPrefixTextView: View {
     }
 }
 
-/// Trail-fade style (Gemini-like): words stream in fast behind a soft opacity
-/// gradient — the word at the reveal cursor is faintest and brightens as the
-/// cursor sweeps past. Opacity is a pure function of distance from the cursor
-/// (`RevealTrail`), so the whole trail brightens smoothly on every tick and
-/// snaps to full opacity on completion.
+/// Trail-fade style (Gemini-like): words stream in quickly with a short,
+/// readable opacity falloff at the leading edge. Opacity is a pure function
+/// of distance from the cursor (`RevealTrail`) so simulator Slow Animations
+/// does not stretch the effect into a long ghosted fade.
 struct RevealTrailTextView: View {
     let block: RevealBlock
     let revealedCount: Int
@@ -370,8 +459,9 @@ struct RevealTrailTextView: View {
                 wordView(word)
             }
         }
-        .animation(.easeOut(duration: 0.4), value: revealedCount)
-        .animation(.easeOut(duration: 0.6), value: isComplete)
+        .transaction { transaction in
+            transaction.animation = nil
+        }
     }
 
     private var visibleWords: [RevealWord] {

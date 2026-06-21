@@ -49,21 +49,23 @@ enum RevealPacing {
 }
 
 /// Opacity ramp for the trail-fade style: instead of a binary reveal
-/// boundary, the newest words sit near-invisible and brighten as the cursor
-/// moves past them — a soft gradient sweeping in reading order.
+/// boundary, the newest words are readable and the last few words behind the
+/// cursor quickly settle to full opacity — a short Gemini-like leading edge.
 enum RevealTrail {
     /// Number of countable units the fade ramp spans.
-    static let length: Double = 12
+    static let length: Double = 7
     /// Opacity of the newest revealed word.
-    static let floor: Double = 0.08
+    static let floor: Double = 0.34
 
     /// Opacity for an atom at `revealIndex` given the current cursor.
-    /// 1 for settled words, `floor` at the cursor, linear ramp between;
+    /// 1 for settled words, `floor` at the cursor, eased ramp between;
     /// everything snaps to 1 once the reveal completes.
     static func opacity(revealIndex: Int, revealedCount: Int, isComplete: Bool) -> Double {
         guard !isComplete else { return 1 }
         let distance = Double(revealedCount - revealIndex)
         guard distance >= 0 else { return 0 }
-        return min(1, floor + (1 - floor) * (distance / length))
+        let progress = min(1, distance / length)
+        let eased = 1 - pow(1 - progress, 2)
+        return floor + (1 - floor) * eased
     }
 }
