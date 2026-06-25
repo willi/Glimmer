@@ -129,19 +129,26 @@ public struct RevealConfiguration: Sendable, Equatable {
     public var revealID: String?
     /// One-shot mode: scale intervals so the whole reveal fits in N seconds (spec R9).
     public var demoDurationCap: Double?
+    /// A small one-shot delay before the very first unit is revealed (only for a
+    /// fresh run, i.e. nothing resumed). Lets a little buffer accumulate so the
+    /// reveal eases in instead of unlocking the first word the instant the first
+    /// token lands — makes a live stream feel smoother. Default 0 (no delay).
+    public var startDelay: Double
 
     public init(
         style: RevealStyle = .wordFade,
         catchUp: CatchUpPolicy = .adaptive(maxLagSeconds: 1.5),
         isStreaming: Bool = false,
         revealID: String? = nil,
-        demoDurationCap: Double? = nil
+        demoDurationCap: Double? = nil,
+        startDelay: Double = 0
     ) {
         self.style = style
         self.catchUp = catchUp
         self.isStreaming = isStreaming
         self.revealID = revealID
         self.demoDurationCap = demoDurationCap
+        self.startDelay = max(0, startDelay)
     }
 }
 

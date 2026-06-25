@@ -24,6 +24,8 @@ public final class RevealDriver {
     private let catchUp: CatchUpPolicy
     private let revealID: String?
     private let demoDurationCap: Double?
+    private let startDelay: Double
+    private var didApplyStartDelay = false
     private let store: RevealProgressStore
     private let sleep: @MainActor (Double) async throws -> Void
 
@@ -44,11 +46,14 @@ public final class RevealDriver {
         self.isStreaming = configuration.isStreaming
         self.revealID = configuration.revealID
         self.demoDurationCap = configuration.demoDurationCap
+        self.startDelay = configuration.startDelay
         self.store = store
         self.sleep = sleep
         let resumed = store.resume(configuration.revealID)
         self.revealedCount = resumed
         self.animateFrom = resumed
+        // Nothing to ease in if we resumed mid-reveal across a remount.
+        self.didApplyStartDelay = resumed > 0
     }
 
     /// Feeds the driver the current buffer state. Call on every parse.
@@ -67,6 +72,16 @@ public final class RevealDriver {
     public func run() async {
         while !Task.isCancelled {
             if revealedCount < totalCountable {
+                // Ease the reveal in: wait once before unlocking the first unit so
+                // a little buffer accumulates instead of revealing the instant the
+                // first token arrives.
+                if !didApplyStartDelay {
+                    didApplyStartDelay = true
+                    if startDelay > 0 {
+                        do { try await sleep(startDelay) } catch { return }
+                        guard !Task.isCancelled else { return }
+                    }
+                }
                 let behind = totalCountable - revealedCount
                 if RevealPacing.shouldSnap(style: style, behind: behind, catchUp: catchUp) {
                     revealedCount = totalCountable
