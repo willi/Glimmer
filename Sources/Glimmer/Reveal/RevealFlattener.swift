@@ -54,6 +54,10 @@ struct RevealFlattener {
     private mutating func run(_ nodes: [MarkdownParser.BlockNode]) -> RevealModel {
         if !configuration.markdownExtensions.isEmpty {
             renderer.beginSession(configuration: configuration)
+            // Reveal-only: make this private renderer instance emit avatar markers
+            // (instead of `[Image: avatar]`) for the rendered-inline path. The flag
+            // defaults to false, so export / settled renderers are unaffected.
+            renderer.emitAvatarMarkers = true
         }
         blocks.reserveCapacity(nodes.count)
         emit(nodes)
@@ -444,6 +448,9 @@ struct RevealFlattener {
             if token.isWhitespace {
                 if wordCount > 0 { pendingSpace = token.slice }
             } else {
+                // Line-slide renders each line as a single Text; inline avatars are
+                // not drawn there, so drop the marker char rather than show a box.
+                if token.slice.avatarImageURL != nil { continue }
                 if let space = pendingSpace {
                     line.append(space)
                     pendingSpace = nil
@@ -478,6 +485,9 @@ struct RevealFlattener {
             if token.isWhitespace {
                 if wordCount > 0 { pendingSpace = token.content }
             } else {
+                // Line-slide renders each line as a single Text; inline avatars are
+                // not drawn there, so drop the marker char rather than show a box.
+                if token.content.avatarImageURL != nil { continue }
                 if let space = pendingSpace {
                     line.append(space)
                     pendingSpace = nil
@@ -697,7 +707,15 @@ struct RevealFlattener {
                 append(children, context: context.withLink(url))
 
             case .image(let url, let alt, _):
-                appendText("[Image: \(alt.isEmpty ? url.absoluteString : alt)]", context: context, style: .inlineContextOnly)
+                if alt.caseInsensitiveCompare("avatar") == .orderedSame {
+                    // Avatars reveal as a real circular avatar view, not `[Image: avatar]`
+                    // text. Emit a standalone, countable marker token (flushed so it is
+                    // never merged with adjacent text) carrying the image URL and the
+                    // wrapping link (if any) for tap-through.
+                    appendAvatarMarker(imageURL: url, linkURL: context.linkURL)
+                } else {
+                    appendText("[Image: \(alt.isEmpty ? url.absoluteString : alt)]", context: context, style: .inlineContextOnly)
+                }
 
             case .autolink(let url, _, let originalText):
                 appendText(originalText, context: context.withLink(url), style: .inlineContextOnly)
@@ -866,6 +884,19 @@ struct RevealFlattener {
             }
         }
 
+        /// Appends an inline-avatar marker as its own non-whitespace (countable)
+        /// token, flushing any pending text first so the marker is a standalone
+        /// reveal "word" regardless of adjacent characters.
+        private mutating func appendAvatarMarker(imageURL: URL, linkURL: URL?) {
+            flushCurrentToken()
+            tokens.append(InlineRevealToken(
+                content: .glimmerAvatarMarker(imageURL: imageURL, linkURL: linkURL),
+                isWhitespace: false,
+                containsNewline: false,
+                url: linkURL
+            ))
+        }
+
         private func attributedText(
             _ text: String,
             context: InlineRenderContext,
@@ -878,7 +909,9 @@ struct RevealFlattener {
                 var linkAttributes = AttributeContainer()
                 linkAttributes.link = linkURL
                 linkAttributes.foregroundColor = configuration.linkColor
-                linkAttributes.underlineStyle = .single
+                if configuration.linkUnderline {
+                    linkAttributes.underlineStyle = .single
+                }
                 value.mergeAttributes(linkAttributes)
             }
 

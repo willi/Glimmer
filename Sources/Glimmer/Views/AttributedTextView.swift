@@ -26,21 +26,32 @@ class ImageLoadingManager: ObservableObject {
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
             if let image = UIImage(data: data) {
-                // Calculate proper size maintaining aspect ratio
-                let targetHeight = attachment.bounds.height > 0 ? attachment.bounds.height : 75
-                let aspectRatio = image.size.width / image.size.height
-                let scaledSize = CGSize(
-                    width: targetHeight * aspectRatio,
-                    height: targetHeight
-                )
-                
-                // Update attachment with loaded image
-                attachment.image = image
-                attachment.bounds = CGRect(
-                    origin: attachment.bounds.origin,
-                    size: scaledSize
-                )
-                
+                if attachment.isAvatar {
+                    // Avatar sentinel: render a circular, center-cropped image sized to
+                    // the surrounding line height (bounds were set in createImageAttachment).
+                    let diameter = attachment.bounds.height > 0 ? attachment.bounds.height : 20
+                    attachment.image = ImageLoadingManager.circularImage(from: image, diameter: diameter)
+                    attachment.bounds = CGRect(
+                        origin: attachment.bounds.origin,
+                        size: CGSize(width: diameter, height: diameter)
+                    )
+                } else {
+                    // Calculate proper size maintaining aspect ratio
+                    let targetHeight = attachment.bounds.height > 0 ? attachment.bounds.height : 75
+                    let aspectRatio = image.size.width / image.size.height
+                    let scaledSize = CGSize(
+                        width: targetHeight * aspectRatio,
+                        height: targetHeight
+                    )
+
+                    // Update attachment with loaded image
+                    attachment.image = image
+                    attachment.bounds = CGRect(
+                        origin: attachment.bounds.origin,
+                        size: scaledSize
+                    )
+                }
+
                 // Store reference and trigger update
                 attachments[url] = attachment
                 loadedImages.insert(url)
@@ -81,8 +92,30 @@ class ImageLoadingManager: ObservableObject {
             UIColor.systemRed.set()
             icon.draw(in: iconRect)
         }
-        
+
         return UIGraphicsGetImageFromCurrentImageContext()
+    }
+
+    /// Produces a circular, center-cropped (aspect-fill) image of the given diameter.
+    /// Used for the `avatar` sentinel so inline avatars render like a round emoji.
+    static func circularImage(from image: UIImage, diameter: CGFloat) -> UIImage {
+        let side = max(diameter, 1)
+        let canvas = CGSize(width: side, height: side)
+        let renderer = UIGraphicsImageRenderer(size: canvas, format: .preferred())
+        return renderer.image { _ in
+            UIBezierPath(ovalIn: CGRect(origin: .zero, size: canvas)).addClip()
+            // Aspect-fill the source into the square so the circle is fully covered.
+            let aspect = image.size.height > 0 ? image.size.width / image.size.height : 1
+            var drawRect = CGRect(origin: .zero, size: canvas)
+            if aspect > 1 {
+                let scaledWidth = side * aspect
+                drawRect = CGRect(x: (side - scaledWidth) / 2, y: 0, width: scaledWidth, height: side)
+            } else if aspect < 1 {
+                let scaledHeight = side / aspect
+                drawRect = CGRect(x: 0, y: (side - scaledHeight) / 2, width: side, height: scaledHeight)
+            }
+            image.draw(in: drawRect)
+        }
     }
 }
 
@@ -92,14 +125,18 @@ struct AttributedTextView: View {
     let configuration: MarkdownConfiguration
     let baseFont: Font?
     let onImageTap: ((URL, String) -> Void)?
+    /// Called when a tapped attachment is wrapped in a link (e.g. a linked avatar);
+    /// receives the link target rather than the image URL. Defaults to `nil`.
+    var onLinkTap: ((URL) -> Void)? = nil
     @StateObject private var imageLoader = ImageLoadingManager()
-    
+
     var body: some View {
         AttributedTextViewRepresentable(
             nodes: nodes,
             configuration: configuration,
             baseFont: baseFont,
             onImageTap: onImageTap,
+            onLinkTap: onLinkTap,
             imageLoader: imageLoader,
             refreshTrigger: imageLoader.loadedImages.count + imageLoader.failedImages.count
         )
@@ -112,6 +149,7 @@ private struct AttributedTextViewRepresentable: UIViewRepresentable {
     let configuration: MarkdownConfiguration
     let baseFont: Font?
     let onImageTap: ((URL, String) -> Void)?
+    let onLinkTap: ((URL) -> Void)?
     let imageLoader: ImageLoadingManager
     let refreshTrigger: Int
     
@@ -135,8 +173,8 @@ private struct AttributedTextViewRepresentable: UIViewRepresentable {
         textView.setContentHuggingPriority(.defaultLow, for: .vertical)
         textView.setContentCompressionResistancePriority(.required, for: .vertical)
         
-        // Set up tap gesture for images
-        if onImageTap != nil {
+        // Set up tap gesture for images / linked attachments
+        if onImageTap != nil || onLinkTap != nil {
             let tapGesture = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
             textView.addGestureRecognizer(tapGesture)
         }
@@ -182,20 +220,33 @@ private struct AttributedTextViewRepresentable: UIViewRepresentable {
         }
         
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
-            guard let textView = gesture.view as? UITextView,
-                  let onImageTap = parent.onImageTap else { return }
-            
+            guard let textView = gesture.view as? UITextView else { return }
+
             let location = gesture.location(in: textView)
             let position = textView.closestPosition(to: location) ?? textView.beginningOfDocument
             let offset = textView.offset(from: textView.beginningOfDocument, to: position)
-            
-            // Check if we tapped on an image attachment
-            if offset < textView.attributedText.length {
-                let attributes = textView.attributedText.attributes(at: offset, effectiveRange: nil)
-                if let attachment = attributes[.attachment] as? ImageTextAttachment {
-                    onImageTap(attachment.imageURL, attachment.altText)
-                }
+
+            guard offset < textView.attributedText.length else { return }
+            let attributes = textView.attributedText.attributes(at: offset, effectiveRange: nil)
+
+            // Any link target (a text link OR a linked image such as an avatar
+            // `[![avatar](img)](href)`) opens its destination — the whole run is
+            // tappable, not just the image glyph.
+            if let onLinkTap = parent.onLinkTap,
+               let linkURL = Coordinator.linkURL(from: attributes[.link]) {
+                onLinkTap(linkURL)
+                return
             }
+            // A bare (non-linked) image attachment falls back to the image handler.
+            if let attachment = attributes[.attachment] as? ImageTextAttachment {
+                parent.onImageTap?(attachment.imageURL, attachment.altText)
+            }
+        }
+
+        private static func linkURL(from value: Any?) -> URL? {
+            if let url = value as? URL { return url }
+            if let string = value as? String { return URL(string: string) }
+            return nil
         }
         
         func textViewDidChange(_ textView: UITextView) {
@@ -209,7 +260,11 @@ private struct AttributedTextViewRepresentable: UIViewRepresentable {
 class ImageTextAttachment: NSTextAttachment, @unchecked Sendable {
     let imageURL: URL
     let altText: String
-    
+
+    /// `true` when this is the host's avatar sentinel (`alt == "avatar"`, case-insensitive).
+    /// Avatar attachments render small, circular, and baseline-aligned like an inline emoji.
+    var isAvatar: Bool { altText.caseInsensitiveCompare("avatar") == .orderedSame }
+
     init(imageURL: URL, altText: String, image: UIImage?) {
         self.imageURL = imageURL
         self.altText = altText
@@ -317,9 +372,19 @@ struct InlineImageRenderer {
             for child in children {
                 content.append(renderNode(child))
             }
-            content.addAttribute(.link, value: url, range: NSRange(location: 0, length: content.length))
-            content.addAttribute(.foregroundColor, value: UIColor.systemBlue, range: NSRange(location: 0, length: content.length))
-            content.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: NSRange(location: 0, length: content.length))
+            let fullRange = NSRange(location: 0, length: content.length)
+            // The link target is carried over the whole range (including any image
+            // attachment) so a tap on a linked avatar can resolve it.
+            content.addAttribute(.link, value: url, range: fullRange)
+            // Decorate text portions only — skip image attachments (e.g. a linked
+            // avatar) so they render like an inline emoji, not as underlined blue text.
+            content.enumerateAttribute(.attachment, in: fullRange, options: []) { value, range, _ in
+                guard value == nil else { return }
+                content.addAttribute(.foregroundColor, value: UIColor.systemBlue, range: range)
+                if configuration.linkUnderline {
+                    content.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: range)
+                }
+            }
             return content
             
         case .image(let url, let alt, _):
@@ -332,12 +397,14 @@ struct InlineImageRenderer {
             return attachmentString
             
         case .autolink(let url, _, let originalText):
-            let attributes: [NSAttributedString.Key: Any] = [
+            var attributes: [NSAttributedString.Key: Any] = [
                 .link: url,
                 .font: baseFont,
-                .foregroundColor: UIColor.systemBlue,
-                .underlineStyle: NSUnderlineStyle.single.rawValue
+                .foregroundColor: UIColor.systemBlue
             ]
+            if configuration.linkUnderline {
+                attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+            }
             return NSAttributedString(string: originalText, attributes: attributes)
             
         case .html(let content):
@@ -435,39 +502,55 @@ struct InlineImageRenderer {
             return existing
         }
         
-        // Determine image size based on URL patterns
-        let urlString = url.absoluteString
-        var imageSize = CGSize(width: 20, height: 20) // Default inline size
-        
-        // Check for size patterns in URL
-        if urlString.contains("/75/") || urlString.contains("/75x") {
-            imageSize = CGSize(width: 75, height: 75)
-        } else if urlString.contains("/50/") || urlString.contains("/50x") {
-            imageSize = CGSize(width: 50, height: 50)
-        } else if urlString.contains("/30/") || urlString.contains("/30x") {
-            imageSize = CGSize(width: 30, height: 30)
-        } else if urlString.contains("/20/") || urlString.contains("/20x") {
-            imageSize = CGSize(width: 20, height: 20)
-        } else if urlString.contains("/40/") || urlString.contains("/40x") {
-            imageSize = CGSize(width: 40, height: 40)
+        // Avatar sentinel (`alt == "avatar"`): a small, circular, baseline-aligned
+        // image sized to ~1em (the base font's line height), like an inline emoji.
+        let isAvatar = alt.caseInsensitiveCompare("avatar") == .orderedSame
+
+        var imageSize: CGSize
+        if isAvatar {
+            let side = baseFont.lineHeight
+            imageSize = CGSize(width: side, height: side)
+        } else {
+            // Determine image size based on URL patterns
+            let urlString = url.absoluteString
+            imageSize = CGSize(width: 20, height: 20) // Default inline size
+
+            // Check for size patterns in URL
+            if urlString.contains("/75/") || urlString.contains("/75x") {
+                imageSize = CGSize(width: 75, height: 75)
+            } else if urlString.contains("/50/") || urlString.contains("/50x") {
+                imageSize = CGSize(width: 50, height: 50)
+            } else if urlString.contains("/30/") || urlString.contains("/30x") {
+                imageSize = CGSize(width: 30, height: 30)
+            } else if urlString.contains("/20/") || urlString.contains("/20x") {
+                imageSize = CGSize(width: 20, height: 20)
+            } else if urlString.contains("/40/") || urlString.contains("/40x") {
+                imageSize = CGSize(width: 40, height: 40)
+            }
+
+            // Don't scale down too much - keep images visible
+            let maxHeight = max(baseFont.lineHeight * 2, imageSize.height)
+            if imageSize.height > maxHeight {
+                let scale = maxHeight / imageSize.height
+                imageSize = CGSize(width: imageSize.width * scale, height: maxHeight)
+            }
         }
-        
-        // Don't scale down too much - keep images visible
-        let maxHeight = max(baseFont.lineHeight * 2, imageSize.height)
-        if imageSize.height > maxHeight {
-            let scale = maxHeight / imageSize.height
-            imageSize = CGSize(width: imageSize.width * scale, height: maxHeight)
-        }
-        
-        // Create placeholder image
-        let placeholder = createPlaceholderImage(size: imageSize)
-        
+
+        // Create placeholder image (circular for avatars)
+        let placeholder = createPlaceholderImage(size: imageSize, circular: isAvatar)
+
         // Create the attachment with proper bounds for inline display
         let attachment = ImageTextAttachment(imageURL: url, altText: alt, image: placeholder)
-        
-        // Set bounds to align with text baseline
-        // Calculate y-offset to center image with text line
-        let yOffset = -(imageSize.height - baseFont.capHeight) / 2
+
+        // Set bounds to align with text baseline.
+        let yOffset: CGFloat
+        if isAvatar {
+            // Sit on the baseline like an emoji (mirrors web's vertical-align: -0.15em).
+            yOffset = -baseFont.pointSize * 0.15
+        } else {
+            // Calculate y-offset to center image with text line
+            yOffset = -(imageSize.height - baseFont.capHeight) / 2
+        }
         attachment.bounds = CGRect(origin: CGPoint(x: 0, y: yOffset), size: imageSize)
         
         // Start async image loading if we have an image loader
@@ -480,15 +563,17 @@ struct InlineImageRenderer {
         return attachment
     }
     
-    private func createPlaceholderImage(size: CGSize, isLoading: Bool = true) -> UIImage {
+    private func createPlaceholderImage(size: CGSize, isLoading: Bool = true, circular: Bool = false) -> UIImage {
         UIGraphicsBeginImageContextWithOptions(size, false, UIScreen.main.scale)
         defer { UIGraphicsEndImageContext() }
-        
+
         let context = UIGraphicsGetCurrentContext()
-        
-        // Subtle background with rounded corners
+
+        // Subtle background (circular for avatars, rounded rect otherwise)
         let rect = CGRect(origin: .zero, size: size)
-        let path = UIBezierPath(roundedRect: rect, cornerRadius: min(6, size.width * 0.12))
+        let path = circular
+            ? UIBezierPath(ovalIn: rect)
+            : UIBezierPath(roundedRect: rect, cornerRadius: min(6, size.width * 0.12))
         
         // Use different colors based on state
         if isLoading {

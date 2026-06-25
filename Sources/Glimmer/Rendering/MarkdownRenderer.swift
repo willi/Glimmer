@@ -22,6 +22,13 @@ public struct MarkdownRenderer {
     private var cachedCodeInlineAttrs: AttributeContainer?
     private var suppressNestedRenderCaching = false
 
+    /// Reveal-only: when true, inline images with `alt == "avatar"` render as a
+    /// single avatar-marker character (`AttributedString.glimmerAvatarMarker`)
+    /// instead of `[Image: avatar]` text, and inline rendering bypasses the
+    /// shared inline cache so markers never leak into export / settled output.
+    /// Defaults to false; only the reveal flattener's private renderer sets it.
+    var emitAvatarMarkers = false
+
     // MARK: - Render Cache
     private final class RCNode: @unchecked Sendable {
         let key: String
@@ -580,7 +587,9 @@ public struct MarkdownRenderer {
             var container = AttributeContainer()
             container.link = url
             container.foregroundColor = configuration.linkColor
-            container.underlineStyle = .single
+            if configuration.linkUnderline {
+                container.underlineStyle = .single
+            }
             return InlineRenderContext(
                 baseFont: baseFont,
                 forcedFont: forcedFont,
@@ -614,6 +623,12 @@ public struct MarkdownRenderer {
         configuration: MarkdownConfiguration,
         baseFont: Font? = nil
     ) -> AttributedString {
+        guard !emitAvatarMarkers else {
+            // Marker output carries a custom attribute and is reveal-only: never
+            // read from or write to the shared inline cache.
+            return renderInlinesUncached(nodes, configuration: configuration, baseFont: baseFont)
+        }
+
         guard !suppressNestedRenderCaching,
               configuration.enableRenderCaching,
               sessionStyleKey != nil else {
@@ -781,6 +796,11 @@ public struct MarkdownRenderer {
             )
 
         case .image(let url, let alt, _):
+            if emitAvatarMarkers, alt.caseInsensitiveCompare("avatar") == .orderedSame {
+                // Force the non-coalesced path so the avatar marker can carry its
+                // custom attribute (the coalesced planner only handles plain text).
+                return false
+            }
             appendTextSegment(
                 "[Image: \(alt.isEmpty ? url.absoluteString : alt)]",
                 style: .inlineContextOnly,
@@ -974,10 +994,20 @@ public struct MarkdownRenderer {
             )
 
         case .image(let url, let alt, _):
-            var image = AttributedString("[Image: \(alt.isEmpty ? url.absoluteString : alt)]")
-            applyLinkContext(&image, context: context, configuration: configuration)
-            applyInlineContext(&image, context: context)
-            result.append(image)
+            if emitAvatarMarkers, alt.caseInsensitiveCompare("avatar") == .orderedSame {
+                // Reveal-only: render avatars as a tappable circular avatar view, so
+                // emit the marker char carrying the image URL plus the wrapping link
+                // (`applyLinkContext` adds `.link`, which keeps the marker its own word
+                // and lets the reveal renderer resolve the tap target).
+                var marker = AttributedString.glimmerAvatarMarker(imageURL: url, linkURL: nil)
+                applyLinkContext(&marker, context: context, configuration: configuration)
+                result.append(marker)
+            } else {
+                var image = AttributedString("[Image: \(alt.isEmpty ? url.absoluteString : alt)]")
+                applyLinkContext(&image, context: context, configuration: configuration)
+                applyInlineContext(&image, context: context)
+                result.append(image)
+            }
 
         case .autolink(let url, _, let originalText):
             var autolink = styledLink(AttributedString(originalText), url: url, configuration: configuration)
@@ -1117,7 +1147,9 @@ public struct MarkdownRenderer {
         var container = AttributeContainer()
         container.link = url
         container.foregroundColor = configuration.linkColor
-        container.underlineStyle = .single
+        if configuration.linkUnderline {
+            container.underlineStyle = .single
+        }
         return container
     }
 

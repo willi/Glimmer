@@ -789,12 +789,35 @@ struct MarkdownTableCell: View {
     }
 }
 
+/// Recursively reports whether any inline node is an image, descending into the
+/// children of links, emphasis, strong, and strikethrough. A linked image such as
+/// `[![avatar](img)](href)` is a top-level `.link` whose `.image` child must route
+/// to the inline-image (NSTextAttachment) renderer rather than degrading to literal
+/// `[Image: …]` text.
+private func inlineNodesContainImage(_ nodes: [MarkdownParser.InlineNode]) -> Bool {
+    nodes.contains { node in
+        switch node {
+        case .image:
+            return true
+        case let .link(_, _, children),
+             let .emphasis(children),
+             let .strong(children),
+             let .strikethrough(children):
+            return inlineNodesContainImage(children)
+        default:
+            return false
+        }
+    }
+}
+
 /// View that renders inline markdown elements
 struct MarkdownInlineView: View {
     let nodes: [MarkdownParser.InlineNode]
     let configuration: MarkdownConfiguration
     let baseFont: Font
-    
+
+    @Environment(\.openURL) private var openURL
+
     init(nodes: [MarkdownParser.InlineNode], configuration: MarkdownConfiguration, baseFont: Font? = nil) {
         self.nodes = nodes
         self.configuration = configuration
@@ -803,12 +826,9 @@ struct MarkdownInlineView: View {
     
     var body: some View {
         
-        // Check if we have any images
-        let hasImages = nodes.contains { node in
-            if case .image = node { return true }
-            return false
-        }
-        
+        // Check if we have any images (including images nested inside links/emphasis)
+        let hasImages = inlineNodesContainImage(nodes)
+
         if hasImages {
             // For content with images, we need a custom layout that properly handles inline flow
             createInlineContentWithImages()
@@ -826,7 +846,9 @@ struct MarkdownInlineView: View {
             nodes: nodes,
             configuration: configuration,
             baseFont: baseFont,
-            onImageTap: configuration.onImageTap
+            onImageTap: configuration.onImageTap,
+            // A tap on a linked attachment (e.g. a linked avatar) opens the link target.
+            onLinkTap: { openURL($0) }
         )
     }
     
@@ -1167,7 +1189,9 @@ struct MarkdownInlineView: View {
             }
             result.link = url
             result.foregroundColor = configuration.linkColor
-            result.underlineStyle = .single
+            if configuration.linkUnderline {
+                result.underlineStyle = .single
+            }
             return result
             
         case .image(let url, let alt, _):
@@ -1184,7 +1208,9 @@ struct MarkdownInlineView: View {
             text.font = baseFont
             text.link = url
             text.foregroundColor = configuration.linkColor
-            text.underlineStyle = .single
+            if configuration.linkUnderline {
+                text.underlineStyle = .single
+            }
             if isStrikethrough {
                 text.strikethroughStyle = .single
             }
@@ -1241,6 +1267,14 @@ struct MarkdownInlineView: View {
             return attrs
 
         case .extensionInline(let node):
+            // Render through the registered extension (mirrors MarkdownRenderer);
+            // only fall back to the raw literal when no handler claims the node.
+            if var rendered = configuration.markdownExtensions
+                .first(where: { $0.id == node.namespace })?
+                .renderInline(node) {
+                if rendered.font == nil { rendered.font = baseFont }
+                return rendered
+            }
             var text = AttributedString(node.literal)
             text.font = baseFont
             text.foregroundColor = configuration.textColor
@@ -1802,11 +1836,9 @@ struct InteractiveInlineView: View {
     
     var body: some View {
         // Check if we have any images that need special rendering
-        let hasImages = nodes.contains { node in
-            if case .image = node { return true }
-            return false
-        }
-        
+        // (including images nested inside links/emphasis, e.g. a linked avatar).
+        let hasImages = inlineNodesContainImage(nodes)
+
         if hasImages {
             // For content with images, we need to render them as actual views
             createInlineContent()
@@ -1833,7 +1865,10 @@ struct InteractiveInlineView: View {
             baseFont: baseFont,
             onImageTap: { url, alt in
                 onLinkTap(url)
-            }
+            },
+            // A tap on a linked attachment (e.g. a linked avatar) routes through the
+            // same handler as text links, opening the link target (the profile).
+            onLinkTap: { _ = handleURL($0) }
         )
     }
     
@@ -2074,7 +2109,9 @@ struct InteractiveInlineView: View {
             }
             result.link = url
             result.foregroundColor = configuration.linkColor
-            result.underlineStyle = .single
+            if configuration.linkUnderline {
+                result.underlineStyle = .single
+            }
             return result
             
         case .image(_, let alt, _):
@@ -2091,7 +2128,9 @@ struct InteractiveInlineView: View {
             var text = AttributedString(originalText)
             text.link = url
             text.foregroundColor = configuration.linkColor
-            text.underlineStyle = .single
+            if configuration.linkUnderline {
+                text.underlineStyle = .single
+            }
             applyStyles(&text, isBold: isBold, isItalic: isItalic, isStrikethrough: isStrikethrough)
             return text
             
@@ -2152,6 +2191,15 @@ struct InteractiveInlineView: View {
             return attrs
 
         case .extensionInline(let node):
+            // Render through the registered extension (mirrors MarkdownRenderer),
+            // keeping its own color + .link; only fall back to the raw literal when
+            // no handler claims the node.
+            if var rendered = configuration.markdownExtensions
+                .first(where: { $0.id == node.namespace })?
+                .renderInline(node) {
+                applyStyles(&rendered, isBold: isBold, isItalic: isItalic, isStrikethrough: isStrikethrough)
+                return rendered
+            }
             var text = AttributedString(node.literal)
             applyStyles(&text, isBold: isBold, isItalic: isItalic, isStrikethrough: isStrikethrough)
             text.foregroundColor = configuration.textColor

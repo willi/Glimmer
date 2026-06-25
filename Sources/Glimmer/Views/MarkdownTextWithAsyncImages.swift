@@ -62,7 +62,7 @@ public struct MarkdownTextWithAsyncImages: View {
         case .link(_, _, let children):
             return children.reduce(Text("")) { $0 + renderNode($1) }
                 .foregroundColor(configuration.linkColor)
-                .underline()
+                .underline(configuration.linkUnderline)
             
         case .image(let url, let alt, _):
             let urlString = url.absoluteString
@@ -99,7 +99,7 @@ public struct MarkdownTextWithAsyncImages: View {
         case .autolink(_, _, let originalText):
             return Text(originalText)
                 .foregroundColor(configuration.linkColor)
-                .underline()
+                .underline(configuration.linkUnderline)
             
         case .mention(let username):
             return Text("@\(username)")

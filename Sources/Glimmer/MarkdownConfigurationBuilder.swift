@@ -24,6 +24,7 @@ public class MarkdownConfigurationBuilder {
         .title3.bold(), .headline, .subheadline.bold()
     ]
     private var linkColor: Color = .blue
+    private var linkUnderline = true
     private var mentionColor: Color = .mint
     private var issueColor: Color = .blue
     private var codeBackgroundColor: Color = Color.secondary.opacity(0.1)
@@ -185,7 +186,13 @@ public class MarkdownConfigurationBuilder {
         linkColor = color
         return self
     }
-    
+
+    @discardableResult
+    public func setLinkUnderline(_ enabled: Bool) -> Self {
+        linkUnderline = enabled
+        return self
+    }
+
     @discardableResult
     public func setMentionColor(_ color: Color) -> Self {
         mentionColor = color
@@ -346,6 +353,7 @@ public class MarkdownConfigurationBuilder {
             codeFont: codeFont,
             headingFonts: headingFonts,
             linkColor: linkColor,
+            linkUnderline: linkUnderline,
             mentionColor: mentionColor,
             issueColor: issueColor,
             codeBackgroundColor: codeBackgroundColor,

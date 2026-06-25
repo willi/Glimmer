@@ -77,6 +77,11 @@ public struct MarkdownConfiguration: Hashable, Sendable {
     /// Default: `.blue`.
     public var linkColor: Color
 
+    /// Whether tappable links are underlined. When `false`, links keep their
+    /// `linkColor` but render without an underline (e.g. web-parity mentions).
+    /// Default: `true`.
+    public var linkUnderline: Bool
+
     /// The color for tappable @mentions.
     /// Default: `.mint`.
     public var mentionColor: Color
@@ -172,6 +177,7 @@ public struct MarkdownConfiguration: Hashable, Sendable {
         ],
         textColor: Color = .primary,
         linkColor: Color = .blue,
+        linkUnderline: Bool = true,
         mentionColor: Color = .mint,
         issueColor: Color = .blue,
         codeBackgroundColor: Color = Color.secondary.opacity(0.1),
@@ -205,6 +211,7 @@ public struct MarkdownConfiguration: Hashable, Sendable {
         self.headingFonts = headingFonts
         self.textColor = textColor
         self.linkColor = linkColor
+        self.linkUnderline = linkUnderline
         self.mentionColor = mentionColor
         self.issueColor = issueColor
         self.codeBackgroundColor = codeBackgroundColor
@@ -246,6 +253,7 @@ public struct MarkdownConfiguration: Hashable, Sendable {
         hasher.combine(headingFonts)
         hasher.combine(textColor)
         hasher.combine(linkColor)
+        hasher.combine(linkUnderline)
         hasher.combine(mentionColor)
         hasher.combine(issueColor)
         hasher.combine(codeBackgroundColor)
@@ -283,6 +291,7 @@ public struct MarkdownConfiguration: Hashable, Sendable {
                lhs.headingFonts == rhs.headingFonts &&
                lhs.textColor == rhs.textColor &&
                lhs.linkColor == rhs.linkColor &&
+               lhs.linkUnderline == rhs.linkUnderline &&
                lhs.mentionColor == rhs.mentionColor &&
                lhs.issueColor == rhs.issueColor &&
                lhs.codeBackgroundColor == rhs.codeBackgroundColor &&

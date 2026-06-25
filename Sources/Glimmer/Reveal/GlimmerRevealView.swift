@@ -151,7 +151,11 @@ public struct GlimmerRevealView: View {
         // Cache VoiceOver text so it isn't recomputed on every body evaluation (Fix 6).
         fullPlainText = model.blocks.flatMap(\.words).flatMap(\.atoms).reduce(into: "") { acc, atom in
             switch atom.kind {
-            case .text(let s), .space(let s): acc += String(s.characters)
+            case .text(let s):
+                // Avatar markers are a single Object-Replacement-Character; omit
+                // them from VoiceOver text rather than read out a `￼` box.
+                if s.avatarImageURL == nil { acc += String(s.characters) }
+            case .space(let s): acc += String(s.characters)
             case .lineBreak: acc += "\n"
             case .block: break
             }
@@ -338,12 +342,13 @@ struct RevealBlockView: View {
         case .plain, .caret:
             RevealPrefixTextView(block: block, revealedCount: revealedCount, showCaret: showCaret)
         case .scramble:
-            RevealScrambleTextView(block: block, revealedCount: revealedCount)
+            RevealScrambleTextView(block: block, revealedCount: revealedCount, configuration: configuration)
         case .trailFade:
             RevealTrailTextView(
                 block: block,
                 revealedCount: revealedCount,
                 isComplete: isComplete || isFullyRevealed,
+                configuration: configuration,
                 onLinkTap: onLinkTap
             )
         default:
@@ -361,6 +366,8 @@ struct RevealBlockView: View {
         }
     }
 
+    private var avatarBaseFont: Font { block.avatarBaseFont(configuration) }
+
     @ViewBuilder private func wordView(_ word: RevealWord) -> some View {
         if word.isLineBreak {
             Color.clear
@@ -372,15 +379,11 @@ struct RevealBlockView: View {
             }
         } else {
             if let url = word.atoms.first?.url {
+                // The HStack-level tap already opens the link, so the avatar atom
+                // inside renders without its own tap handler to avoid a double tap.
                 HStack(spacing: 0) {
                     ForEach(word.atoms.filter { $0.revealIndex <= revealedCount }) { atom in
-                        if case .text(let s) = atom.kind {
-                            RevealUnitView(
-                                attributed: s,
-                                treatment: treatment,
-                                animate: atom.revealIndex > animateFrom
-                            )
-                        }
+                        atomView(atom)
                     }
                 }
                 .accessibilityHidden(true)
@@ -389,16 +392,24 @@ struct RevealBlockView: View {
             } else {
                 HStack(spacing: 0) {
                     ForEach(word.atoms.filter { $0.revealIndex <= revealedCount }) { atom in
-                        if case .text(let s) = atom.kind {
-                            RevealUnitView(
-                                attributed: s,
-                                treatment: treatment,
-                                animate: atom.revealIndex > animateFrom
-                            )
-                        }
+                        atomView(atom)
                     }
                 }
                 .accessibilityHidden(true)
+            }
+        }
+    }
+
+    @ViewBuilder private func atomView(_ atom: RevealAtom) -> some View {
+        if case .text(let s) = atom.kind {
+            if let imageURL = s.avatarImageURL {
+                RevealInlineAvatarAtomView(imageURL: imageURL, baseFont: avatarBaseFont)
+            } else {
+                RevealUnitView(
+                    attributed: s,
+                    treatment: treatment,
+                    animate: atom.revealIndex > animateFrom
+                )
             }
         }
     }
@@ -415,7 +426,11 @@ struct RevealPrefixTextView: View {
         var result = AttributedString()
         for atom in block.words.flatMap(\.atoms) where atom.revealIndex <= revealedCount {
             switch atom.kind {
-            case .text(let s), .space(let s): result.append(s)
+            case .text(let s):
+                // Plain/caret treatments don't render inline avatars; drop the
+                // marker char so no replacement-character box appears.
+                if s.avatarImageURL == nil { result.append(s) }
+            case .space(let s): result.append(s)
             case .lineBreak: result.append(AttributedString("\n"))
             case .block: break
             }
@@ -451,6 +466,7 @@ struct RevealTrailTextView: View {
     let block: RevealBlock
     let revealedCount: Int
     let isComplete: Bool
+    let configuration: MarkdownConfiguration
     let onLinkTap: (URL) -> Void
 
     var body: some View {
@@ -485,7 +501,15 @@ struct RevealTrailTextView: View {
                 revealedCount: revealedCount,
                 isComplete: isComplete
             )
-            if let url = word.atoms[0].url {
+            if let imageURL = s.avatarImageURL {
+                RevealInlineAvatarAtomView(
+                    imageURL: imageURL,
+                    baseFont: block.avatarBaseFont(configuration),
+                    opacity: opacity,
+                    linkURL: word.atoms[0].url,
+                    onLinkTap: onLinkTap
+                )
+            } else if let url = word.atoms[0].url {
                 Text(s)
                     .opacity(opacity)
                     .accessibilityHidden(true)
@@ -506,6 +530,7 @@ struct RevealTrailTextView: View {
 struct RevealScrambleTextView: View {
     let block: RevealBlock
     let revealedCount: Int
+    let configuration: MarkdownConfiguration
 
     private static let glyphs: [Character] = Array(
         "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz0123456789@#%&*+=<>/?"
@@ -547,7 +572,13 @@ struct RevealScrambleTextView: View {
                     HStack(spacing: 0) {
                         ForEach(word.atoms) { atom in
                             if case .text(let s) = atom.kind {
-                                if atom.revealIndex <= revealedCount {
+                                if let imageURL = s.avatarImageURL {
+                                    RevealInlineAvatarAtomView(
+                                        imageURL: imageURL,
+                                        baseFont: block.avatarBaseFont(configuration),
+                                        opacity: atom.revealIndex <= revealedCount ? 1 : 0.7
+                                    )
+                                } else if atom.revealIndex <= revealedCount {
                                     Text(s)
                                 } else {
                                     Text(transform(s)).opacity(0.7)
