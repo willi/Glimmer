@@ -212,6 +212,48 @@ public extension GlimmerRevealView {
     }
 }
 
+// MARK: - Word/space merging (spacing parity for the flow paths)
+
+/// Whether a word's following space can be folded into its own `Text`: a single
+/// non-avatar text atom (word granularity). Avatars and character-granularity
+/// (multi-atom) words keep their separate space atoms.
+func isMergeableTextWord(_ word: RevealWord) -> Bool {
+    guard !word.isWhitespace, !word.isLineBreak, word.atoms.count == 1,
+          case .text(let s) = word.atoms[0].kind
+    else { return false }
+    return s.avatarImageURL == nil
+}
+
+/// Pairs each mergeable word with the following whitespace word's space so the
+/// space is shaped inside the word's Text (its native advance) instead of as an
+/// isolated, separately-measured Text atom placed edge-to-edge — which widens
+/// inter-word gaps versus the settled contiguous render. The merged space also
+/// hangs at a line wrap, matching TextKit's trailing-whitespace handling.
+/// Returns `base` with `trailing` appended (or `base` unchanged when nil).
+func appending(_ trailing: AttributedString?, to base: AttributedString) -> AttributedString {
+    guard let trailing else { return base }
+    var copy = base
+    copy.append(trailing)
+    return copy
+}
+
+func mergedRevealWords(_ words: [RevealWord]) -> [(word: RevealWord, trailingSpace: AttributedString?)] {
+    var result: [(word: RevealWord, trailingSpace: AttributedString?)] = []
+    var index = 0
+    while index < words.count {
+        let word = words[index]
+        if isMergeableTextWord(word), index + 1 < words.count, words[index + 1].isWhitespace,
+           case .space(let space)? = words[index + 1].atoms.first?.kind {
+            result.append((word, space))
+            index += 2
+        } else {
+            result.append((word, nil))
+            index += 1
+        }
+    }
+    return result
+}
+
 // MARK: - Per-block reveal rendering
 
 struct RevealBlockView: View {
@@ -353,8 +395,8 @@ struct RevealBlockView: View {
             )
         default:
             RevealFlowLayout(lineSpacing: 2) {
-                ForEach(visibleWords) { word in
-                    wordView(word)
+                ForEach(mergedRevealWords(visibleWords), id: \.word.id) { item in
+                    wordView(item.word, trailingSpace: item.trailingSpace)
                 }
             }
         }
@@ -368,7 +410,7 @@ struct RevealBlockView: View {
 
     private var avatarBaseFont: Font { block.avatarBaseFont(configuration) }
 
-    @ViewBuilder private func wordView(_ word: RevealWord) -> some View {
+    @ViewBuilder private func wordView(_ word: RevealWord, trailingSpace: AttributedString? = nil) -> some View {
         if word.isLineBreak {
             Color.clear
                 .frame(width: 0, height: 0)
@@ -378,12 +420,13 @@ struct RevealBlockView: View {
                 Text(s)
             }
         } else {
+            let lastAtomID = word.atoms.last?.id
             if let url = word.atoms.first?.url {
                 // The HStack-level tap already opens the link, so the avatar atom
                 // inside renders without its own tap handler to avoid a double tap.
                 HStack(spacing: 0) {
                     ForEach(word.atoms.filter { $0.revealIndex <= revealedCount }) { atom in
-                        atomView(atom)
+                        atomView(atom, trailingSpace: atom.id == lastAtomID ? trailingSpace : nil)
                     }
                 }
                 .accessibilityHidden(true)
@@ -392,7 +435,7 @@ struct RevealBlockView: View {
             } else {
                 HStack(spacing: 0) {
                     ForEach(word.atoms.filter { $0.revealIndex <= revealedCount }) { atom in
-                        atomView(atom)
+                        atomView(atom, trailingSpace: atom.id == lastAtomID ? trailingSpace : nil)
                     }
                 }
                 .accessibilityHidden(true)
@@ -400,13 +443,13 @@ struct RevealBlockView: View {
         }
     }
 
-    @ViewBuilder private func atomView(_ atom: RevealAtom) -> some View {
+    @ViewBuilder private func atomView(_ atom: RevealAtom, trailingSpace: AttributedString? = nil) -> some View {
         if case .text(let s) = atom.kind {
             if let imageURL = s.avatarImageURL {
                 RevealInlineAvatarAtomView(imageURL: imageURL, baseFont: avatarBaseFont)
             } else {
                 RevealUnitView(
-                    attributed: s,
+                    attributed: appending(trailingSpace, to: s),
                     treatment: treatment,
                     animate: atom.revealIndex > animateFrom
                 )
@@ -486,8 +529,8 @@ struct RevealTrailTextView: View {
                     })
             } else {
                 RevealFlowLayout(lineSpacing: 2) {
-                    ForEach(visibleWords) { word in
-                        wordView(word)
+                    ForEach(mergedRevealWords(visibleWords), id: \.word.id) { item in
+                        wordView(item.word, trailingSpace: item.trailingSpace)
                     }
                 }
             }
@@ -568,7 +611,7 @@ struct RevealTrailTextView: View {
         }
     }
 
-    @ViewBuilder private func wordView(_ word: RevealWord) -> some View {
+    @ViewBuilder private func wordView(_ word: RevealWord, trailingSpace: AttributedString? = nil) -> some View {
         if word.isLineBreak {
             Color.clear
                 .frame(width: 0, height: 0)
@@ -592,13 +635,13 @@ struct RevealTrailTextView: View {
                     onLinkTap: onLinkTap
                 )
             } else if let url = word.atoms[0].url {
-                Text(s)
+                Text(appending(trailingSpace, to: s))
                     .opacity(opacity)
                     .accessibilityHidden(true)
                     .contentShape(Rectangle())
                     .onTapGesture { onLinkTap(url) }
             } else {
-                Text(s)
+                Text(appending(trailingSpace, to: s))
                     .opacity(opacity)
                     .accessibilityHidden(true)
             }
