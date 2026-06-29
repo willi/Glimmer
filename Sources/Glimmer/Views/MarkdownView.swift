@@ -545,14 +545,36 @@ struct MarkdownBlockView: View {
     }
 }
 
+/// Remembers the last measured table container width so a re-mounted
+/// `MarkdownTableView` renders at the wrapped, correct height immediately. When
+/// a `LazyVStack` recycles a chat cell on a navigation push/pop, the table's
+/// `availableWidth` @State would otherwise reset to 0 — columns don't wrap, the
+/// table is briefly short, then grows when the width is re-measured, shifting
+/// the surrounding scroll position (a visible "jump" when returning to a chat
+/// that contains a table). Seeding from the last width avoids that.
+private enum MarkdownTableLayoutCache {
+    nonisolated(unsafe) static var lastWidth: CGFloat = 0
+}
+
 /// View that renders markdown tables with wrapping cell widths.
 struct MarkdownTableView: View {
     let header: [MarkdownParser.TableCell]
     let rows: [[MarkdownParser.TableCell]]
     let configuration: MarkdownConfiguration
 
-    @State private var availableWidth: CGFloat = 0
+    @State private var availableWidth: CGFloat
     @State private var contentHeight: CGFloat = 0
+
+    init(
+        header: [MarkdownParser.TableCell],
+        rows: [[MarkdownParser.TableCell]],
+        configuration: MarkdownConfiguration
+    ) {
+        self.header = header
+        self.rows = rows
+        self.configuration = configuration
+        _availableWidth = State(initialValue: MarkdownTableLayoutCache.lastWidth)
+    }
 
     var body: some View {
         let columnWidths = resolvedColumnWidths
@@ -603,8 +625,15 @@ struct MarkdownTableView: View {
         .onGeometryChange(for: CGFloat.self) { proxy in
             proxy.size.width
         } action: { newWidth in
-            if newWidth > 0 {
+            guard newWidth > 0 else { return }
+            MarkdownTableLayoutCache.lastWidth = newWidth
+            if abs(newWidth - availableWidth) > 0.5 {
                 availableWidth = newWidth
+                // Re-derive the height for the new width. Otherwise a stale seed
+                // (or the 0-width first frame) locks an over-tall height that
+                // never shrinks, because `.frame(height: contentHeight)` feeds
+                // back into the measured content height.
+                contentHeight = 0
             }
         }
     }
@@ -1531,8 +1560,30 @@ struct InteractiveMarkdownTableView: View {
     let onIssueTap: ((Int) -> Void)?
     let onFootnoteTap: ((String) -> Void)?
 
-    @State private var availableWidth: CGFloat = 0
+    @State private var availableWidth: CGFloat
     @State private var contentHeight: CGFloat = 0
+
+    init(
+        header: [MarkdownParser.TableCell],
+        rows: [[MarkdownParser.TableCell]],
+        configuration: MarkdownConfiguration,
+        onLinkTap: @escaping (URL) -> Void,
+        onMentionTap: ((String) -> Void)?,
+        onIssueTap: ((Int) -> Void)?,
+        onFootnoteTap: ((String) -> Void)?
+    ) {
+        self.header = header
+        self.rows = rows
+        self.configuration = configuration
+        self.onLinkTap = onLinkTap
+        self.onMentionTap = onMentionTap
+        self.onIssueTap = onIssueTap
+        self.onFootnoteTap = onFootnoteTap
+        // Seed from the last measured width so a LazyVStack re-mount (navigation
+        // push/pop) renders the wrapped, correct-height table immediately and
+        // doesn't shift the chat's scroll position. See MarkdownTableLayoutCache.
+        _availableWidth = State(initialValue: MarkdownTableLayoutCache.lastWidth)
+    }
 
     var body: some View {
         let columnWidths = resolvedColumnWidths
@@ -1591,8 +1642,15 @@ struct InteractiveMarkdownTableView: View {
         .onGeometryChange(for: CGFloat.self) { proxy in
             proxy.size.width
         } action: { newWidth in
-            if newWidth > 0 {
+            guard newWidth > 0 else { return }
+            MarkdownTableLayoutCache.lastWidth = newWidth
+            if abs(newWidth - availableWidth) > 0.5 {
                 availableWidth = newWidth
+                // Re-derive the height for the new width. Otherwise a stale seed
+                // (or the 0-width first frame) locks an over-tall height that
+                // never shrinks, because `.frame(height: contentHeight)` feeds
+                // back into the measured content height.
+                contentHeight = 0
             }
         }
     }
