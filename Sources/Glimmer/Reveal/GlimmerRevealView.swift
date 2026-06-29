@@ -470,14 +470,96 @@ struct RevealTrailTextView: View {
     let onLinkTap: (URL) -> Void
 
     var body: some View {
-        RevealFlowLayout(lineSpacing: 2) {
-            ForEach(visibleWords) { word in
-                wordView(word)
+        Group {
+            if useContiguousText {
+                // Render the revealed prefix as ONE native Text so inter-word
+                // spacing, wrapping and baseline are shaped contiguously by
+                // TextKit — identical to the settled render. (The per-word flow
+                // layout measures each word/space in isolation, which widens the
+                // gaps during the animation.) The trail fade is applied per word
+                // as a foreground-colour alpha instead of a per-view opacity.
+                Text(trailAttributedText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .environment(\.openURL, OpenURLAction { url in
+                        onLinkTap(url)
+                        return .handled
+                    })
+            } else {
+                RevealFlowLayout(lineSpacing: 2) {
+                    ForEach(visibleWords) { word in
+                        wordView(word)
+                    }
+                }
             }
         }
         .transaction { transaction in
             transaction.animation = nil
         }
+    }
+
+    /// Use the contiguous single-Text path for plain wrapping text blocks.
+    /// Blocks with inline avatars (which can't live inside a `Text`) and the
+    /// horizontally-scrolled code/table blocks keep the per-word flow layout.
+    private var useContiguousText: Bool {
+        guard !blockHasInlineAvatars else { return false }
+        switch block.kind {
+        case .paragraph, .heading, .listItem, .blockquote:
+            return true
+        case .codeBlock, .table, .wholeBlock:
+            return false
+        }
+    }
+
+    private var blockHasInlineAvatars: Bool {
+        block.words.contains { word in
+            word.atoms.contains { atom in
+                if case .text(let s) = atom.kind { return s.avatarImageURL != nil }
+                return false
+            }
+        }
+    }
+
+    /// The revealed prefix as one attributed string, each text run dimmed by its
+    /// word's trail opacity. Spaces and fully-settled words keep full opacity, so
+    /// once the reveal completes this equals the original styled string.
+    private var trailAttributedText: AttributedString {
+        var result = AttributedString()
+        for word in visibleWords {
+            if word.isLineBreak {
+                result.append(AttributedString("\n"))
+                continue
+            }
+            for atom in word.atoms where atom.revealIndex <= revealedCount {
+                switch atom.kind {
+                case .text(let s):
+                    let opacity = RevealTrail.opacity(
+                        revealIndex: atom.revealIndex,
+                        revealedCount: revealedCount,
+                        isComplete: isComplete
+                    )
+                    result.append(dimmed(s, opacity: opacity))
+                case .space(let s):
+                    result.append(s)
+                case .lineBreak:
+                    result.append(AttributedString("\n"))
+                case .block:
+                    break
+                }
+            }
+        }
+        return result
+    }
+
+    /// Multiplies each run's foreground alpha by `opacity`; returns the string
+    /// unchanged once it has settled (opacity 1).
+    private func dimmed(_ string: AttributedString, opacity: Double) -> AttributedString {
+        guard opacity < 1 else { return string }
+        var copy = string
+        for range in copy.runs.map(\.range) {
+            let base = copy[range].foregroundColor ?? configuration.textColor
+            copy[range].foregroundColor = base.opacity(opacity)
+        }
+        return copy
     }
 
     private var visibleWords: [RevealWord] {
