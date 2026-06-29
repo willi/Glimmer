@@ -70,6 +70,53 @@ final class ListTableParserTests: XCTestCase {
         XCTAssertEqual(secondItems.map(\.marker), ["*"])
     }
 
+    func testLooseOrderedListCoalescesIntoOneList() throws {
+        // A loose ordered list (items separated by blank lines) must parse as a
+        // single ordered list. Otherwise each item becomes its own single-item
+        // list and ordered numbering restarts at "1." for every item.
+        let blocks = MarkdownParser.parse("""
+        1. First
+
+        2. Second
+
+        3. Third
+        """)
+
+        let orderedLists = blocks.compactMap { block -> [MarkdownParser.ListItem]? in
+            if case .list(true, _, let items) = block { return items }
+            return nil
+        }
+        XCTAssertEqual(orderedLists.count, 1, "Expected one ordered list, got \(orderedLists.count)")
+        XCTAssertEqual(orderedLists.first?.map(\.marker), ["1.", "2.", "3."])
+
+        guard case .list(true, let tight, _) = try XCTUnwrap(blocks.first) else {
+            return XCTFail("Expected ordered list")
+        }
+        XCTAssertFalse(tight, "Blank-line-separated items make a loose list")
+    }
+
+    func testLooseListDoesNotStealTrailingParagraph() throws {
+        // The blank line(s) after the last item, plus the following paragraph,
+        // must remain a separate block (the subsequent-item loop rolls back past
+        // skipped blanks when no continuing marker follows).
+        let blocks = MarkdownParser.parse("""
+        1. First
+
+        2. Second
+
+        Not a list item.
+        """)
+
+        guard case .list(true, _, let items) = try XCTUnwrap(blocks.first) else {
+            return XCTFail("Expected ordered list first")
+        }
+        XCTAssertEqual(items.map(\.marker), ["1.", "2."])
+        XCTAssertTrue(
+            blocks.contains { if case .paragraph = $0 { return true } else { return false } },
+            "Trailing paragraph should survive as its own block"
+        )
+    }
+
     func testTableParsing() {
         let md = """
         | H1 | H2 |

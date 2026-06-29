@@ -1828,6 +1828,7 @@ public struct BlockParser {
         let marker = parsedMarker.marker
 
         var items: [MarkdownParser.ListItem] = []
+        var isTight = true
 
         // Parse first item
         let firstItemContent = parseListItemContent(
@@ -1842,6 +1843,17 @@ public struct BlockParser {
         // Parse subsequent items
         while !state.isAtEnd {
             let itemPositionIndex = state.currentIndex
+
+            // Skip blank lines between items so a LOOSE list (items separated by
+            // blank lines) coalesces into one list instead of splitting into a
+            // run of single-item lists (which would restart ordered numbering at
+            // 1 for every item). `itemPositionIndex` is captured BEFORE the skip
+            // so a non-continuing line rolls back past the blanks, leaving them
+            // for the following block.
+            var sawBlankLine = false
+            while state.advanceIfAtEmptyLine() {
+                sawBlankLine = true
+            }
 
             // Skip indent
             let itemIndent = skipListIndent(
@@ -1865,6 +1877,9 @@ public struct BlockParser {
                 break
             }
 
+            // A blank line between items makes the list loose.
+            if sawBlankLine { isTight = false }
+
             let itemContent = parseListItemContent(
                 &state,
                 indent: itemIndent,
@@ -1874,8 +1889,8 @@ public struct BlockParser {
             )
             items.append(itemContent)
         }
-        
-        return .list(ordered: isOrdered, tight: true, items: items)
+
+        return .list(ordered: isOrdered, tight: isTight, items: items)
     }
 
     private static func skipListIndent(
