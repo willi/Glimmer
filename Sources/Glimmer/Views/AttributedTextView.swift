@@ -311,8 +311,25 @@ struct InlineImageRenderer {
         paragraphStyle.alignment = .natural
         paragraphStyle.lineSpacing = 2
         result.addAttribute(.paragraphStyle, value: paragraphStyle, range: NSRange(location: 0, length: result.length))
+        applyTextRunSpacing(to: result)
         
         return result
+    }
+
+    private func applyTextRunSpacing(to result: NSMutableAttributedString) {
+        guard result.length > 0 else { return }
+
+        let fullRange = NSRange(location: 0, length: result.length)
+        var textRanges: [NSRange] = []
+        result.enumerateAttribute(.attachment, in: fullRange, options: []) { value, range, _ in
+            if value == nil {
+                textRanges.append(range)
+            }
+        }
+
+        for range in textRanges {
+            result.addAttribute(.kern, value: 0, range: range)
+        }
     }
     
     private func renderNode(_ node: MarkdownParser.InlineNode) -> NSAttributedString {
