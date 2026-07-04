@@ -117,6 +117,22 @@ final class ListTableParserTests: XCTestCase {
         )
     }
 
+    func testLooseListEndingInBlankLinesTerminates() throws {
+        let blocks = MarkdownParser.parse("""
+        1. First
+
+        2. Second
+
+        """)
+
+        XCTAssertEqual(blocks.count, 1)
+        guard case .list(true, let tight, let items) = try XCTUnwrap(blocks.first) else {
+            return XCTFail("Expected one ordered list")
+        }
+        XCTAssertFalse(tight, "Blank-line-separated items make a loose list")
+        XCTAssertEqual(items.map(\.marker), ["1.", "2."])
+    }
+
     func testTableParsing() {
         let md = """
         | H1 | H2 |

@@ -479,6 +479,8 @@ public struct ParserState {
     @discardableResult
     @inline(__always)
     mutating func advanceIfAtEmptyLine() -> Bool {
+        guard !isAtEnd else { return false }
+
         let utf8 = text.utf8
         let start = currentIndex
         var index = start
@@ -504,6 +506,7 @@ public struct ParserState {
 
     @discardableResult
     mutating func advanceIfAtEmptyLineBySeparateScanForTesting() -> Bool {
+        guard !isAtEnd else { return false }
         guard isAtEmptyLine() else { return false }
         advanceLine()
         return true
