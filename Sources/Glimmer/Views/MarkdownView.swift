@@ -711,7 +711,7 @@ struct MarkdownTableCell: View {
                     }
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 4)
+                .padding(.vertical, 6)
             } else {
                 MarkdownInlineView(
                     nodes: cell.content,
@@ -722,10 +722,13 @@ struct MarkdownTableCell: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .multilineTextAlignment(textAlignment(for: cell.alignment))
                 .padding(.horizontal, 12)
-                .padding(.vertical, 4)
+                .padding(.vertical, 6)
             }
         }
         .frame(width: width, alignment: alignment(for: cell.alignment))
+        // The clear ZStack layer may fill the row for border drawing, but must
+        // not make the Grid distribute all available parent height among rows.
+        .gridCellUnsizedAxes(.vertical)
         .clipped() // Ensure content doesn't overflow bounds
         .overlay(
             GeometryReader { geometry in
@@ -802,10 +805,10 @@ struct MarkdownTableCell: View {
     
     private func alignment(for tableAlignment: MarkdownParser.TableAlignment) -> Alignment {
         switch tableAlignment {
-        case .left: return .leading
-        case .center: return .center
-        case .right: return .trailing
-        case .none: return .leading
+        case .left: return .topLeading
+        case .center: return .top
+        case .right: return .topTrailing
+        case .none: return .topLeading
         }
     }
     
@@ -1751,7 +1754,7 @@ struct InteractiveTableCell: View {
                     }
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 4)
+                .padding(.vertical, 6)
             } else {
                 InteractiveInlineView(
                     nodes: cell.content,
@@ -1766,10 +1769,11 @@ struct InteractiveTableCell: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .multilineTextAlignment(textAlignment(for: cell.alignment))
                 .padding(.horizontal, 12)
-                .padding(.vertical, 4)
+                .padding(.vertical, 6)
             }
         }
         .frame(width: width, alignment: alignment(for: cell.alignment))
+        .gridCellUnsizedAxes(.vertical)
         .clipped() // Ensure content doesn't overflow bounds
         .overlay(
             GeometryReader { geometry in
@@ -1846,10 +1850,10 @@ struct InteractiveTableCell: View {
     
     private func alignment(for tableAlignment: MarkdownParser.TableAlignment) -> Alignment {
         switch tableAlignment {
-        case .left: return .leading
-        case .center: return .center
-        case .right: return .trailing
-        case .none: return .leading
+        case .left: return .topLeading
+        case .center: return .top
+        case .right: return .topTrailing
+        case .none: return .topLeading
         }
     }
     

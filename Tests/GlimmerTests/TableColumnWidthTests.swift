@@ -168,6 +168,47 @@ final class TableColumnWidthTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testTableRowsStayContentSizedAcrossParentHeights() throws {
+        let markdown = """
+        | Check | Result |
+        | --- | --- |
+        | Template headings | 22 ✓ |
+        | Member responses across 21 panel templates | 63 (21 × 3) ✓ |
+        """
+        let blocks = MarkdownParser.parse(markdown, configuration: .github)
+        guard case .table(let header, let rows) = blocks.first else {
+            return XCTFail("Expected a parsed audit table")
+        }
+
+        let parentHeights: [CGFloat] = [320, 844]
+        let plainHeights = parentHeights.map { parentHeight in
+            horizontalScrollViewMetrics(
+                MarkdownTableView(header: header, rows: rows, configuration: .github),
+                width: 320,
+                parentHeight: parentHeight
+            )
+        }
+        let interactiveHeights = parentHeights.map { parentHeight in
+            horizontalScrollViewMetrics(
+                InteractiveMarkdownTableView(
+                    header: header,
+                    rows: rows,
+                    configuration: .github,
+                    onLinkTap: { _ in },
+                    onMentionTap: nil,
+                    onIssueTap: nil,
+                    onFootnoteTap: nil
+                ),
+                width: 320,
+                parentHeight: parentHeight
+            )
+        }
+
+        assertCompactContentDrivenHeights(plainHeights, renderer: "plain")
+        assertCompactContentDrivenHeights(interactiveHeights, renderer: "interactive")
+    }
+
     private func makeRepresentativeInlineMeasurementSamples() throws -> [[MarkdownParser.InlineNode]] {
         let exampleURL = try XCTUnwrap(URL(string: "https://example.com/docs/table"))
         return [
@@ -238,6 +279,74 @@ final class TableColumnWidthTests: XCTestCase {
             scrollView.bounds.height + 1,
             scrollView.contentSize.height,
             "The horizontal table scroll view must be tall enough for wrapped rows.",
+            file: file,
+            line: line
+        )
+    }
+
+    @MainActor
+    private func horizontalScrollViewMetrics<V: View>(
+        _ view: V,
+        width: CGFloat,
+        parentHeight: CGFloat,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> (boundsHeight: CGFloat, contentHeight: CGFloat) {
+        let host = UIHostingController(
+            rootView: view
+                .lineSpacing(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: width, height: parentHeight))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.frame = window.bounds
+
+        for _ in 0..<8 {
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
+
+        guard let scrollView = firstScrollView(in: host.view) else {
+            XCTFail("Expected table view to contain a horizontal UIScrollView.", file: file, line: line)
+            return (0, 0)
+        }
+        return (scrollView.bounds.height, scrollView.contentSize.height)
+    }
+
+    private func assertCompactContentDrivenHeights(
+        _ measurements: [(boundsHeight: CGFloat, contentHeight: CGFloat)],
+        renderer: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(measurements.count, 2, file: file, line: line)
+        guard measurements.count == 2 else { return }
+
+        for measurement in measurements {
+            XCTAssertGreaterThan(measurement.boundsHeight, 0, file: file, line: line)
+            XCTAssertLessThan(
+                measurement.boundsHeight,
+                180,
+                "The \(renderer) audit table should hug its rows instead of filling the parent.",
+                file: file,
+                line: line
+            )
+            XCTAssertGreaterThanOrEqual(
+                measurement.boundsHeight + 1,
+                measurement.contentHeight,
+                "The \(renderer) audit table must remain tall enough for wrapped rows.",
+                file: file,
+                line: line
+            )
+        }
+
+        XCTAssertEqual(
+            measurements[0].boundsHeight,
+            measurements[1].boundsHeight,
+            accuracy: 1,
+            "The \(renderer) table height must be content-driven, not parent-driven.",
             file: file,
             line: line
         )
