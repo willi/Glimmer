@@ -22,7 +22,7 @@ A high-performance, SwiftUI-native Markdown parser and renderer with full GitHub
 - ⚡ **Parallel Parsing**: Multi-threaded parsing for documents >10KB with configurable concurrency
 - 💾 **Advanced Caching**: Size-limited cache (50MB default) with TTL, LRU eviction, and memory pressure handling
 - 🌊 **Streaming Support**: Process markdown incrementally with `StreamingMarkdownView` for real-time updates
-- ✨ **Streaming Reveal**: Animated per-word/character reveal of streaming LLM output via `GlimmerRevealView` — 11 styles (typewriter, word fade, blur-in, shimmer, diffusion, trail fade, …) with adaptive catch-up and cross-remount resume
+- ✨ **Streaming Reveal**: Animated streaming LLM output via `GlimmerRevealView` — 12 styles including smooth trail, UIKit integration, adaptive catch-up, and cross-remount resume
 - 🔍 **Markdown Linting**: 20+ configurable lint rules with severity levels and fix suggestions
 - 📤 **Multiple Export Formats**: Export to HTML, Plain Text, or back to Markdown
 - 🎭 **Custom Renderers**: Protocol-based extensibility for custom output formats
@@ -338,13 +338,13 @@ let finalBlocks = parser.finish()
 
 ## Streaming Reveal
 
-`GlimmerRevealView` renders streaming LLM/chat output with per-unit animated reveal — fully styled markdown from the first frame (no raw `**` markers), settling into Glimmer's normal rendering with zero layout pop because the reveal path *is* the settled path.
+`GlimmerRevealView` renders streaming LLM/chat output with animated reveal and rich markdown styling. The `.smoothTrail` style eases newly revealed text into full opacity over time, so the trail continues settling even when the network pauses. It uses iOS 18's `TextRenderer` for continuous text layout.
 
 ```swift
 GlimmerRevealView(
     markdown: message.text,                        // grows as tokens stream in
     reveal: RevealConfiguration(
-        style: .wordFade,                          // any of the 11 styles
+        style: .smoothTrail,                     // any of the 12 styles
         catchUp: .adaptive(maxLagSeconds: 1.5),    // accelerate when the buffer races ahead
         isStreaming: message.isStreaming,
         revealID: message.turnID                   // resume across re-mounts (optimistic→final swaps)
@@ -366,9 +366,66 @@ GlimmerRevealView(
 GlimmerRevealView.demo("# Hello **world**", style: .shimmer, durationCap: 6)
 ```
 
-**Styles** (`RevealStyle`): `typewriter` (blinking caret), `llmTokens`, `wordFade`, `blurIn`, `lineSlide`, `charCascade`, `shimmer`, `tracking`, `diffusion` (scramble→lock), `waveGlow`, and `trailFade` (a soft opacity gradient trailing the cursor, like Gemini's reveal). Use `.none` to opt out entirely.
+**Styles** (`RevealStyle`): `typewriter` (blinking caret), `llmTokens`, `wordFade`, `blurIn`, `lineSlide`, `charCascade`, `shimmer`, `tracking`, `diffusion` (scramble→lock), `waveGlow`, `trailFade` (an opacity gradient based on distance behind the cursor), and `smoothTrail` (a time-based fade that settles during streaming pauses). Use `.none` to opt out entirely.
 
 The reveal cadence is clock-driven and decoupled from how fast text arrives; rich elements (code blocks, tables, images, blockquotes) reveal as whole units, links stay tappable, VoiceOver reads the full text, and Reduce Motion downgrades to a plain progressive reveal. For append-only streams, `GlimmerRevealView` uses an internal `RevealSession` that reuses completed parsed/flattened blocks and reparses only the current tail, falling back to the canonical full parse path for replacements or unsafe boundaries. Try every style in the demo app under **Advanced Demos → Streaming Reveal**.
+
+### UIKit: complete markdown
+
+`GlimmerRevealViewController` embeds the full markdown renderer inside a `UIHostingController`. It supports the same configuration, rich blocks, link handling, accessibility, and reveal styles as `GlimmerRevealView`.
+
+```swift
+// Keep this as a property of your UIKit screen.
+let revealController = GlimmerRevealViewController(
+    reveal: RevealConfiguration(
+        style: .smoothTrail,
+        isStreaming: true,
+        revealID: messageID
+    ),
+    configuration: .github,
+    onLinkTap: { url in /* handle navigation */ }
+)
+
+// Standard UIViewController containment; containerView has a constrained width.
+addChild(revealController)
+containerView.addSubview(revealController.view)
+revealController.view.translatesAutoresizingMaskIntoConstraints = false
+NSLayoutConstraint.activate([
+    revealController.view.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+    revealController.view.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+    revealController.view.topAnchor.constraint(equalTo: containerView.topAnchor),
+    revealController.view.bottomAnchor.constraint(equalTo: containerView.bottomAnchor)
+])
+revealController.didMove(toParent: self)
+
+// Pass the accumulated received markdown on the main actor for each update.
+revealController.update(markdown: receivedMarkdown, isStreaming: true)
+revealController.update(markdown: finalMarkdown, isStreaming: false)
+
+// Reuse for another message without rebuilding the controller hierarchy.
+revealController.reset(
+    reveal: RevealConfiguration(style: .smoothTrail, isStreaming: true, revealID: nextMessageID)
+)
+```
+
+The hosted view uses intrinsic content sizing for Auto Layout. Custom layouts can call `sizeThatFits(in:)` with a finite width. Updates preserve the reveal session; `reset` starts a new view identity and accepts a new style or message ID. Reusing a `revealID` resumes its saved progress. To replay that same message, clear it with `RevealProgressStore.shared.clear(messageID)` before resetting. The demo's **UIKit Markdown** mode exercises this API with actual streaming prefixes.
+
+### UIKit: native attributed text
+
+For an existing UIKit attributed-text pipeline, `GlimmerTrailTextView` is a native `UITextView` surface that applies a smooth time-based trail to received `NSAttributedString` content. It does not parse markdown or host SwiftUI.
+
+```swift
+let textView = GlimmerTrailTextView()
+textView.update(attributedText: receivedAttributedText, isStreaming: true)
+textView.update(attributedText: finalAttributedText, isStreaming: false)
+
+textView.finishImmediately() // Show all received text without waiting for the trail.
+textView.reset()             // Clear state before displaying another message.
+```
+
+Provide the complete accumulated attributed string with UIKit attributes (`UIFont`, `UIColor`, paragraph styles, and links) on each update. The text view exposes its revealed prefix through `attributedText` and keeps native link and selection behavior. Its animation uses TextKit 2; avoid reading the inherited `layoutManager` property, which switches UIKit to TextKit 1. Choose the controller for Glimmer's full markdown rendering, or the native text view when your app already owns text formatting.
+
+In **GlimmerDemo → Streaming Reveal**, select **SwiftUI**, **UIKit Markdown**, or **UIKit TextKit**. The native mode streams an attributed prose sample with a bold first sentence and a link. Every simulated stream includes a 900 ms producer pause so you can inspect trail settlement. For repeatable simulator capture, launch GlimmerDemo with `--reveal-demo --reveal-host=native --reveal-autoplay` (or `--reveal-host=uikit` for hosted markdown).
 
 ## Custom Renderers
 
@@ -463,6 +520,8 @@ Sources/Glimmer/
 │   └── MarkdownRenderer.swift
 ├── Reveal/
 │   ├── GlimmerRevealView.swift
+│   ├── GlimmerRevealViewController.swift
+│   ├── GlimmerTrailTextView.swift
 │   ├── RevealAtom.swift
 │   ├── RevealDriver.swift
 │   ├── RevealFlattener.swift
@@ -470,6 +529,8 @@ Sources/Glimmer/
 │   ├── RevealPacing.swift
 │   ├── RevealProgressStore.swift
 │   ├── RevealSession.swift
+│   ├── RevealSmoothTrail.swift
+│   ├── RevealSmoothTrailTextView.swift
 │   ├── RevealTokenization.swift
 │   ├── RevealTreatments.swift
 │   └── RevealTypes.swift

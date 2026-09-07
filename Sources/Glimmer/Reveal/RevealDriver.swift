@@ -17,6 +17,9 @@ public final class RevealDriver {
     /// mount and render settled, with no entrance animation (spec R6).
     public let animateFrom: Int
 
+    /// Temporal state is updated only on reveal/settlement, never every frame.
+    private(set) var smoothTrail = RevealSmoothTrailState()
+
     private var totalCountable = 0
     private var isStreaming: Bool
     private var hasReceivedUpdate = false
@@ -28,6 +31,7 @@ public final class RevealDriver {
     private var didApplyStartDelay = false
     private let store: RevealProgressStore
     private let sleep: @MainActor (Double) async throws -> Void
+    private let now: @MainActor () -> Double
 
     public convenience init(configuration: RevealConfiguration) {
         self.init(configuration: configuration, store: .shared) { seconds in
@@ -39,6 +43,7 @@ public final class RevealDriver {
     init(
         configuration: RevealConfiguration,
         store: RevealProgressStore,
+        now: @escaping @MainActor () -> Double = { ProcessInfo.processInfo.systemUptime },
         sleep: @escaping @MainActor (Double) async throws -> Void
     ) {
         self.style = configuration.style
@@ -49,9 +54,11 @@ public final class RevealDriver {
         self.startDelay = configuration.startDelay
         self.store = store
         self.sleep = sleep
+        self.now = now
         let resumed = store.resume(configuration.revealID)
         self.revealedCount = resumed
         self.animateFrom = resumed
+        self.smoothTrail.settleImmediately(through: resumed)
         // Nothing to ease in if we resumed mid-reveal across a remount.
         self.didApplyStartDelay = resumed > 0
     }
@@ -59,11 +66,15 @@ public final class RevealDriver {
     /// Feeds the driver the current buffer state. Call on every parse.
     public func update(totalCountable: Int, isStreaming: Bool) {
         hasReceivedUpdate = true
-        self.totalCountable = totalCountable
+        self.totalCountable = max(0, totalCountable)
         self.isStreaming = isStreaming
-        if revealedCount > totalCountable {
+        if isStreaming || revealedCount < self.totalCountable {
+            isComplete = false
+        }
+        if revealedCount > self.totalCountable {
             // Buffer was replaced with shorter content (non-append change).
-            revealedCount = totalCountable
+            revealedCount = self.totalCountable
+            smoothTrail.truncate(to: self.totalCountable)
         }
     }
 
@@ -71,6 +82,11 @@ public final class RevealDriver {
     /// the buffer is drained and streaming has ended.
     public func run() async {
         while !Task.isCancelled {
+            if style == .smoothTrail {
+                var settled = smoothTrail
+                settled.settle(at: now())
+                if settled != smoothTrail { smoothTrail = settled }
+            }
             if revealedCount < totalCountable {
                 // Ease the reveal in: wait once before unlocking the first unit so
                 // a little buffer accumulates instead of revealing the instant the
@@ -85,6 +101,7 @@ public final class RevealDriver {
                 let behind = totalCountable - revealedCount
                 if RevealPacing.shouldSnap(style: style, behind: behind, catchUp: catchUp) {
                     revealedCount = totalCountable
+                    smoothTrail.settleImmediately(through: revealedCount)
                 } else {
                     var interval = RevealPacing.intervalSeconds(
                         style: style, behind: behind, catchUp: catchUp, jitter: .random(in: 0..<1)
@@ -95,10 +112,18 @@ public final class RevealDriver {
                     do { try await sleep(interval) } catch { return }
                     guard !Task.isCancelled else { return }
                     let step = RevealPacing.step(style: style, jitter: .random(in: 0..<1))
+                    let previous = revealedCount
                     revealedCount = min(totalCountable, revealedCount + step)
+                    if style == .smoothTrail {
+                        smoothTrail.reveal(through: revealedCount, from: previous, at: now())
+                    }
                 }
                 store.record(revealedCount, for: revealID)
             } else if hasReceivedUpdate && !isStreaming {
+                if style == .smoothTrail, let deadline = smoothTrail.nextSettlement {
+                    do { try await sleep(max(0.001, deadline - now())) } catch { return }
+                    continue
+                }
                 // Never complete before the first buffer update — .task may start before the initial rebuild.
                 isComplete = true
                 return

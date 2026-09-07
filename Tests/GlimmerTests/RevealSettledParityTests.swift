@@ -15,6 +15,17 @@ final class RevealSettledParityTests: XCTestCase {
         }
     }
 
+    func testCompletedSmoothTrailMatchesSettledMarkdownLayout() {
+        for fixture in fixtures {
+            assertCompletedRevealMatchesSettledMarkdown(
+                fixture.markdown,
+                name: fixture.name,
+                configuration: fixture.configuration,
+                style: .smoothTrail
+            )
+        }
+    }
+
     func testCompletedRevealTablesUseSettledTableSizing() {
         let markdown = """
         | | On-page SEO | Technical SEO | Off-page SEO | Content SEO |
@@ -165,6 +176,7 @@ final class RevealSettledParityTests: XCTestCase {
         _ markdown: String,
         name: String,
         configuration: MarkdownConfiguration,
+        style: RevealStyle = .trailFade,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
@@ -175,7 +187,7 @@ final class RevealSettledParityTests: XCTestCase {
                 configuration: configuration
             )
         )
-        let revealed = hostCompletedReveal(markdown: markdown, style: .trailFade, configuration: configuration)
+        let revealed = hostCompletedReveal(markdown: markdown, style: style, configuration: configuration)
 
         pumpLayout(settled)
         pumpLayout(revealed)

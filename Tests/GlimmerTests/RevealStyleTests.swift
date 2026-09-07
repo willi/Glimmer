@@ -15,6 +15,7 @@ final class RevealStyleTests: XCTestCase {
         XCTAssertEqual(RevealStyle.tracking.granularity, .word)
         XCTAssertEqual(RevealStyle.waveGlow.granularity, .word)
         XCTAssertEqual(RevealStyle.trailFade.granularity, .word)
+        XCTAssertEqual(RevealStyle.smoothTrail.granularity, .word)
         XCTAssertEqual(RevealStyle.none.granularity, .word)
     }
 
@@ -30,6 +31,7 @@ final class RevealStyleTests: XCTestCase {
         XCTAssertEqual(RevealStyle.diffusion.treatment, .scramble)
         XCTAssertEqual(RevealStyle.waveGlow.treatment, .glow)
         XCTAssertEqual(RevealStyle.trailFade.treatment, .trailFade)
+        XCTAssertEqual(RevealStyle.smoothTrail.treatment, .smoothTrail)
     }
 
     func testSettledBlockRenderingRequiresFullyRevealedBlock() {

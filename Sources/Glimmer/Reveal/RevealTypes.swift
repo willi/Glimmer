@@ -11,6 +11,8 @@ public enum RevealTreatment: Sendable, Equatable {
     /// Soft opacity gradient trailing the reveal cursor (Gemini-like): the
     /// newest words are faintest and brighten as the cursor moves past.
     case trailFade
+    /// Continuous time-based fade that settles even when the producer pauses.
+    case smoothTrail
 }
 
 // MARK: - RevealStyle
@@ -33,6 +35,8 @@ public enum RevealStyle: String, CaseIterable, Identifiable, Sendable, Equatable
     case diffusion
     case waveGlow
     case trailFade
+    /// A continuous, softly fading edge with native text shaping and no movement.
+    case smoothTrail
 
     public var id: String { rawValue }
 
@@ -50,6 +54,7 @@ public enum RevealStyle: String, CaseIterable, Identifiable, Sendable, Equatable
         case .diffusion: "Diffusion"
         case .waveGlow: "Wave Glow"
         case .trailFade: "Trail Fade"
+        case .smoothTrail: "Smooth Trail"
         }
     }
 
@@ -57,7 +62,7 @@ public enum RevealStyle: String, CaseIterable, Identifiable, Sendable, Equatable
         switch self {
         case .typewriter, .llmTokens, .charCascade, .diffusion: .character
         case .lineSlide: .line
-        case .none, .wordFade, .blurIn, .shimmer, .tracking, .waveGlow, .trailFade: .word
+        case .none, .wordFade, .blurIn, .shimmer, .tracking, .waveGlow, .trailFade, .smoothTrail: .word
         }
     }
 
@@ -74,6 +79,7 @@ public enum RevealStyle: String, CaseIterable, Identifiable, Sendable, Equatable
         case .diffusion: .scramble
         case .waveGlow: .glow
         case .trailFade: .trailFade
+        case .smoothTrail: .smoothTrail
         }
     }
 
@@ -92,6 +98,7 @@ public enum RevealStyle: String, CaseIterable, Identifiable, Sendable, Equatable
         case .diffusion: 22...40
         case .waveGlow: 105...105
         case .trailFade: 75...75
+        case .smoothTrail: 45...45
         }
     }
 
@@ -100,7 +107,7 @@ public enum RevealStyle: String, CaseIterable, Identifiable, Sendable, Equatable
         switch self {
         case .llmTokens: 1...4
         case .none, .typewriter, .wordFade, .blurIn, .lineSlide,
-             .charCascade, .shimmer, .tracking, .diffusion, .waveGlow, .trailFade: 1...1
+             .charCascade, .shimmer, .tracking, .diffusion, .waveGlow, .trailFade, .smoothTrail: 1...1
         }
     }
 }

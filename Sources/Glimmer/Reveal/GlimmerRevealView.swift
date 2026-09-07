@@ -52,17 +52,31 @@ public struct GlimmerRevealView: View {
     }
 
     public var body: some View {
-        if shouldRenderSettledContent {
-            settledContent
-            .onAppear { fireCompletionOnce() }
-        } else {
-            revealBody
+        Group {
+            if shouldRenderSettledContent {
+                settledContent
+                    .onAppear { fireCompletionOnce() }
+            } else {
+                revealBody
+            }
+        }
+        .onChange(of: revealMarkdown, initial: true) { _, newValue in
+            if reveal.style != .none { rebuild(newValue) }
+        }
+        .onChange(of: reveal.isStreaming) { _, streaming in
+            driver.update(totalCountable: model.countableCount, isStreaming: streaming)
+        }
+        .task(id: driver.isComplete) {
+            guard reveal.style != .none, !driver.isComplete else { return }
+            await driver.run()
+            if driver.isComplete { fireCompletionOnce() }
         }
     }
 
     private var shouldRenderSettledContent: Bool {
         reveal.style == .none
-            || (!reveal.isStreaming && hasBuiltModel && driver.revealedCount >= model.countableCount)
+            || (!reveal.isStreaming && hasBuiltModel && driver.revealedCount >= model.countableCount
+                && (effectiveTreatment != .smoothTrail || driver.smoothTrail.isSettled))
     }
 
     private var settledContent: some View {
@@ -97,7 +111,8 @@ public struct GlimmerRevealView: View {
                     showCaret: showCaret(for: block),
                     isComplete: driver.isComplete,
                     configuration: configuration,
-                    onLinkTap: handleLink
+                    onLinkTap: handleLink,
+                    smoothTrail: driver.smoothTrail
                 )
                 .padding(.bottom, spacingAfterVisibleBlock(at: index))
             }
@@ -105,16 +120,6 @@ public struct GlimmerRevealView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(fullPlainText))
-        .onChange(of: revealMarkdown, initial: true) { _, newValue in
-            rebuild(newValue)
-        }
-        .onChange(of: reveal.isStreaming) { _, streaming in
-            driver.update(totalCountable: model.countableCount, isStreaming: streaming)
-        }
-        .task {
-            await driver.run()
-            if driver.isComplete { fireCompletionOnce() }
-        }
     }
 
     private var visibleBlocks: [RevealBlock] {
@@ -265,6 +270,7 @@ struct RevealBlockView: View {
     let isComplete: Bool
     let configuration: MarkdownConfiguration
     let onLinkTap: (URL) -> Void
+    var smoothTrail = RevealSmoothTrailState()
 
     var body: some View {
         if shouldRenderSettledBlock, let node = block.node {
@@ -376,7 +382,9 @@ struct RevealBlockView: View {
     }
 
     private var shouldRenderSettledBlock: Bool {
-        treatment.shouldRenderSettledBlock(isFullyRevealed: isFullyRevealed)
+        isFullyRevealed && (treatment != .smoothTrail || !block.words.contains { word in
+            word.atoms.contains { smoothTrail.starts[$0.revealIndex] != nil }
+        })
     }
 
     @ViewBuilder private var inlineContent: some View {
@@ -390,6 +398,14 @@ struct RevealBlockView: View {
                 block: block,
                 revealedCount: revealedCount,
                 isComplete: isComplete || isFullyRevealed,
+                configuration: configuration,
+                onLinkTap: onLinkTap
+            )
+        case .smoothTrail:
+            RevealSmoothTrailTextView(
+                block: block,
+                revealedCount: revealedCount,
+                trail: smoothTrail,
                 configuration: configuration,
                 onLinkTap: onLinkTap
             )
