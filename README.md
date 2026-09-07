@@ -427,6 +427,35 @@ Provide the complete accumulated attributed string with UIKit attributes (`UIFon
 
 In **GlimmerDemo → Streaming Reveal**, select **SwiftUI**, **UIKit Markdown**, or **UIKit TextKit**. The native mode streams an attributed prose sample with a bold first sentence and a link. Every simulated stream includes a 900 ms producer pause so you can inspect trail settlement. For repeatable simulator capture, launch GlimmerDemo with `--reveal-demo --reveal-host=native --reveal-autoplay` (or `--reveal-host=uikit` for hosted markdown).
 
+### Sharing smooth trail timing with a custom renderer
+
+If your renderer already shares a `RevealDriver` across text, table, and code blocks, read `driver.smoothTrail` to use the same timing. The `RevealSmoothTrailState` snapshot is `Equatable` and `Sendable`; its properties are read-only. Keep the driver's `run()` task active during producer pauses and until it completes, and observe `smoothTrail` as well as `revealedCount`. The driver updates the snapshot on reveal and settlement, while your display clock draws intermediate opacity:
+
+```swift
+// On the main actor, using the latest driver state and the block's reveal model.
+let trail = driver.smoothTrail
+let now = ProcessInfo.processInfo.systemUptime
+let atoms = block.words.flatMap(\.atoms)
+
+for atom in atoms where atom.revealIndex <= driver.revealedCount {
+    let opacity = trail.starts[atom.revealIndex].map {
+        RevealSmoothTrail.opacity(age: now - $0)
+    } ?? 1
+    // Apply opacity as a drawing multiplier to this atom's original styled content.
+}
+
+let fullyRevealed = atoms.allSatisfy {
+    !$0.isCountable || $0.revealIndex <= driver.revealedCount
+}
+let tailIsActive = atoms.contains { trail.starts[$0.revealIndex] != nil }
+let blockIsSettled = fullyRevealed && !tailIsActive
+// A display clock can pause when tailIsActive is false; observe the driver to restart it.
+```
+
+`starts` uses global, one-based reveal indices from `Glimmer.revealModel`, not atom IDs or block-local indices. Non-countable spaces and line breaks share the preceding countable index (or zero before the first unit). Only revealed atoms without a start timestamp are fully opaque. `RevealSmoothTrail.duration` is the fade duration in seconds; `opacity(age:)` clamps to zero before the start and one at or after that duration. Start timestamps and `nextSettlement` use system uptime, so calculate ages with `ProcessInfo.processInfo.systemUptime`, not `Date`.
+
+`settledCount` describes the fully opaque leading units, including resumed progress, and can decrease on truncation. `isSettled` describes the currently revealed tail; it may be true while more content is pending. `nextSettlement` is the earliest active unit's deadline, not the end of the entire tail. A copied snapshot does not update itself. Use a fresh driver snapshot after each observed change, and use the per-block check above to settle one block while later blocks keep fading. With `.smoothTrail`, `driver.isComplete` becomes true only after streaming ends, all units reveal, and the final tail settles. These timing properties describe `.smoothTrail`; a custom host remains responsible for its Reduce Motion treatment and drawing lifecycle.
+
 ## Custom Renderers
 
 Render markdown to different output formats:

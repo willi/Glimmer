@@ -12,13 +12,19 @@ public final class RevealDriver {
     /// Number of countable atoms currently revealed. Monotonic during a run.
     public private(set) var revealedCount: Int
     /// True once the buffer is drained AND the producer has stopped streaming.
+    /// For `.smoothTrail`, also waits for the final tail to settle.
     public private(set) var isComplete = false
     /// Atoms with `revealIndex <= animateFrom` were restored from a previous
     /// mount and render settled, with no entrance animation (spec R6).
     public let animateFrom: Int
 
-    /// Temporal state is updated only on reveal/settlement, never every frame.
-    private(set) var smoothTrail = RevealSmoothTrailState()
+    /// Read-only timing snapshot for renderers sharing this driver's `.smoothTrail` reveal.
+    ///
+    /// While `run()` is active, this observable value updates on reveal and settlement,
+    /// including producer pauses, but not every animation frame. Read a fresh snapshot
+    /// when it changes; use `ProcessInfo.processInfo.systemUptime` to evaluate per-frame
+    /// opacity from its timestamps. Other reveal styles do not maintain a timed tail.
+    public private(set) var smoothTrail = RevealSmoothTrailState()
 
     private var totalCountable = 0
     private var isStreaming: Bool
