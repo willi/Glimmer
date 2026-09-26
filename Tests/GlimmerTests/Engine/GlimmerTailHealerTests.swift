@@ -14,6 +14,12 @@ final class GlimmerTailHealerTests: XCTestCase {
         ("* item **b", "* item **b**"),
         ("```swift\nlet x", "```swift\nlet x\n```"),
         ("~~~\ncode\n", "~~~\ncode\n~~~"),
+        ("1. Install:\n\n   ```bash\n   npm i", "1. Install:\n\n   ```bash\n   npm i\n   ```"),
+        ("1. ```sh\n   ls", "1. ```sh\n   ls\n   ```"),
+        ("> ```swift\n> let x", "> ```swift\n> let x\n> ```"),
+        ("para\n\n| a | b |\n|--", "para\n\n"),
+        ("| a | b |\n|---|", ""),
+        ("| a | b |\n|---|-", "| a | b |\n|---|-"),
         ("see [docs](https://ex", "see [docs](https://ex)"),
         ("see [do", "see do"),
         ("[a](b) c [d", "[a](b) c d"),
@@ -39,6 +45,12 @@ final class GlimmerTailHealerTests: XCTestCase {
         XCTAssertEqual(GlimmerTailHealer.openFence(in: "````js\nx"), "````")
         XCTAssertNil(GlimmerTailHealer.openFence(in: "```\nx\n```"))
         XCTAssertNil(GlimmerTailHealer.openFence(in: "inline ``` not a fence"))
+    }
+
+    func testFenceInsideAListStaysInTheList() {
+        let blocks = GlimmerParser.parse(GlimmerTailHealer.heal("1. Install:\n\n   ```bash\n   npm i"))
+        XCTAssertEqual(blocks.count, 1, "no phantom top-level code block")
+        guard case .list = blocks.first else { return XCTFail("expected a list, got \(blocks)") }
     }
 
     func testHealedMarkdownRendersWithoutRawMarkers() {

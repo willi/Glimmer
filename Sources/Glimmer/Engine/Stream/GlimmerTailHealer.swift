@@ -18,34 +18,95 @@ enum GlimmerTailHealer {
 
     // MARK: - Code fences
 
-    /// The fence that would close a fence still open at the end of `markdown`, or nil.
+    /// The line that would close a fence still open at the end of `markdown`, or nil. It repeats the opener's quote
+    /// markers and indentation, so a fence inside a list item or a quote closes there instead of starting a new block.
     static func openFence(in markdown: String) -> String? {
-        var open: (marker: Character, count: Int)?
+        var open: (marker: Character, count: Int, prefix: String)?
         for line in markdown.split(separator: "\n", omittingEmptySubsequences: false) {
-            let content = line.drop { $0 == " " }
-            guard line.count - content.count <= 3, let first = content.first, first == "`" || first == "~" else { continue }
+            let (prefix, content) = containerPrefix(of: line)
+            guard let first = content.first, first == "`" || first == "~" else { continue }
             let run = content.prefix { $0 == first }.count
             guard run >= 3 else { continue }
             let rest = content.dropFirst(run)
             if let current = open {
                 if first == current.marker, run >= current.count, rest.allSatisfy({ $0 == " " }) { open = nil }
             } else if first == "~" || !rest.contains("`") {
-                open = (first, run)
+                open = (first, run, prefix)
             }
         }
-        return open.map { String(repeating: $0.marker, count: $0.count) }
+        return open.map { $0.prefix + String(repeating: $0.marker, count: $0.count) }
+    }
+
+    /// Splits a line into its container prefix — indentation, quote markers, list markers — and its content. The
+    /// prefix comes back as a continuation line would write it: quote markers kept, list markers turned into spaces.
+    private static func containerPrefix(of line: Substring) -> (prefix: String, content: Substring) {
+        var prefix = ""
+        var rest = line
+        while let first = rest.first {
+            if first == " " || first == ">" {
+                prefix.append(first)
+                rest = rest.dropFirst()
+            } else if first == "\t" {
+                prefix.append("    ")
+                rest = rest.dropFirst()
+            } else if "-*+".contains(first), rest.dropFirst().first == " " {
+                prefix.append("  ")
+                rest = rest.dropFirst(2)
+            } else if let number = orderedListMarkerLength(rest) {
+                prefix.append(String(repeating: " ", count: number))
+                rest = rest.dropFirst(number)
+            } else {
+                break
+            }
+        }
+        return (prefix, rest)
+    }
+
+    /// The length of an ordered list marker and its space (`12. `) at the start of `text`, or nil.
+    private static func orderedListMarkerLength(_ text: Substring) -> Int? {
+        let digits = text.prefix { $0.isASCII && $0.isNumber }.count
+        guard (1...9).contains(digits) else { return nil }
+        let after = text.dropFirst(digits)
+        guard let delimiter = after.first, delimiter == "." || delimiter == ")", after.dropFirst().first == " " else { return nil }
+        return digits + 2
     }
 
     // MARK: - Tables
 
-    /// A lone `| a | b |` line is a table header waiting for its delimiter row; shown early it renders raw pipes.
+    /// A table header waiting for its delimiter row (`| a | b |`, or `| a | b |` over a partial `|--`) renders raw
+    /// pipes if shown early; hold it back until the delimiter row is complete.
     private static func holdBackTableHeader(_ tail: String) -> String {
         var lines = tail.components(separatedBy: "\n")
         let pipeLines = lines.indices.filter { lines[$0].trimmingCharacters(in: .whitespaces).hasPrefix("|") }
-        guard pipeLines.count == 1, let index = pipeLines.first,
-              lines[(index + 1)...].allSatisfy({ $0.trimmingCharacters(in: .whitespaces).isEmpty }) else { return tail }
-        lines.removeSubrange(index...)
-        return lines.joined(separator: "\n") + (index > 0 ? "\n" : "")
+        guard let header = pipeLines.first, let last = pipeLines.last,
+              lines[(last + 1)...].allSatisfy({ $0.trimmingCharacters(in: .whitespaces).isEmpty }) else { return tail }
+        switch pipeLines.count {
+        case 1:
+            break
+        case 2 where last == header + 1 && isIncompleteDelimiterRow(lines[last], columns: cells(of: lines[header]).count):
+            break
+        default:
+            return tail
+        }
+        lines.removeSubrange(header...)
+        return lines.joined(separator: "\n") + (header > 0 ? "\n" : "")
+    }
+
+    /// Whether `line` is a delimiter row still being typed: only `|`, `-`, `:` and spaces, but not yet one valid cell
+    /// per column.
+    private static func isIncompleteDelimiterRow(_ line: String, columns: Int) -> Bool {
+        guard line.allSatisfy({ "|-: ".contains($0) }) else { return false }
+        let cells = cells(of: line)
+        return cells.count != columns || !cells.allSatisfy { $0.contains(#/^\s*:?-+:?\s*$/#) }
+    }
+
+    /// The cells of a pipe table row, without its outer pipes.
+    private static func cells(of row: String) -> [Substring] {
+        var body = Substring(row.trimmingCharacters(in: .whitespaces))
+        if body.hasPrefix("|") { body = body.dropFirst() }
+        if body.hasSuffix("|") { body = body.dropLast() }
+        guard !body.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
+        return body.split(separator: "|", omittingEmptySubsequences: false)
     }
 
     // MARK: - Links and images
