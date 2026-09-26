@@ -210,6 +210,23 @@ See §6.
 
 Arrived text is shown immediately with no mask and no pacing.
 
+### 5.6 Why not Metal
+
+Gemini ships Metal shaders, but none of them draws text. Their function names (`aurora*`, `neuralGradient*` including
+`…Sparks…`, `shaderLoadingFragment`, a glow, `turrellMesh`) are the colour-shifting backdrop, the loading shimmer and the
+glow. The trace shows `MTKView draw` driven by a display link on the main thread, while Gemini's text is drawn on the CPU
+by `NSLayoutManager` into a tiled layer. The reveal stays on Core Animation for three reasons:
+
+- **Core Animation is already on the GPU.** A mask sublayer's opacity animation runs in the system render server with
+  zero app work per frame. A Metal view needs a display-link draw call every frame, which is more main-thread work, not less.
+- **A shader breaks native text.** Shaders only see pixels, so text would have to be rendered into a texture. We would
+  either lose native selection, VoiceOver and system text rendering, or maintain a second, synchronized copy of the text.
+- **The measured effect is plain opacity.** Gemini's reveal is a linear 0→1 fade with no blur, glow or motion, which is
+  exactly what a Core Animation opacity animation does.
+
+Revisit this only for an effect opacity can't express, such as a glow or blur on the newest phrase. That would be a Metal
+overlay limited to the leading band, added only if the plain fade looks flat on device.
+
 ## 6. Interaction and accessibility
 
 - **Selection** is native and continuous across prose. Embeds are selected as one unit (U+FFFC) from outside, and code and tables keep their own
@@ -349,3 +366,6 @@ SuperMe adoption:
 - replace the SwiftUI `MarkdownView` call sites with `GlimmerText`;
 - remove the 12-style streaming settings demo;
 - bump the pinned revision in `Packages/Features` and `Packages/Shared`.
+
+Possible SuperMe follow-up, unrelated to Glimmer: an ambient "thinking" backdrop like Gemini's aurora. That is app chrome,
+not markdown rendering; SwiftUI's `MeshGradient` or a stitchable Metal shader in `.colorEffect` would suit it.
