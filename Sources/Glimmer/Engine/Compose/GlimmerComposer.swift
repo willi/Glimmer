@@ -97,10 +97,11 @@ struct GlimmerComposer {
             if let marker { appendTextParagraph([], font: theme.bodyFont, context: context, marker: marker, to: output) }
             appendList(list, context: context, to: output)
         case .codeBlock(let language, let code):
-            appendEmbed(.codeBlock(language: language, code: code), source: "```\(language ?? "")\n\(code)\n```",
+            appendEmbed(.codeBlock(language: language, code: code), source: Self.fencedSource(code, language: language),
                         context: context, marker: marker, to: output)
         case .table(let table):
-            appendEmbed(tableEmbed(table), source: tableSource(table), context: context, marker: marker, to: output)
+            let embed = tableEmbed(table)
+            appendEmbed(embed, source: tableSource(embed), context: context, marker: marker, to: output)
         case .thematicBreak:
             appendEmbed(.thematicBreak, source: "---", context: context, marker: marker, to: output)
         case .htmlBlock(let html):
@@ -297,11 +298,23 @@ struct GlimmerComposer {
         )
     }
 
-    private func tableSource(_ table: GlimmerTable) -> String {
-        func line(_ cells: [[GlimmerInline]]) -> String {
-            "| " + cells.map { GlimmerInline.plainText($0) }.joined(separator: " | ") + " |"
+    /// A fence longer than any backtick run in the code, so code that shows a fence copies intact.
+    static func fencedSource(_ code: String, language: String?) -> String {
+        let fence = String(repeating: "`", count: max(3, GlimmerMarkdownSerializer.longestBacktickRun(in: code) + 1))
+        return "\(fence)\(language ?? "")\n\(code)\n\(fence)"
+    }
+
+    /// The table's markdown, each composed cell written back with its styles, code and links, pipes escaped.
+    private func tableSource(_ embed: GlimmerEmbed) -> String {
+        guard case .table(let header, let rows, let alignments) = embed else { return "" }
+        func line(_ cells: [NSAttributedString]) -> String {
+            let written = cells.map { cell in
+                GlimmerMarkdownSerializer.markdown(from: cell, range: NSRange(location: 0, length: cell.length))
+                    .replacingOccurrences(of: "|", with: "\\|")
+            }
+            return "| " + written.joined(separator: " | ") + " |"
         }
-        let divider = "| " + table.alignments.map { alignment in
+        let divider = "| " + alignments.map { alignment in
             switch alignment {
             case .left: ":---"
             case .center: ":---:"
@@ -309,6 +322,6 @@ struct GlimmerComposer {
             case .none: "---"
             }
         }.joined(separator: " | ") + " |"
-        return ([line(table.header), divider] + table.rows.map(line)).joined(separator: "\n")
+        return ([line(header), divider] + rows.map(line)).joined(separator: "\n")
     }
 }

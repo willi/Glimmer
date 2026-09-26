@@ -128,6 +128,13 @@ public final class GlimmerView: UIView {
         textView.setNeedsLayout()
     }
 
+    /// The markdown for `range` of the shown text (UTF-16 offsets, as in `UITextView.selectedRange`), or — for nil —
+    /// the whole answer exactly as last given to `update`. Backs "Copy answer" buttons.
+    public func markdownSource(for range: NSRange? = nil) -> String {
+        guard let range else { return markdown }
+        return GlimmerMarkdownSerializer.markdown(from: textView.textStorage, range: range)
+    }
+
     func linkAction(for url: URL) -> UIAction? {
         guard let onLinkTap else { return nil }
         return UIAction { _ in onLinkTap(url) }

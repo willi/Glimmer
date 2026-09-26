@@ -147,6 +147,11 @@ final class GlimmerComposerTests: XCTestCase {
         XCTAssertEqual(paragraph?.lineHeightMultiple, 1)
     }
 
+    func testCodeShowingAFenceGetsALongerFence() {
+        let text = compose("````\n```\nx\n```\n````")
+        XCTAssertEqual(text.attribute(.glimmerSource, at: 0, effectiveRange: nil) as? String, "````\n```\nx\n```\n````")
+    }
+
     func testTableBecomesAttachmentWithComposedCells() throws {
         let text = compose("| a | **b** |\n|---|---|\n| 1 | 2 |")
         let attachment = try XCTUnwrap(blockAttachment(in: text))
@@ -155,7 +160,8 @@ final class GlimmerComposerTests: XCTestCase {
         XCTAssertEqual(rows.map { $0.map(\.string) }, [["1", "2"]])
         let boldHeader = header[1].attribute(.font, at: 0, effectiveRange: nil) as? UIFont
         XCTAssertTrue(boldHeader?.fontDescriptor.symbolicTraits.contains(.traitBold) ?? false)
-        XCTAssertEqual(text.attribute(.glimmerSource, at: 0, effectiveRange: nil) as? String, "| a | b |\n| --- | --- |\n| 1 | 2 |")
+        XCTAssertEqual(text.attribute(.glimmerSource, at: 0, effectiveRange: nil) as? String, "| a | **b** |\n| --- | --- |\n| 1 | 2 |",
+                       "cells copy with their styles")
     }
 
     func testStandaloneImageIsEmbedInlineImageIsAltText() throws {
