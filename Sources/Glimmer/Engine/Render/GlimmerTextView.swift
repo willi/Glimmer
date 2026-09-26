@@ -95,4 +95,15 @@ final class GlimmerTextView: UITextView {
         guard index >= 0, index < textStorage.length else { return nil }
         return segmentRects(for: NSRange(location: index, length: 1)).first
     }
+
+    /// Whether the character at `index` begins a visual line: a paragraph start or a wrap point.
+    func isLineStart(atCharacter index: Int) -> Bool {
+        guard index > 0 else { return true }
+        guard let manager = textLayoutManager, let content = manager.textContentManager,
+              let location = content.location(content.documentRange.location, offsetBy: index),
+              let fragment = manager.textLayoutFragment(for: location) else { return false }
+        let paragraphStart = content.offset(from: content.documentRange.location, to: fragment.rangeInElement.location)
+        let offsetInParagraph = index - paragraphStart
+        return fragment.textLineFragments.contains { $0.characterRange.location == offsetInParagraph }
+    }
 }

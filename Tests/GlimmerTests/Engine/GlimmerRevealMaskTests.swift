@@ -49,6 +49,32 @@ final class GlimmerRevealMaskTests: XCTestCase {
         _ = window
     }
 
+    func testPhraseStartingALineAlsoRevealsItsGutter() throws {
+        // A quote bar lives in the gutter, left of the glyphs; it must fade in with the line's first phrase.
+        let (textView, window) = hosted("> One two three four five six seven eight nine ten")
+        let engine = engine(for: textView, streaming: true, advancedTo: 0)
+        let mask = GlimmerRevealMask()
+        mask.update(in: textView, engine: engine, now: 0)
+        let covered = try XCTUnwrap(mask.phraseLayer(startingAt: 0)?.path?.boundingBox)
+        XCTAssertLessThanOrEqual(covered.minX, 0.5)
+        _ = window
+    }
+
+    func testSettledPartOfALineKeepsItsGutter() throws {
+        let (textView, window) = hosted("> One two three four five six seven eight nine ten eleven twelve thirteen")
+        var engine = GlimmerRevealEngine(options: options)
+        engine.textChanged(NSString(string: textView.textStorage.string), isStreaming: true, now: 0)
+        engine.advance(to: 0)
+        engine.advance(to: options.fadeDuration + 0.01)
+        XCTAssertGreaterThan(engine.settledLength, 0)
+        XCTAssertLessThan(engine.settledLength, textView.textStorage.length, "the first phrase settled, the line has not")
+        let mask = GlimmerRevealMask()
+        mask.update(in: textView, engine: engine, now: options.fadeDuration + 0.01)
+        let settledLine = try XCTUnwrap(mask.settledLinePath?.boundingBox)
+        XCTAssertLessThanOrEqual(settledLine.minX, 0.5)
+        _ = window
+    }
+
     func testSettledTextIsCoveredWithoutPhraseLayers() {
         let (textView, window) = hosted("Short settled line.")
         let engine = engine(for: textView, streaming: false, advancedTo: 5)

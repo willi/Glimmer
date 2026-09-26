@@ -47,7 +47,8 @@ final class GlimmerRevealMask {
         let lineStart = max(0, firstUnsettled - 512)
         let settledOnLine = textView.segmentRects(for: NSRange(location: lineStart, length: firstUnsettled - lineStart))
             .filter { $0.minY >= lineTop - 0.5 }
-        settledLineLayer.path = Self.path(settledOnLine)
+        // The settled part of a line always starts the line, so it also uncovers the gutter (quote bars).
+        settledLineLayer.path = Self.path(settledOnLine.map(Self.extendedToLeadingEdge))
 
         // Fading: one layer per active phrase, keyed by its start offset.
         var live = Set<Int>()
@@ -58,7 +59,12 @@ final class GlimmerRevealMask {
             guard existing == nil || rebuild else { continue }
             let phraseLayer = existing ?? CAShapeLayer()
             phraseLayer.fillColor = UIColor.black.cgColor
-            phraseLayer.path = Self.path(textView.segmentRects(for: phrase.range))
+            // Segments that begin a visual line also uncover the gutter to their left (quote bars fade in with text).
+            let startsLine = textView.isLineStart(atCharacter: phrase.range.location)
+            let segments = textView.segmentRects(for: phrase.range).enumerated().map { index, rect in
+                index > 0 || startsLine ? Self.extendedToLeadingEdge(rect) : rect
+            }
+            phraseLayer.path = Self.path(segments)
             phraseLayer.opacity = 1
             let elapsed = min(max(0, now - phrase.start), engine.options.fadeDuration)
             let fade = CABasicAnimation(keyPath: "opacity")
@@ -77,6 +83,10 @@ final class GlimmerRevealMask {
             stale.removeFromSuperlayer()
             phraseLayers[key] = nil
         }
+    }
+
+    private static func extendedToLeadingEdge(_ rect: CGRect) -> CGRect {
+        CGRect(x: 0, y: rect.minY, width: rect.maxX, height: rect.height)
     }
 
     private static func path(_ rects: [CGRect]) -> CGPath {
