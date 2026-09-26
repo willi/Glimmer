@@ -98,6 +98,16 @@ public final class GlimmerView: UIView {
         }
     }
 
+    /// A host that moves the view without resizing it (content above grew) gives it no layout pass, so the rendered
+    /// band would stay where it was: refresh it here.
+    public override var frame: CGRect {
+        didSet { if frame.origin != oldValue.origin { textView.refreshVisibleBandIfNeeded() } }
+    }
+
+    public override var center: CGPoint {
+        didSet { if center != oldValue { textView.refreshVisibleBandIfNeeded() } }
+    }
+
     public override func sizeThatFits(_ size: CGSize) -> CGSize {
         CGSize(width: size.width, height: height(forWidth: size.width))
     }

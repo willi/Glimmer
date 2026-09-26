@@ -87,6 +87,24 @@ final class GlimmerVisibleBandTests: XCTestCase {
         _ = window
     }
 
+    func testMovingTheViewRefreshesTheBandWithoutALayoutPass() throws {
+        let container = UIView()
+        let window = hostInWindow(container, width: 390, height: 800)
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
+        view.update(markdown: long)
+        let height = view.sizeThatFits(CGSize(width: 390, height: CGFloat.greatestFiniteMagnitude)).height
+        view.frame = CGRect(x: 0, y: 0, width: 390, height: height)
+        container.addSubview(view)
+        settle(container)
+        // Only the origin moves, so UIKit gives the view no layout pass.
+        let middle = (height / 2).rounded()
+        view.frame.origin.y = -middle
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        let range = try XCTUnwrap(viewportRange(view.textView))
+        XCTAssertTrue(NSLocationInRange(character(atY: middle + 400, in: view.textView), range))
+        _ = window
+    }
+
     func testSelectionStillSpansTheWholeAnswer() throws {
         let (view, _, window) = scrolled()
         let textView = view.textView
