@@ -103,6 +103,8 @@ struct StreamingLabDemo: View {
     > Fast streams reveal in longer phrases, so the reveal keeps up without flickering.
 
     ```swift
+    let view = GlimmerView()
+    container.addSubview(view)
     view.update(markdown: received, isStreaming: true, revealID: messageID)
     ```
 

@@ -105,4 +105,24 @@ final class GlimmerRevealMaskTests: XCTestCase {
         XCTAssertEqual(fade.duration, 0.3, accuracy: 0.01)
         _ = window
     }
+
+    func testInvalidatingFromAnOffsetLeavesEarlierPhrasesAlone() throws {
+        let words = (1...40).map { "word\($0)" }.joined(separator: " ")
+        let (textView, window) = hosted(words, width: 390)
+        var engine = GlimmerRevealEngine(options: options)
+        engine.textChanged(NSString(string: textView.textStorage.string), isStreaming: true, now: 0)
+        engine.advance(to: 0.25)
+        XCTAssertGreaterThan(engine.phrases.count, 1)
+        let mask = GlimmerRevealMask()
+        mask.update(in: textView, engine: engine, now: 0.25)
+        let first = try XCTUnwrap(mask.phraseLayer(startingAt: 0)?.animation(forKey: "glimmer.fade"))
+        let lastStart = try XCTUnwrap(engine.phrases.last).range.location
+        let last = try XCTUnwrap(mask.phraseLayer(startingAt: lastStart)?.animation(forKey: "glimmer.fade"))
+        // Only text from the last phrase on moved: its fade is rebuilt, the earlier ones keep theirs.
+        mask.invalidateGeometry(from: lastStart)
+        mask.update(in: textView, engine: engine, now: 0.3)
+        XCTAssertTrue(mask.phraseLayer(startingAt: 0)?.animation(forKey: "glimmer.fade") === first)
+        XCTAssertFalse(mask.phraseLayer(startingAt: lastStart)?.animation(forKey: "glimmer.fade") === last)
+        _ = window
+    }
 }

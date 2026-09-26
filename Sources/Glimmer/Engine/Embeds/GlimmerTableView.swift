@@ -86,7 +86,26 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
         updateColors()
     }
 
-    func embedHeight(forWidth width: CGFloat) -> CGFloat { layout(forWidth: width).height }
+    /// Rows shown while a reveal runs (the header counts as one); nil shows all.
+    var visibleUnitCount: Int? {
+        didSet { if visibleUnitCount != oldValue { setNeedsLayout() } }
+    }
+
+    func embedHeight(forWidth width: CGFloat) -> CGFloat {
+        let heights = layout(forWidth: width).rowHeights
+        let count = visibleUnitCount.map { min(max($0, 1), heights.count) } ?? heights.count
+        return heights.prefix(count).reduce(0, +)
+    }
+
+    func revealUnitRects(in box: CGRect) -> [CGRect] {
+        var rects: [CGRect] = []
+        var y: CGFloat = 0
+        for height in layout(forWidth: box.width).rowHeights {
+            rects.append(CGRect(x: 0, y: y, width: box.width, height: height))
+            y += height
+        }
+        return extendingLastVisibleUnit(rects, in: box)
+    }
 
     func layout(forWidth width: CGFloat) -> Layout {
         if let cachedLayout, cachedLayout.width == width { return cachedLayout.layout }
@@ -121,8 +140,9 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
         let layout = layout(forWidth: bounds.width)
         let padding = Self.cellPadding
         scrollView.frame = bounds
-        scrollView.contentSize = CGSize(width: layout.contentWidth, height: layout.height)
-        content.frame = CGRect(origin: .zero, size: scrollView.contentSize)
+        // While revealing, this view is shorter than the table and clips the rows below; never scroll vertically.
+        scrollView.contentSize = CGSize(width: layout.contentWidth, height: min(layout.height, bounds.height))
+        content.frame = CGRect(x: 0, y: 0, width: layout.contentWidth, height: layout.height)
         headerBackground.frame = CGRect(x: 0, y: 0, width: layout.contentWidth, height: layout.rowHeights.first ?? 0)
 
         let path = UIBezierPath()

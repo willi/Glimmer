@@ -99,4 +99,72 @@ final class GlimmerRevealEngineTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(later - earlier, options.minPhraseSpacing - 1e-9)
         }
     }
+
+    /// Runs the engine to completion in 10 ms steps, returning every phrase in start order.
+    private func allPhrases(_ engine: inout GlimmerRevealEngine, until limit: TimeInterval = 20) -> [GlimmerRevealEngine.Phrase] {
+        var seen: [GlimmerRevealEngine.Phrase] = []
+        var time = 0.0
+        while !engine.isComplete, time < limit {
+            engine.advance(to: time)
+            for phrase in engine.phrases where !seen.contains(phrase) { seen.append(phrase) }
+            time += 0.01
+        }
+        return seen
+    }
+
+    func testEmbedRevealsOneUnitAtATime() {
+        let text = "Intro line here.\n\u{FFFC}\nAfter the code block ends." as NSString
+        let embed = text.range(of: "\u{FFFC}").location
+        var engine = GlimmerRevealEngine(options: GlimmerRevealOptions())
+        engine.textChanged(text, isStreaming: false, now: 0, embedUnits: [embed: [12, 12, 12]])
+        let phrases = allPhrases(&engine)
+        let units = phrases.filter { $0.unit != nil }
+        XCTAssertEqual(units.map(\.unit), [0, 1, 2])
+        XCTAssertTrue(units.allSatisfy { $0.range == NSRange(location: embed, length: 1) })
+        XCTAssertEqual(units.map(\.start), units.map(\.start).sorted())
+        XCTAssertFalse(phrases.contains { $0.unit == nil && NSLocationInRange(embed, $0.range) }, "no text phrase covers the embed")
+        let after = phrases.first { $0.unit == nil && $0.range.location > embed }
+        XCTAssertGreaterThan(after?.start ?? 0, units.last?.start ?? .infinity, "text after the embed waits for its last unit")
+        XCTAssertTrue(engine.isComplete)
+    }
+
+    func testEmbedAtTheEndWaitsForMoreUnits() {
+        let text = "Code:\n\u{FFFC}" as NSString
+        let embed = text.length - 1
+        var engine = GlimmerRevealEngine(options: GlimmerRevealOptions())
+        engine.textChanged(text, isStreaming: true, now: 0, embedUnits: [embed: [8, 8]])
+        engine.advance(to: 5)
+        XCTAssertEqual(engine.unitsRevealed[embed], 2)
+        XCTAssertEqual(engine.revealedLength, embed, "the embed may still grow")
+        engine.textChanged(text, isStreaming: true, now: 5, embedUnits: [embed: [8, 8, 8]])
+        engine.advance(to: 10)
+        XCTAssertEqual(engine.unitsRevealed[embed], 3)
+        engine.textChanged(text, isStreaming: false, now: 10, embedUnits: [embed: [8, 8, 8]])
+        engine.advance(to: 20)
+        XCTAssertTrue(engine.isComplete)
+        XCTAssertEqual(engine.settledLength, text.length)
+    }
+
+    func testSettledUnitsAreCountedPerEmbed() {
+        let text = "\u{FFFC}\nTail words keep going here." as NSString
+        var engine = GlimmerRevealEngine(options: GlimmerRevealOptions())
+        engine.textChanged(text, isStreaming: false, now: 0, embedUnits: [0: [5, 5]])
+        engine.advance(to: 0)
+        XCTAssertEqual(engine.unitsRevealed[0], 1)
+        engine.advance(to: GlimmerRevealOptions().fadeDuration + 0.01)
+        XCTAssertGreaterThanOrEqual(engine.unitsSettled[0] ?? 0, 1)
+        XCTAssertEqual(engine.settledLength, 0, "the embed character settles only with its last unit")
+    }
+
+    func testFadingUnitsSurviveMoreText() {
+        let text = "\u{FFFC}" as NSString
+        var engine = GlimmerRevealEngine(options: GlimmerRevealOptions())
+        engine.textChanged(text, isStreaming: true, now: 0, embedUnits: [0: [6, 6]])
+        engine.advance(to: 0.1)
+        let fading = engine.phrases.filter { $0.unit != nil }
+        XCTAssertFalse(fading.isEmpty)
+        // The code block gains a line mid-fade: the lines already fading keep fading.
+        engine.textChanged(text, isStreaming: true, now: 0.1, embedUnits: [0: [6, 6, 6]])
+        XCTAssertEqual(engine.phrases.filter { $0.unit != nil }, fading)
+    }
 }

@@ -40,11 +40,27 @@ final class GlimmerBlockAttachment: NSTextAttachment {
         cachedView?.update(to: embed)
     }
 
+    /// The units the view shows while a reveal runs; nil shows all. Kept here, so a view made later starts right.
+    @MainActor
+    var visibleUnitCount: Int? {
+        get { visibleUnits }
+        set {
+            visibleUnits = newValue
+            cachedView?.visibleUnitCount = newValue
+        }
+    }
+    @MainActor private var visibleUnits: Int?
+
+    /// The view, if one was made.
+    @MainActor
+    var existingView: (any GlimmerEmbedView)? { cachedView }
+
     /// The embed's view, created on first use and reused for the attachment's lifetime.
     @MainActor
     func embedView() -> any GlimmerEmbedView {
         if let cachedView { return cachedView }
-        let view = GlimmerEmbedViewFactory.makeView(for: self)
+        var view = GlimmerEmbedViewFactory.makeView(for: self)
+        view.visibleUnitCount = visibleUnits
         cachedView = view
         return view
     }

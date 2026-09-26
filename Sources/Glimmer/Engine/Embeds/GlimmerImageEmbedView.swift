@@ -50,6 +50,11 @@ final class GlimmerImageEmbedView: UIView, GlimmerEmbedView {
     /// An image embed continues only an identical one (`GlimmerEmbed.continues`), so there is nothing to update.
     func update(to embed: GlimmerEmbed) {}
 
+    /// Reveals as one phrase: no units.
+    var visibleUnitCount: Int?
+
+    func revealUnitRects(in box: CGRect) -> [CGRect] { [box] }
+
     isolated deinit {
         loadTask?.cancel()
     }

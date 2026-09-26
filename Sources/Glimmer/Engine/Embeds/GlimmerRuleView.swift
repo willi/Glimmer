@@ -18,6 +18,11 @@ final class GlimmerRuleView: UIView, GlimmerEmbedView {
 
     func update(to embed: GlimmerEmbed) {}
 
+    /// Reveals as one phrase: no units.
+    var visibleUnitCount: Int?
+
+    func revealUnitRects(in box: CGRect) -> [CGRect] { [box] }
+
     func embedHeight(forWidth width: CGFloat) -> CGFloat { spacing + 1 }
 
     override func layoutSubviews() {

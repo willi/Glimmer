@@ -31,6 +31,10 @@ public final class GlimmerView: UIView {
     /// The bottom of the last revealed line, for a revealed length and width. Appends after the revealed text do not
     /// move it; edits that reach into the revealed text clear it.
     private var revealedHeight: (revealed: Int, width: CGFloat, height: CGFloat)?
+    /// The first character whose layout may have changed since the text view was last measured.
+    private var layoutChangedFrom = 0
+    /// Embeds that reveal in units (code lines, table rows): document offset → each unit's length.
+    private var embedUnits: [Int: [Int]] = [:]
 
     public init(configuration: GlimmerConfiguration = .default) {
         self.configuration = configuration
@@ -67,6 +71,7 @@ public final class GlimmerView: UIView {
             // Grown code blocks and tables update their views in place; the edit then re-lays them out.
             for update in edit.embedUpdates { update.attachment.update(to: update.embed) }
             textView.apply(edit)
+            layoutChangedFrom = min(layoutChangedFrom, edit.range.location)
             fitTextViewToContent()
             // Revealed text changed or reflowed (a list turned loose, a header became a table): fading phrases move.
             if let engine, edit.range.location < engine.revealedLength {
@@ -75,7 +80,9 @@ public final class GlimmerView: UIView {
             }
         }
         startRevealIfNeeded()
-        engine?.textChanged(NSString(string: textView.textStorage.string), isStreaming: isStreaming, now: clock.now)
+        embedUnits = document.embedUnits
+        engine?.textChanged(NSString(string: textView.textStorage.string), isStreaming: isStreaming, now: clock.now,
+                            embedUnits: embedUnits)
         advanceReveal()
         reportHeightIfChanged()
     }
@@ -133,6 +140,7 @@ public final class GlimmerView: UIView {
             return
         }
         engine = current
+        syncEmbedUnits()
         revealMask.update(in: textView, engine: current, now: now)
         reportHeightIfChanged()
         if let wake = current.nextWake {
@@ -156,8 +164,30 @@ public final class GlimmerView: UIView {
         textView.layer.mask = revealMask.layer
     }
 
+    /// Shows the frontier embed's started units, one more line or row per unit phrase. Embeds already passed, or not
+    /// reached yet, show everything.
+    private func syncEmbedUnits() {
+        var changedFrom = Int.max
+        for offset in embedUnits.keys {
+            guard let attachment = textView.blockAttachment(atCharacter: offset) else { continue }
+            let visible: Int? = engine.flatMap { engine in
+                offset == engine.revealedLength ? max(1, engine.unitsRevealed[offset] ?? 0) : nil
+            }
+            guard attachment.visibleUnitCount != visible else { continue }
+            attachment.visibleUnitCount = visible
+            textView.invalidateEmbedLayout(atCharacter: offset)
+            layoutChangedFrom = min(layoutChangedFrom, offset)
+            changedFrom = min(changedFrom, offset)
+        }
+        guard changedFrom < .max else { return }
+        fitTextViewToContent()
+        revealMask.invalidateGeometry(from: changedFrom)
+        revealedHeight = nil
+    }
+
     private func endReveal() {
         engine = nil
+        syncEmbedUnits()
         clock.cancel()
         textView.layer.mask = nil
     }
@@ -180,11 +210,14 @@ public final class GlimmerView: UIView {
         ))
         _ = document.update(markdown: preprocessed(markdown), isStreaming: isStreaming)
         textView.attributedText = document.text
+        layoutChangedFrom = 0
         revealedHeight = nil
         fitTextViewToContent()
         if revealOptions == nil { endReveal() }
         revealMask.invalidateGeometry()
-        engine?.textChanged(NSString(string: textView.textStorage.string), isStreaming: isStreaming, now: clock.now)
+        embedUnits = document.embedUnits
+        engine?.textChanged(NSString(string: textView.textStorage.string), isStreaming: isStreaming, now: clock.now,
+                            embedUnits: embedUnits)
         advanceReveal()
         reportHeightIfChanged()
     }
@@ -195,7 +228,9 @@ public final class GlimmerView: UIView {
     private func height(forWidth width: CGFloat) -> CGFloat {
         guard width > 0 else { return 0 }
         if let engine, engine.revealedLength < textView.textStorage.length {
-            guard engine.revealedLength > 0 else { return 0 }
+            // An embed at the frontier with units started: its box, as tall as those units, ends the height.
+            let frontierEmbed = (engine.unitsRevealed[engine.revealedLength] ?? 0) > 0
+            guard engine.revealedLength > 0 || frontierEmbed else { return 0 }
             if textView.bounds.width != width {
                 let fullHeight = textView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
                 textView.frame = CGRect(x: 0, y: 0, width: width, height: fullHeight + slack(forContentHeight: fullHeight))
@@ -203,7 +238,8 @@ public final class GlimmerView: UIView {
             if let revealedHeight, revealedHeight.revealed == engine.revealedLength, revealedHeight.width == width {
                 return revealedHeight.height
             }
-            let height = ceil(textView.lineRect(atCharacter: engine.revealedLength - 1)?.maxY ?? 0)
+            let last = frontierEmbed ? engine.revealedLength : engine.revealedLength - 1
+            let height = ceil(textView.lineRect(atCharacter: last)?.maxY ?? 0)
             revealedHeight = (engine.revealedLength, width, height)
             return height
         }
@@ -224,10 +260,12 @@ public final class GlimmerView: UIView {
             // A new width re-wraps everything: measure it in full once.
             let fullHeight = textView.sizeThatFits(CGSize(width: bounds.width, height: .greatestFiniteMagnitude)).height
             textView.frame = CGRect(x: 0, y: 0, width: bounds.width, height: fullHeight + slack(forContentHeight: fullHeight))
+            layoutChangedFrom = 0
         } else if contentHeight?.version == textView.textVersion {
             return
         }
-        let height = textView.laidOutHeight()
+        let height = textView.laidOutHeight(from: layoutChangedFrom)
+        layoutChangedFrom = Int.max
         let slack = slack(forContentHeight: height)
         if textView.bounds.height < height || textView.bounds.height > height + 2 * slack {
             textView.frame.size.height = height + slack

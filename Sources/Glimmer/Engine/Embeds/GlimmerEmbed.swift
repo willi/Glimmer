@@ -26,3 +26,18 @@ extension GlimmerEmbed {
         }
     }
 }
+
+extension GlimmerEmbed {
+    /// The UTF-16 length of each reveal unit: code lines, or the header row and each body row. Images and rules have
+    /// none; each reveals as one phrase.
+    var revealUnitLengths: [Int] {
+        switch self {
+        case .codeBlock(_, let code):
+            code.split(separator: "\n", omittingEmptySubsequences: false).map { max(1, $0.utf16.count) }
+        case .table(let header, let rows, _):
+            ([header] + rows).map { row in max(1, row.reduce(0) { $0 + $1.length }) }
+        case .image, .thematicBreak:
+            []
+        }
+    }
+}

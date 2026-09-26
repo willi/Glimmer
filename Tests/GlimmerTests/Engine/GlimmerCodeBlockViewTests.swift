@@ -78,4 +78,20 @@ final class GlimmerCodeBlockViewTests: XCTestCase {
         let plain = GlimmerCodeBlockView(code: "x", language: nil, theme: theme, highlighter: GlimmerBasicHighlighter())
         XCTAssertEqual(plain.languageLabel.text, "code")
     }
+
+    func testRevealingCodeBlockHidesLinesNotYetShown() throws {
+        let view = GlimmerCodeBlockView(code: "one\ntwo\nthree", language: nil, theme: theme, highlighter: GlimmerBasicHighlighter())
+        view.visibleUnitCount = 1
+        let height = view.embedHeight(forWidth: 300)
+        view.frame = CGRect(x: 0, y: 0, width: 300, height: height)
+        view.layoutIfNeeded()
+        let firstLineBottom = try XCTUnwrap(view.revealUnitRects(in: view.bounds).first).maxY
+        // Glyphs are clipped at the shown line, so the next line never peeks into the bottom padding.
+        XCTAssertLessThanOrEqual(view.scrollView.frame.maxY, height - theme.embedPadding + 0.5)
+        XCTAssertLessThanOrEqual(view.scrollView.frame.maxY, firstLineBottom)
+        view.visibleUnitCount = nil
+        view.frame.size.height = view.embedHeight(forWidth: 300)
+        view.layoutIfNeeded()
+        XCTAssertEqual(view.scrollView.frame.maxY, view.bounds.height, accuracy: 0.5, "a settled code block scrolls over its full height")
+    }
 }

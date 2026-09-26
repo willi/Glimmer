@@ -10,14 +10,25 @@ final class GlimmerRevealMask {
 
     private let settledLayer = CALayer()
     private let settledLineLayer = CAShapeLayer()
-    private var phraseLayers: [Int: CAShapeLayer] = [:]
+    private var phraseLayers: [PhraseKey: CAShapeLayer] = [:]
     private var geometryWidth: CGFloat = -1
+    /// Text from this offset on moved since the last update; geometry before it still stands.
+    private var movedFrom = Int.max
     /// What the settled geometry was last computed for; segment queries cost time in proportion to the text length,
     /// so they run only when a phrase settles or the layout changes, not on every update or layout pass.
     private var settledKey: SettledKey?
 
+    /// A text phrase by its start offset; a unit phrase by its embed's offset and unit index (all of an embed's
+    /// units share its offset).
+    private struct PhraseKey: Hashable {
+        let location: Int
+        let unit: Int?
+    }
+
     private struct SettledKey: Equatable {
         let settledLength: Int
+        /// Units of the embed at `settledLength` that have finished fading.
+        let settledUnits: Int
         let width: CGFloat
         /// Everything is settled: the settled rect then reaches the bottom of the view, so its height matters.
         let allSettledHeight: CGFloat?
@@ -33,7 +44,14 @@ final class GlimmerRevealMask {
     var settledRect: CGRect { settledLayer.frame }
     var settledLinePath: CGPath? { settledLineLayer.path }
     var phraseLayerCount: Int { phraseLayers.count }
-    func phraseLayer(startingAt location: Int) -> CAShapeLayer? { phraseLayers[location] }
+    func phraseLayer(startingAt location: Int) -> CAShapeLayer? { phraseLayers[PhraseKey(location: location, unit: nil)] }
+    func phraseLayer(forUnit unit: Int, at location: Int) -> CAShapeLayer? { phraseLayers[PhraseKey(location: location, unit: unit)] }
+
+    /// Rebuilds the geometry of text from `location` on at the next update (an embed at the reveal's frontier grew),
+    /// leaving earlier phrases' fades running untouched.
+    func invalidateGeometry(from location: Int) {
+        movedFrom = min(movedFrom, location)
+    }
 
     /// Forces phrase geometry to be rebuilt on the next update (theme or text changes that move glyphs).
     func invalidateGeometry() {
@@ -50,14 +68,17 @@ final class GlimmerRevealMask {
         layer.frame = bounds
         let rebuild = bounds.width != geometryWidth
         geometryWidth = bounds.width
+        let moved = movedFrom
+        movedFrom = .max
 
         // Settled: every line above the first unsettled character, plus that line's settled part.
         let firstUnsettled = engine.settledLength
+        let settledUnits = engine.unitsSettled[firstUnsettled] ?? 0
         let key = SettledKey(
-            settledLength: firstUnsettled, width: bounds.width,
+            settledLength: firstUnsettled, settledUnits: settledUnits, width: bounds.width,
             allSettledHeight: firstUnsettled < textView.textStorage.length ? nil : bounds.height
         )
-        if key != settledKey || rebuild {
+        if key != settledKey || rebuild || moved <= firstUnsettled {
             settledKey = key
             let lineTop = textView.lineRect(atCharacter: firstUnsettled)?.minY ?? bounds.height
             settledLayer.frame = CGRect(x: 0, y: 0, width: bounds.width, height: lineTop)
@@ -65,22 +86,32 @@ final class GlimmerRevealMask {
             let settledOnLine = textView.segmentRects(for: NSRange(location: lineStart, length: firstUnsettled - lineStart))
                 .filter { $0.minY >= lineTop - 0.5 }
             // The settled part of a line always starts the line, so it also uncovers the gutter (quote bars).
-            settledLineLayer.path = Self.path(settledOnLine.map(Self.extendedToLeadingEdge))
+            var settledRects = settledOnLine.map(Self.extendedToLeadingEdge)
+            // An embed revealing in units: the units that finished fading stay uncovered.
+            if settledUnits > 0, let rects = textView.embedUnitRects(atCharacter: firstUnsettled) {
+                settledRects += rects.prefix(settledUnits)
+            }
+            settledLineLayer.path = Self.path(settledRects)
         }
 
         // Fading: one layer per active phrase, keyed by its start offset.
-        var live = Set<Int>()
+        var live = Set<PhraseKey>()
         for phrase in engine.phrases {
-            let key = phrase.range.location
+            let key = PhraseKey(location: phrase.range.location, unit: phrase.unit)
             live.insert(key)
             let existing = phraseLayers[key]
-            guard existing == nil || rebuild else { continue }
+            guard existing == nil || rebuild || key.location >= moved else { continue }
             let phraseLayer = existing ?? CAShapeLayer()
             phraseLayer.fillColor = UIColor.black.cgColor
-            // Segments that begin a visual line also uncover the gutter to their left (quote bars fade in with text).
-            let startsLine = textView.isLineStart(atCharacter: phrase.range.location)
-            let segments = textView.segmentRects(for: phrase.range).enumerated().map { index, rect in
-                index > 0 || startsLine ? Self.extendedToLeadingEdge(rect) : rect
+            let segments: [CGRect]
+            if let unit = phrase.unit, let rects = textView.embedUnitRects(atCharacter: phrase.range.location), unit < rects.count {
+                segments = [rects[unit]]
+            } else {
+                // Segments that begin a visual line also uncover the gutter to their left (quote bars fade in with text).
+                let startsLine = textView.isLineStart(atCharacter: phrase.range.location)
+                segments = textView.segmentRects(for: phrase.range).enumerated().map { index, rect in
+                    index > 0 || startsLine ? Self.extendedToLeadingEdge(rect) : rect
+                }
             }
             phraseLayer.path = Self.path(segments)
             phraseLayer.opacity = 1

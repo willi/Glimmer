@@ -13,6 +13,7 @@ final class GlimmerStreamingPerformanceTests: XCTestCase {
     /// TextKit re-lays out the ~60 fragments of the rendered band after every change: 3–4 ms p95 here, 4–6 ms with a
     /// reveal's mask (it was 30 ms before the band). Plan 5's on-device harness checks the Release cost against hitches.
     private let layoutBudget: Duration = .milliseconds(6)
+    private let revealingLayoutBudget: Duration = .milliseconds(8)
 
     /// About 5,000 words of headings, prose, lists, quotes, code and tables.
     private let longMixedAnswer = Array(repeating: StreamingFixtures.all.map(\.markdown).joined(separator: "\n\n"), count: 29)
@@ -27,10 +28,12 @@ final class GlimmerStreamingPerformanceTests: XCTestCase {
         XCTAssertLessThan(p95.layout, layoutBudget, "layout pass p95")
     }
 
+    /// The tail holds a code block and a table, which reveal a line or row at a time: each unit start grows the box,
+    /// and TextKit re-lays it out with the text after it (about 3.5 ms here). Hence a looser layout gate.
     func testRevealingUpdatesNearTheEndOfALongAnswerStayWithinBudget() {
         let p95 = streamTail(of: longMixedAnswer, reveal: .smooth(GlimmerRevealOptions()))
         XCTAssertLessThan(p95.update, budget, "update p95")
-        XCTAssertLessThan(p95.layout, layoutBudget, "layout pass p95")
+        XCTAssertLessThan(p95.layout, revealingLayoutBudget, "layout pass p95")
     }
 
     /// A list is one block, so every update still re-composes all of it; what this bounds is the rest — TextKit
@@ -53,6 +56,31 @@ final class GlimmerStreamingPerformanceTests: XCTestCase {
         var samples: [Duration] = []
         for _ in 0..<21 { samples.append(timer.measure { _ = view.textView.segmentRects(for: late) }) }
         XCTAssertLessThan(samples.sorted()[10], .microseconds(200), "median segment lookup at the end of 5,000 words")
+        _ = window
+    }
+
+    /// Measuring after a change lays out from the change, not the whole answer: every update and every embed unit
+    /// pays for it.
+    func testMeasuringAfterAnAppendStaysCheap() throws {
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
+        let window = hostInWindow(view, width: 390, height: 800)
+        view.update(markdown: longMixedAnswer)
+        view.layoutIfNeeded()
+        let textView = view.textView
+        let full = textView.laidOutHeight(from: 0)
+        let content = try XCTUnwrap(textView.textLayoutManager?.textContentManager as? NSTextContentStorage)
+        let timer = ContinuousClock()
+        var samples: [Duration] = []
+        for _ in 0..<11 {
+            let end = textView.textStorage.length
+            content.performEditingTransaction {
+                textView.textStorage.append(NSAttributedString(string: " more", attributes: [.font: GlimmerTheme.default.bodyFont]))
+            }
+            samples.append(timer.measure { _ = textView.laidOutHeight(from: end) })
+        }
+        XCTAssertEqual(textView.laidOutHeight(from: textView.textStorage.length - 1), textView.laidOutHeight(from: 0))
+        XCTAssertGreaterThanOrEqual(textView.laidOutHeight(from: 0), full)
+        XCTAssertLessThan(samples.sorted()[5], .microseconds(300), "median measure after an append at 5,000 words")
         _ = window
     }
 

@@ -26,6 +26,16 @@ final class GlimmerStreamingDocument {
     /// Each block's attachments, with the embeds they were composed with and their offsets in the block's fragment.
     private var blockAttachments: [[GlimmerEmbeddedAttachment]] = []
 
+    /// Embeds that reveal in units: document offset → each unit's text length.
+    var embedUnits: [Int: [Int]] {
+        var units: [Int: [Int]] = [:]
+        for record in embeddedAttachments {
+            let lengths = record.embed.revealUnitLengths
+            if !lengths.isEmpty { units[record.offset] = lengths }
+        }
+        return units
+    }
+
     /// Every block attachment in `text`, at its document offset, with its current embed.
     var embeddedAttachments: [(offset: Int, attachment: GlimmerBlockAttachment, embed: GlimmerEmbed)] {
         zip(blockOffsets, blockAttachments).flatMap { blockOffset, records in

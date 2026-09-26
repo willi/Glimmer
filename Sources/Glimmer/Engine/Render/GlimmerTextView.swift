@@ -80,11 +80,19 @@ final class GlimmerTextView: UITextView {
         return CGSize(width: size.width, height: ceil(fitted.height))
     }
 
-    /// The height of the laid-out text at the current width. Cheap, because only changed paragraphs lay out again, and
-    /// exact at any frame height, because the text container is unbounded (see `init`).
-    func laidOutHeight() -> CGFloat {
-        guard textStorage.length > 0, let manager = textLayoutManager else { return 0 }
-        manager.ensureLayout(for: manager.documentRange)
+    /// The height of the laid-out text at the current width, exact at any frame height because the text container is
+    /// unbounded (see `init`). Layout is ensured from `index` on: pass the first character that changed since the
+    /// last measure, because ensuring the whole document walks every paragraph (about 0.9 ms at 5,000 words) even
+    /// when nothing needs layout.
+    func laidOutHeight(from index: Int = 0) -> CGFloat {
+        guard textStorage.length > 0, let manager = textLayoutManager, let content = manager.textContentManager else { return 0 }
+        let start = min(max(0, index), textStorage.length - 1)
+        if start == 0 {
+            manager.ensureLayout(for: manager.documentRange)
+        } else if let location = content.location(content.documentRange.location, offsetBy: start),
+                  let range = NSTextRange(location: location, end: content.documentRange.endLocation) {
+            manager.ensureLayout(for: range)
+        }
         return ceil(manager.usageBoundsForTextContainer.maxY + textContainerInset.top + textContainerInset.bottom)
     }
 
@@ -154,6 +162,37 @@ final class GlimmerTextView: UITextView {
         let paragraphStart = content.offset(from: content.documentRange.location, to: fragment.rangeInElement.location)
         let offsetInParagraph = index - paragraphStart
         return fragment.textLineFragments.contains { $0.characterRange.location == offsetInParagraph }
+    }
+
+    // MARK: - Embeds
+
+    /// The block attachment at `index`, or nil.
+    func blockAttachment(atCharacter index: Int) -> GlimmerBlockAttachment? {
+        guard index >= 0, index < textStorage.length else { return nil }
+        return textStorage.attribute(.attachment, at: index, effectiveRange: nil) as? GlimmerBlockAttachment
+    }
+
+    /// The reveal-unit rects of the embed at `index`, in this view's coordinates, or nil before its view exists.
+    /// Placed from TextKit's attachment frame, not the view's: an invalidated attachment's view is detached, and its
+    /// frame lags, until the next viewport pass.
+    func embedUnitRects(atCharacter index: Int) -> [CGRect]? {
+        guard let view = blockAttachment(atCharacter: index)?.existingView, let manager = textLayoutManager,
+              let range = textRange(for: NSRange(location: index, length: 1)) else { return nil }
+        manager.ensureLayout(for: range)
+        guard let fragment = manager.textLayoutFragment(for: range.location) else { return nil }
+        let frame = fragment.frameForTextAttachment(at: range.location)
+        guard frame.width > 0, frame.height > 0 else { return nil }
+        let origin = CGPoint(x: fragment.layoutFragmentFrame.minX + frame.minX + textContainerInset.left,
+                             y: fragment.layoutFragmentFrame.minY + frame.minY + textContainerInset.top)
+        return view.revealUnitRects(in: CGRect(origin: .zero, size: frame.size)).map { $0.offsetBy(dx: origin.x, dy: origin.y) }
+    }
+
+    /// Lays the embed at `index` out again after its height changed (its visible units).
+    func invalidateEmbedLayout(atCharacter index: Int) {
+        guard let manager = textLayoutManager, let range = textRange(for: NSRange(location: index, length: 1)) else { return }
+        manager.invalidateLayout(for: range)
+        manager.ensureLayout(for: range)
+        textVersion &+= 1
     }
 
     // MARK: - Visible band

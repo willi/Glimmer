@@ -20,7 +20,12 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
     private let theme: GlimmerTheme
     private let highlighter: any GlimmerHighlighter
     private var highlighted: NSAttributedString
-    private var cachedTextSize: CGSize?
+    /// Bottom of each code line in the unwrapped text, cumulative, and the widest line: TextKit 2, measured once.
+    private var lineMetrics: (bottoms: [CGFloat], width: CGFloat)?
+
+    var visibleUnitCount: Int? {
+        didSet { if visibleUnitCount != oldValue { setNeedsLayout() } }
+    }
 
     init(code: String, language: String?, theme: GlimmerTheme, highlighter: any GlimmerHighlighter) {
         self.code = code
@@ -68,19 +73,56 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
 
     /// Unwrapped size of the highlighted code.
     var textSize: CGSize {
-        if let cachedTextSize { return cachedTextSize }
-        let bounds = highlighted.boundingRect(
-            with: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            context: nil
-        )
-        let size = CGSize(width: ceil(bounds.width), height: ceil(bounds.height))
-        cachedTextSize = size
-        return size
+        CGSize(width: lines.width, height: lines.bottoms.last ?? 0)
+    }
+
+    /// Measured with a standalone TextKit 2 layout manager whose container is unbounded both ways, so each code line
+    /// is one layout fragment.
+    private var lines: (bottoms: [CGFloat], width: CGFloat) {
+        if let lineMetrics { return lineMetrics }
+        let storage = NSTextContentStorage()
+        let manager = NSTextLayoutManager()
+        let container = NSTextContainer(size: CGSize(width: CGFloat.greatestFiniteMagnitude, height: 0))
+        container.lineFragmentPadding = 0
+        manager.textContainer = container
+        storage.addTextLayoutManager(manager)
+        storage.attributedString = highlighted
+        manager.ensureLayout(for: manager.documentRange)
+        var bottoms: [CGFloat] = []
+        var width: CGFloat = 0
+        manager.enumerateTextLayoutFragments(from: manager.documentRange.location, options: [.ensuresLayout]) { fragment in
+            bottoms.append(ceil(fragment.layoutFragmentFrame.maxY))
+            for line in fragment.textLineFragments { width = max(width, ceil(line.typographicBounds.width)) }
+            return true
+        }
+        if bottoms.isEmpty { bottoms = [ceil(theme.codeFont.lineHeight)] }
+        let metrics = (bottoms, width)
+        lineMetrics = metrics
+        return metrics
+    }
+
+    /// The height of the lines shown: all of them, or the first `visibleUnitCount` while a reveal runs.
+    private var visibleTextHeight: CGFloat {
+        let bottoms = lines.bottoms
+        let count = visibleUnitCount.map { min(max($0, 1), bottoms.count) } ?? bottoms.count
+        return bottoms[count - 1]
     }
 
     func embedHeight(forWidth width: CGFloat) -> CGFloat {
-        (theme.showsCodeBlockHeader ? Self.headerHeight : 0) + theme.embedPadding * 2 + textSize.height
+        (theme.showsCodeBlockHeader ? Self.headerHeight : 0) + theme.embedPadding * 2 + visibleTextHeight
+    }
+
+    func revealUnitRects(in box: CGRect) -> [CGRect] {
+        let top = (theme.showsCodeBlockHeader ? Self.headerHeight : 0) + theme.embedPadding
+        var rects: [CGRect] = []
+        var previous: CGFloat = 0
+        for (index, bottom) in lines.bottoms.enumerated() {
+            // The first line also covers the header and top padding.
+            let minY = index == 0 ? 0 : top + previous
+            rects.append(CGRect(x: 0, y: minY, width: box.width, height: top + bottom - minY))
+            previous = bottom
+        }
+        return extendingLastVisibleUnit(rects, in: box)
     }
 
     func update(to embed: GlimmerEmbed) {
@@ -90,7 +132,7 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
         highlighted = Self.highlightedCode(code, language: language, theme: theme, highlighter: highlighter)
         textView.attributedText = highlighted
         languageLabel.text = language?.lowercased() ?? "code"
-        cachedTextSize = nil
+        lineMetrics = nil
         setNeedsLayout()
     }
 
@@ -104,11 +146,15 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
                 width: max(0, copyButton.frame.minX - theme.embedPadding), height: headerHeight
             )
         }
-        scrollView.frame = CGRect(x: 0, y: headerHeight, width: bounds.width, height: max(0, bounds.height - headerHeight))
+        // While revealing, glyphs stop at the last shown line, so the next line never peeks into the bottom padding.
+        let glyphHeight = visibleUnitCount == nil ? bounds.height - headerHeight : theme.embedPadding + visibleTextHeight
+        scrollView.frame = CGRect(x: 0, y: headerHeight, width: bounds.width, height: max(0, min(glyphHeight, bounds.height - headerHeight)))
         // +2 absorbs rounding between boundingRect and TextKit so the last glyph never wraps.
         let contentWidth = max(bounds.width, textSize.width + theme.embedPadding * 2 + 2)
-        textView.frame = CGRect(x: 0, y: 0, width: contentWidth, height: scrollView.bounds.height)
-        scrollView.contentSize = textView.frame.size
+        // Every line stays laid out; while revealing, this view is shorter and the scroll view clips the rest. The
+        // content size keeps the visible height, so the code never scrolls vertically.
+        textView.frame = CGRect(x: 0, y: 0, width: contentWidth, height: textSize.height + theme.embedPadding * 2)
+        scrollView.contentSize = CGSize(width: contentWidth, height: scrollView.bounds.height)
     }
 
     static func highlightedCode(
