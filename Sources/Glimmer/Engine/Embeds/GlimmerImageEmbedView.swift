@@ -8,6 +8,7 @@ final class GlimmerImageEmbedView: UIView, GlimmerEmbedView {
     let altLabel = UILabel()
 
     private let theme: GlimmerTheme
+    private var loadTask: Task<Void, Never>?
 
     init(source: URL, alt: String, theme: GlimmerTheme, loader: (any GlimmerImageLoader)?) {
         self.theme = theme
@@ -34,7 +35,7 @@ final class GlimmerImageEmbedView: UIView, GlimmerEmbedView {
             altLabel.isHidden = false
             return
         }
-        Task { [weak self] in
+        loadTask = Task { [weak self] in
             do {
                 let image = try await loader.loadImage(from: source)
                 self?.imageView.image = image
@@ -45,6 +46,10 @@ final class GlimmerImageEmbedView: UIView, GlimmerEmbedView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    isolated deinit {
+        loadTask?.cancel()
+    }
 
     func embedHeight(forWidth width: CGFloat) -> CGFloat {
         min(width / theme.imagePlaceholderAspect, theme.maxImageHeight)

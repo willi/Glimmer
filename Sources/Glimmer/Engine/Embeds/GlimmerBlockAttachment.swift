@@ -7,6 +7,9 @@ final class GlimmerBlockAttachment: NSTextAttachment {
     let theme: GlimmerTheme
     let highlighter: any GlimmerHighlighter
     let imageLoader: (any GlimmerImageLoader)?
+    /// Built once. TextKit asks for a fresh provider on every height query and frame change; rebuilding the view each
+    /// time would re-highlight code and re-fetch images.
+    private var cachedView: (any GlimmerEmbedView)?
 
     init(embed: GlimmerEmbed, theme: GlimmerTheme, highlighter: any GlimmerHighlighter, imageLoader: (any GlimmerImageLoader)?) {
         self.embed = embed
@@ -28,6 +31,15 @@ final class GlimmerBlockAttachment: NSTextAttachment {
         provider.tracksTextAttachmentViewBounds = true
         return provider
     }
+
+    /// The embed's view, created on first use and reused for the attachment's lifetime.
+    @MainActor
+    func embedView() -> any GlimmerEmbedView {
+        if let cachedView { return cachedView }
+        let view = GlimmerEmbedViewFactory.makeView(for: self)
+        cachedView = view
+        return view
+    }
 }
 
 /// Creates the embed view and sizes the attachment to the full available width.
@@ -36,10 +48,10 @@ final class GlimmerBlockAttachment: NSTextAttachment {
 /// assume main-actor isolation to reach the (main-actor) embed views.
 final class GlimmerEmbedViewProvider: NSTextAttachmentViewProvider {
     override func loadView() {
-        // The attachment is immutable after init and this callback runs on the main thread during layout.
+        // UITextView calls this on the main thread during layout; the attachment's only mutable state (its cached view) is main-actor.
         nonisolated(unsafe) let attachment = textAttachment as? GlimmerBlockAttachment
         guard attachment != nil else { return }
-        view = MainActor.assumeIsolated { attachment.map { GlimmerEmbedViewFactory.makeView(for: $0) } }
+        view = MainActor.assumeIsolated { attachment.map { $0.embedView() } }
     }
 
     override func attachmentBounds(

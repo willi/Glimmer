@@ -81,8 +81,51 @@ final class GlimmerTextViewTests: XCTestCase {
         textView.frame = CGRect(x: 0, y: 0, width: 250, height: narrow)
         settle(textView)
         let resized = try XCTUnwrap(findSubview(GlimmerRuleView.self, in: textView))
+        XCTAssertTrue(resized === rule, "the same view resizes; it is not rebuilt")
         XCTAssertEqual(resized.frame.width, 250, accuracy: 0.5)
         _ = window
+    }
+
+    func testEmbedViewsSurviveHeightQueriesAndFrameChanges() async throws {
+        let loader = CountingImageLoader()
+        let url = URL(string: "https://example.com/a.png")!  // test-only literal
+        let textView = GlimmerTextView()
+        textView.attributedText = document([
+            NSAttributedString(attachment: GlimmerBlockAttachment(
+                embed: .codeBlock(language: "swift", code: "let x = 1"), theme: theme,
+                highlighter: GlimmerBasicHighlighter(), imageLoader: nil)),
+            NSAttributedString(attachment: GlimmerBlockAttachment(
+                embed: .image(source: url, alt: "a"), theme: theme,
+                highlighter: GlimmerBasicHighlighter(), imageLoader: loader)),
+        ])
+        let height = textView.sizeThatFits(CGSize(width: 390, height: CGFloat.greatestFiniteMagnitude)).height
+        let window = hostInWindow(textView, width: 390, height: height)
+        let code = try XCTUnwrap(findSubview(GlimmerCodeBlockView.self, in: textView))
+
+        _ = textView.sizeThatFits(CGSize(width: 390, height: CGFloat.greatestFiniteMagnitude))
+        _ = textView.intrinsicContentSize
+        textView.frame.size.height += 40
+        settle(textView)
+
+        let after = try XCTUnwrap(findSubview(GlimmerCodeBlockView.self, in: textView))
+        XCTAssertTrue(after === code, "height queries and frame changes must not rebuild embed views")
+        let loaded = await waitUntil { loader.count >= 1 }
+        XCTAssertTrue(loaded)
+        settle(textView)
+        XCTAssertEqual(loader.count, 1, "the image is fetched once")
+        _ = window
+    }
+
+    func testImageLoadIsCancelledWhenTheViewGoesAway() async throws {
+        let loader = SuspendingImageLoader()
+        let url = URL(string: "https://example.com/a.png")!  // test-only literal
+        var view: GlimmerImageEmbedView? = GlimmerImageEmbedView(source: url, alt: "a", theme: theme, loader: loader)
+        let started = await waitUntil { loader.didStart }
+        XCTAssertTrue(started)
+        XCTAssertNotNil(view)
+        view = nil
+        let cancelled = await waitUntil { loader.wasCancelled }
+        XCTAssertTrue(cancelled, "a dropped image view must not keep fetching")
     }
 
     func testThemeSetsLinkAttributes() {
@@ -92,5 +135,36 @@ final class GlimmerTextViewTests: XCTestCase {
         textView.apply(theme: themed)
         XCTAssertEqual(textView.linkTextAttributes[.foregroundColor] as? UIColor, themed.linkColor)
         XCTAssertEqual(textView.linkTextAttributes[.underlineStyle] as? Int, NSUnderlineStyle.single.rawValue)
+    }
+}
+
+/// Counts fetches; returns an empty image.
+final class CountingImageLoader: GlimmerImageLoader, @unchecked Sendable {
+    private let lock = NSLock()
+    private var calls = 0
+    var count: Int { lock.withLock { calls } }
+
+    func loadImage(from url: URL) async throws -> UIImage {
+        lock.withLock { calls += 1 }
+        return UIImage()
+    }
+}
+
+/// Never finishes on its own; records whether its task was cancelled.
+final class SuspendingImageLoader: GlimmerImageLoader, @unchecked Sendable {
+    private let lock = NSLock()
+    private var started = false
+    private var cancelled = false
+    var didStart: Bool { lock.withLock { started } }
+    var wasCancelled: Bool { lock.withLock { cancelled } }
+
+    func loadImage(from url: URL) async throws -> UIImage {
+        lock.withLock { started = true }
+        return try await withTaskCancellationHandler {
+            try await Task.sleep(for: .seconds(30))
+            return UIImage()
+        } onCancel: {
+            lock.withLock { cancelled = true }
+        }
     }
 }

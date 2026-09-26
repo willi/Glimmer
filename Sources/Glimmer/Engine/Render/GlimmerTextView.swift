@@ -33,6 +33,9 @@ final class GlimmerTextView: UITextView {
         linkTextAttributes = link
     }
 
+    /// Measured by `UITextView`. TextKit 2 inside a text view lays out only what its viewport covers — even after
+    /// `ensureLayout(for: documentRange)` — so usage bounds under-report a view shorter than its content. The
+    /// attachments cache their views, so the provider churn this measurement causes rebuilds nothing.
     override func sizeThatFits(_ size: CGSize) -> CGSize {
         guard size.width > 0, attributedText.length > 0 else { return CGSize(width: max(size.width, 0), height: 0) }
         let fitted = super.sizeThatFits(CGSize(width: size.width, height: CGFloat.greatestFiniteMagnitude))

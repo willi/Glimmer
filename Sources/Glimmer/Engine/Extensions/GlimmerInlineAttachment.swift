@@ -5,6 +5,8 @@ final class GlimmerInlineAttachment: NSTextAttachment {
     let token: GlimmerInlineToken
     let glimmerExtension: any GlimmerExtension
     let theme: GlimmerTheme
+    /// Built once and reused when TextKit asks for a fresh provider (height queries, frame changes).
+    private var cachedView: UIView?
 
     init(token: GlimmerInlineToken, glimmerExtension: any GlimmerExtension, theme: GlimmerTheme) {
         self.token = token
@@ -25,6 +27,24 @@ final class GlimmerInlineAttachment: NSTextAttachment {
         provider.tracksTextAttachmentViewBounds = true
         return provider
     }
+
+    /// The chip's view: the extension's, or a label with the token's display text. Created once.
+    @MainActor
+    func chipView() -> UIView {
+        if let cachedView { return cachedView }
+        let view: UIView
+        if let custom = glimmerExtension.makeInlineView(for: token, theme: theme) {
+            view = custom
+        } else {
+            let label = UILabel()
+            label.text = token.displayText
+            label.font = theme.bodyFont
+            label.textColor = theme.linkColor
+            view = label
+        }
+        cachedView = view
+        return view
+    }
 }
 
 /// Creates the chip view and sizes it to the surrounding font's line height.
@@ -33,20 +53,10 @@ final class GlimmerInlineAttachment: NSTextAttachment {
 /// `UITextView` layout, so they assume main-actor isolation to build and measure the view.
 final class GlimmerInlineViewProvider: NSTextAttachmentViewProvider {
     override func loadView() {
-        // The attachment is immutable after init and this callback runs on the main thread during layout.
+        // UITextView calls this on the main thread during layout; the attachment's only mutable state (its cached view) is main-actor.
         nonisolated(unsafe) let attachment = textAttachment as? GlimmerInlineAttachment
         guard attachment != nil else { return }
-        view = MainActor.assumeIsolated { () -> UIView? in
-            guard let attachment else { return nil }
-            if let custom = attachment.glimmerExtension.makeInlineView(for: attachment.token, theme: attachment.theme) {
-                return custom
-            }
-            let label = UILabel()
-            label.text = attachment.token.displayText
-            label.font = attachment.theme.bodyFont
-            label.textColor = attachment.theme.linkColor
-            return label
-        }
+        view = MainActor.assumeIsolated { attachment?.chipView() }
     }
 
     override func attachmentBounds(
