@@ -12,11 +12,17 @@ import XCTest
 /// These run in Debug on the simulator, so the gates are looser than the spec's.
 @MainActor
 final class GlimmerStreamingPerformanceTests: XCTestCase {
+    // The apply is Glimmer's own code: Debug is slower, so its gate is looser; Release gates at the spec's 2 ms.
+    #if DEBUG
     private let budget: Duration = .milliseconds(8)
+    #else
+    private let budget: Duration = .milliseconds(2)
+    #endif
     /// TextKit re-lays out the ~60 fragments of the rendered band after every change: 3–4 ms p95 here, 4–6 ms with a
     /// reveal's mask (it was 30 ms before the band). Plan 5's on-device harness checks the Release cost against hitches.
-    /// Measured before moving compose off-main (main-thread CPU, p95): mixed 12 ms, revealing 18 ms, long list 20 ms;
-    /// after: 13, 19 and 6 ms.
+    /// The rest of the main thread is TextKit's layout and drawing — framework code, as fast in Debug as in Release — so
+    /// these bounds hold for both. Measured before moving compose off-main (main-thread CPU, p95): mixed 12 ms,
+    /// revealing 18 ms, long list 20 ms; after: 13, 19 and 6 ms (Release: 8, 21 and 6 under load).
     private let mainThreadBudget: Duration = .milliseconds(18)
     /// A regression bound, not the spec's 4 ms: TextKit's first layout of the screen dominates a cached configure.
     private let configureBudget: Duration = .milliseconds(24)
@@ -62,6 +68,7 @@ final class GlimmerStreamingPerformanceTests: XCTestCase {
         let timer = ContinuousClock()
         var samples: [Duration] = []
         for _ in 0..<21 { samples.append(timer.measure { _ = view.textView.segmentRects(for: late) }) }
+        print("PERF late segment lookup at 5,000 words: median \(samples.sorted()[10])")
         XCTAssertLessThan(samples.sorted()[10], .microseconds(200), "median segment lookup at the end of 5,000 words")
         _ = window
     }
