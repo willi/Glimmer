@@ -17,6 +17,8 @@ struct GlimmerComposer {
         var listDepth = 0
         /// Overrides `paragraphSpacing` (tight lists).
         var paragraphSpacing: CGFloat?
+        /// Width of the innermost list's marker column: its text starts this far right of the marker.
+        var listStep: CGFloat = 0
     }
 
     func compose(_ blocks: [GlimmerBlock]) -> NSAttributedString {
@@ -76,11 +78,17 @@ struct GlimmerComposer {
 
     private func appendList(_ list: GlimmerList, context: Context, to output: NSMutableAttributedString) {
         var inner = context
-        inner.indent += theme.listIndent
         inner.listDepth += 1
+        let markers = list.items.enumerated().map { offset, item in
+            listMarker(kind: list.kind, index: offset, checkbox: item.checkbox, context: inner)
+        }
+        // At least `listIndent`, and always a gap after the widest marker (wide numbers, large text sizes).
+        let widestMarker = markers.map { $0.attributedSubstring(from: NSRange(location: 0, length: $0.length - 1)).size().width }.max() ?? 0
+        inner.listStep = max(theme.listIndent, ceil(widestMarker + theme.bodyFont.pointSize * 0.4))
+        inner.indent += inner.listStep
         inner.paragraphSpacing = list.isTight ? theme.tightListSpacing : nil
         for (offset, item) in list.items.enumerated() {
-            let marker = listMarker(kind: list.kind, index: offset, checkbox: item.checkbox, context: inner)
+            let marker = markers[offset]
             if item.blocks.isEmpty {
                 appendTextParagraph([], font: theme.bodyFont, context: inner, marker: marker, to: output)
             }
@@ -135,7 +143,7 @@ struct GlimmerComposer {
         let style = NSMutableParagraphStyle()
         style.lineHeightMultiple = theme.lineHeightMultiple
         style.headIndent = context.indent
-        style.firstLineHeadIndent = hasMarker ? max(0, context.indent - theme.listIndent) : context.indent
+        style.firstLineHeadIndent = hasMarker ? max(0, context.indent - context.listStep) : context.indent
         style.tabStops = hasMarker ? [NSTextTab(textAlignment: .natural, location: context.indent, options: [:])] : []
         style.paragraphSpacing = context.paragraphSpacing ?? theme.paragraphSpacing
         return style

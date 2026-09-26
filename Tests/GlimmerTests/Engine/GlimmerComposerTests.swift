@@ -82,6 +82,23 @@ final class GlimmerComposerTests: XCTestCase {
         XCTAssertEqual(style(of: "inner", in: text)?.headIndent, theme.listIndent * 2)
     }
 
+    func testWideListMarkerKeepsAGapBeforeTheText() {
+        let text = compose("1000. item")
+        let markerWidth = NSAttributedString(string: "1000.", attributes: [.font: theme.bodyFont]).size().width
+        let paragraph = style(of: "item", in: text)
+        XCTAssertGreaterThanOrEqual(paragraph?.headIndent ?? 0, markerWidth + 4, "the text never touches its marker")
+        XCTAssertEqual(paragraph?.firstLineHeadIndent, 0)
+        XCTAssertEqual(paragraph?.tabStops.first?.location, paragraph?.headIndent)
+    }
+
+    func testListAtAccessibilitySizeKeepsAGap() {
+        let scaled = theme.scaled(for: UITraitCollection(preferredContentSizeCategory: .accessibilityExtraExtraExtraLarge))
+        let text = GlimmerComposer(theme: scaled).compose(GlimmerParser.parse("1. item"))
+        let markerWidth = NSAttributedString(string: "1.", attributes: [.font: scaled.bodyFont]).size().width
+        let paragraph = style(of: "item", in: text)
+        XCTAssertGreaterThanOrEqual(paragraph?.headIndent ?? 0, markerWidth + 4)
+    }
+
     func testTaskListUsesCheckboxAndMarkdownSource() {
         let text = compose("- [x] done")
         XCTAssertNotNil(text.attribute(.attachment, at: 0, effectiveRange: nil) as? NSTextAttachment)

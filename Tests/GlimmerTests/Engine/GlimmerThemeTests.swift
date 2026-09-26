@@ -24,6 +24,17 @@ final class GlimmerThemeTests: XCTestCase {
         XCTAssertGreaterThan(huge.headingFonts[0].pointSize, large.headingFonts[0].pointSize)
     }
 
+    func testSpacingScalesWithDynamicType() {
+        let theme = GlimmerTheme.default
+        let large = theme.scaled(for: UITraitCollection(preferredContentSizeCategory: .large))
+        let huge = theme.scaled(for: UITraitCollection(preferredContentSizeCategory: .accessibilityExtraLarge))
+        XCTAssertGreaterThan(huge.listIndent, large.listIndent)
+        XCTAssertGreaterThan(huge.quoteIndent, large.quoteIndent)
+        XCTAssertGreaterThan(huge.paragraphSpacing, large.paragraphSpacing)
+        XCTAssertGreaterThan(huge.blockSpacing, large.blockSpacing)
+        XCTAssertGreaterThan(huge.embedPadding, large.embedPadding)
+    }
+
     func testColorsAdaptToDarkMode() {
         let color = GlimmerTheme.default.textColor
         let light = color.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))

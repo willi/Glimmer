@@ -52,11 +52,19 @@ public struct GlimmerTheme: Sendable {
         headingFonts[min(max(level, 1), headingFonts.count) - 1]
     }
 
-    /// A copy with every font scaled for the traits' content size category.
+    /// A copy with every font — and the spacing that must grow with text — scaled for the traits' content size
+    /// category.
     public func scaled(for traits: UITraitCollection) -> GlimmerTheme {
         let metrics = UIFontMetrics.default
         func scale(_ font: UIFont) -> UIFont { metrics.scaledFont(for: font, compatibleWith: traits) }
+        func scale(_ value: CGFloat) -> CGFloat { metrics.scaledValue(for: value, compatibleWith: traits) }
         var copy = self
+        copy.paragraphSpacing = scale(paragraphSpacing)
+        copy.tightListSpacing = scale(tightListSpacing)
+        copy.blockSpacing = scale(blockSpacing)
+        copy.listIndent = scale(listIndent)
+        copy.quoteIndent = scale(quoteIndent)
+        copy.embedPadding = scale(embedPadding)
         copy.bodyFont = scale(bodyFont)
         copy.codeFont = scale(codeFont)
         copy.headingFonts = headingFonts.map(scale)
