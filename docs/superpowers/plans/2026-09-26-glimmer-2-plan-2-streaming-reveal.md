@@ -22,6 +22,8 @@
 
 Appending in a TextKit 2 editing transaction kept the first paragraph's layout-fragment object (it was reused) and re-laid out only the edited one: 0.94 ms including `ensureLayout`. Both a full re-parse and a full re-compose on every update would exceed the spec's 2 ms p95 budget on long answers, so this plan does neither.
 
+**Constraint found in Plan 1's review fix (2026-09-26):** TextKit 2 inside a `UITextView` lays out only the lines its viewport covers, even after `ensureLayout(for: documentRange)`. So `GlimmerView` keeps the text view's frame at the full document height (`fitTextViewToContent`) and clips itself to the revealed height, rather than sizing the text view to the revealed height. Measuring through `UITextView.sizeThatFits` on every update is a cost that Task 11's recording and Plan 3's harness must check against the §3 budget.
+
 **Ruling carried in this plan (spec §5.2 conflict):** with phrases capped at 8 words and starts at least 60 ms apart, peak throughput is about 750 characters a second. A 3,000-character burst would then need about 4 s to drain, not the spec's "about 1.5 s". The resolution is that a phrase grows until it carries at least `rate × minPhraseSpacing` characters, so fast streams reveal in larger phrases (as Gemini's does) while starts stay at least 60 ms apart.
 
 ## Global Constraints
@@ -2001,6 +2003,8 @@ public final class GlimmerView: UIView {
         self.configuration = configuration
         document = GlimmerStreamingDocument(composer: GlimmerComposer(theme: configuration.theme))
         super.init(frame: .zero)
+        // While revealing, this view is shorter than the text and clips the rest (see `fitTextViewToContent`).
+        clipsToBounds = true
         textView.delegate = self
         addSubview(textView)
         rebuildDocument()
@@ -2027,6 +2031,7 @@ public final class GlimmerView: UIView {
         self.revealID = revealID
         if let edit = document.update(markdown: preprocessed(markdown), isStreaming: isStreaming) {
             textView.apply(edit)
+            fitTextViewToContent()
         }
         startRevealIfNeeded()
         engine?.textChanged(NSString(string: textView.textStorage.string), isStreaming: isStreaming, now: clock.now)
@@ -2044,7 +2049,7 @@ public final class GlimmerView: UIView {
 
     public override func layoutSubviews() {
         super.layoutSubviews()
-        textView.frame = bounds
+        fitTextViewToContent()
         if let engine { revealMask.update(in: textView, engine: engine, now: clock.now) }
         guard bounds.width != lastWidth else { return }
         lastWidth = bounds.width
@@ -2116,6 +2121,7 @@ public final class GlimmerView: UIView {
         ))
         _ = document.update(markdown: preprocessed(markdown), isStreaming: isStreaming)
         textView.attributedText = document.text
+        fitTextViewToContent()
         if revealOptions == nil { endReveal() }
         revealMask.invalidateGeometry()
         engine?.textChanged(NSString(string: textView.textStorage.string), isStreaming: isStreaming, now: clock.now)
@@ -2130,10 +2136,21 @@ public final class GlimmerView: UIView {
         guard width > 0 else { return 0 }
         if let engine, engine.revealedLength < textView.textStorage.length {
             guard engine.revealedLength > 0 else { return 0 }
-            if textView.bounds.width != width { textView.frame.size.width = width }
+            if textView.bounds.width != width {
+                let fullHeight = textView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
+                textView.frame = CGRect(x: 0, y: 0, width: width, height: fullHeight)
+            }
             return ceil(textView.lineRect(atCharacter: engine.revealedLength - 1)?.maxY ?? 0)
         }
         return textView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
+    }
+
+    /// Keeps the text view as tall as the whole document. TextKit 2 inside a text view lays out only what its viewport
+    /// covers (verified in Plan 1's review fix), and the mask needs geometry for text below the revealed line.
+    private func fitTextViewToContent() {
+        guard bounds.width > 0 else { return }
+        let fullHeight = textView.sizeThatFits(CGSize(width: bounds.width, height: .greatestFiniteMagnitude)).height
+        textView.frame = CGRect(x: 0, y: 0, width: bounds.width, height: max(bounds.height, fullHeight))
     }
 
     private func reportHeightIfChanged() {
