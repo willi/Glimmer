@@ -12,6 +12,16 @@ final class GlimmerRevealMask {
     private let settledLineLayer = CAShapeLayer()
     private var phraseLayers: [Int: CAShapeLayer] = [:]
     private var geometryWidth: CGFloat = -1
+    /// What the settled geometry was last computed for; segment queries cost time in proportion to the text length,
+    /// so they run only when a phrase settles or the layout changes, not on every update or layout pass.
+    private var settledKey: SettledKey?
+
+    private struct SettledKey: Equatable {
+        let settledLength: Int
+        let width: CGFloat
+        /// Everything is settled: the settled rect then reaches the bottom of the view, so its height matters.
+        let allSettledHeight: CGFloat?
+    }
 
     init() {
         settledLayer.backgroundColor = UIColor.black.cgColor
@@ -28,6 +38,7 @@ final class GlimmerRevealMask {
     /// Forces phrase geometry to be rebuilt on the next update (theme or text changes that move glyphs).
     func invalidateGeometry() {
         geometryWidth = -1
+        settledKey = nil
     }
 
     func update(in textView: GlimmerTextView, engine: GlimmerRevealEngine, now: TimeInterval) {
@@ -42,13 +53,20 @@ final class GlimmerRevealMask {
 
         // Settled: every line above the first unsettled character, plus that line's settled part.
         let firstUnsettled = engine.settledLength
-        let lineTop = textView.lineRect(atCharacter: firstUnsettled)?.minY ?? bounds.height
-        settledLayer.frame = CGRect(x: 0, y: 0, width: bounds.width, height: lineTop)
-        let lineStart = max(0, firstUnsettled - 512)
-        let settledOnLine = textView.segmentRects(for: NSRange(location: lineStart, length: firstUnsettled - lineStart))
-            .filter { $0.minY >= lineTop - 0.5 }
-        // The settled part of a line always starts the line, so it also uncovers the gutter (quote bars).
-        settledLineLayer.path = Self.path(settledOnLine.map(Self.extendedToLeadingEdge))
+        let key = SettledKey(
+            settledLength: firstUnsettled, width: bounds.width,
+            allSettledHeight: firstUnsettled < textView.textStorage.length ? nil : bounds.height
+        )
+        if key != settledKey || rebuild {
+            settledKey = key
+            let lineTop = textView.lineRect(atCharacter: firstUnsettled)?.minY ?? bounds.height
+            settledLayer.frame = CGRect(x: 0, y: 0, width: bounds.width, height: lineTop)
+            let lineStart = max(0, firstUnsettled - 512)
+            let settledOnLine = textView.segmentRects(for: NSRange(location: lineStart, length: firstUnsettled - lineStart))
+                .filter { $0.minY >= lineTop - 0.5 }
+            // The settled part of a line always starts the line, so it also uncovers the gutter (quote bars).
+            settledLineLayer.path = Self.path(settledOnLine.map(Self.extendedToLeadingEdge))
+        }
 
         // Fading: one layer per active phrase, keyed by its start offset.
         var live = Set<Int>()

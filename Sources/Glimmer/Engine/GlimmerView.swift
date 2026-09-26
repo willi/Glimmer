@@ -25,6 +25,11 @@ public final class GlimmerView: UIView {
     private var document: GlimmerStreamingDocument
     private var lastWidth: CGFloat = 0
     private var lastReportedHeight: CGFloat = -1
+    /// The text's height at the text view's width, as of a text version (see `fitTextViewToContent`).
+    private var contentHeight: (version: Int, height: CGFloat)?
+    /// The bottom of the last revealed line, for a revealed length and width. Appends after the revealed text do not
+    /// move it; edits that reach into the revealed text clear it.
+    private var revealedHeight: (revealed: Int, width: CGFloat, height: CGFloat)?
 
     public init(configuration: GlimmerConfiguration = .default) {
         self.configuration = configuration
@@ -60,7 +65,10 @@ public final class GlimmerView: UIView {
             textView.apply(edit)
             fitTextViewToContent()
             // Revealed text changed or reflowed (a list turned loose, a header became a table): fading phrases move.
-            if let engine, edit.range.location < engine.revealedLength { revealMask.invalidateGeometry() }
+            if let engine, edit.range.location < engine.revealedLength {
+                revealMask.invalidateGeometry()
+                revealedHeight = nil
+            }
         }
         startRevealIfNeeded()
         engine?.textChanged(NSString(string: textView.textStorage.string), isStreaming: isStreaming, now: clock.now)
@@ -123,6 +131,7 @@ public final class GlimmerView: UIView {
         let resumed = revealID.flatMap { GlimmerRevealStore.shared.revealedLength(for: $0) } ?? 0
         engine = GlimmerRevealEngine(options: options, alreadyRevealed: min(resumed, textView.textStorage.length))
         revealMask.invalidateGeometry()
+        revealedHeight = nil
         textView.layer.mask = revealMask.layer
     }
 
@@ -150,6 +159,7 @@ public final class GlimmerView: UIView {
         ))
         _ = document.update(markdown: preprocessed(markdown), isStreaming: isStreaming)
         textView.attributedText = document.text
+        revealedHeight = nil
         fitTextViewToContent()
         if revealOptions == nil { endReveal() }
         revealMask.invalidateGeometry()
@@ -167,19 +177,49 @@ public final class GlimmerView: UIView {
             guard engine.revealedLength > 0 else { return 0 }
             if textView.bounds.width != width {
                 let fullHeight = textView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
-                textView.frame = CGRect(x: 0, y: 0, width: width, height: fullHeight)
+                textView.frame = CGRect(x: 0, y: 0, width: width, height: fullHeight + slack(forContentHeight: fullHeight))
             }
-            return ceil(textView.lineRect(atCharacter: engine.revealedLength - 1)?.maxY ?? 0)
+            if let revealedHeight, revealedHeight.revealed == engine.revealedLength, revealedHeight.width == width {
+                return revealedHeight.height
+            }
+            let height = ceil(textView.lineRect(atCharacter: engine.revealedLength - 1)?.maxY ?? 0)
+            revealedHeight = (engine.revealedLength, width, height)
+            return height
+        }
+        if width == textView.bounds.width, width == bounds.width {
+            if contentHeight?.version != textView.textVersion { fitTextViewToContent() }
+            if let contentHeight { return contentHeight.height }
         }
         return textView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
     }
 
-    /// Keeps the text view as tall as the whole document. TextKit 2 inside a text view lays out only what its viewport
-    /// covers (verified in Plan 1's review fix), and the mask needs geometry for text below the revealed line.
+    /// Keeps the text view taller than the whole document, with a slack band below the text. TextKit 2 inside a text
+    /// view lays out only what its viewport covers, and the mask needs geometry for text below the revealed line. The
+    /// band lets most updates measure from the laid-out text (`laidOutHeight`) and leave the frame alone: resizing a
+    /// long text view costs as much as laying it out again. The band grows with the text, so resizes stay rare.
     private func fitTextViewToContent() {
         guard bounds.width > 0 else { return }
-        let fullHeight = textView.sizeThatFits(CGSize(width: bounds.width, height: .greatestFiniteMagnitude)).height
-        textView.frame = CGRect(x: 0, y: 0, width: bounds.width, height: max(bounds.height, fullHeight))
+        if textView.bounds.width != bounds.width {
+            // A new width re-wraps everything: measure it in full once.
+            let fullHeight = textView.sizeThatFits(CGSize(width: bounds.width, height: .greatestFiniteMagnitude)).height
+            textView.frame = CGRect(x: 0, y: 0, width: bounds.width, height: fullHeight + slack(forContentHeight: fullHeight))
+        }
+        var height = textView.laidOutHeight()
+        // Text reaching into the band may run on past the frame, unlaid-out: grow the frame and measure again.
+        while height > textView.bounds.height - slack(forContentHeight: height) / 2 {
+            textView.frame.size.height = height + slack(forContentHeight: height)
+            height = textView.laidOutHeight()
+        }
+        // Far more band than text (a regenerated, shorter answer): give the space back.
+        if textView.bounds.height > height + 2 * slack(forContentHeight: height) {
+            textView.frame.size.height = height + slack(forContentHeight: height)
+        }
+        if textView.bounds.height < bounds.height { textView.frame.size.height = bounds.height }
+        contentHeight = (textView.textVersion, height)
+    }
+
+    private func slack(forContentHeight height: CGFloat) -> CGFloat {
+        max(1_000, height / 4)
     }
 
     private func reportHeightIfChanged() {
