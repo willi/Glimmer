@@ -17,16 +17,26 @@ struct GlimmerComposer {
         var listDepth = 0
         /// Overrides `paragraphSpacing` (tight lists).
         var paragraphSpacing: CGFloat?
+        /// True while composing the document's first top-level block (no heading space above it).
+        var isDocumentStart = false
         /// Width of the innermost list's marker column: its text starts this far right of the marker.
         var listStep: CGFloat = 0
     }
 
     func compose(_ blocks: [GlimmerBlock]) -> NSAttributedString {
         let output = NSMutableAttributedString()
-        for block in blocks { append(block, context: Context(), marker: nil, to: output) }
-        if output.string.hasSuffix("\n") {
-            output.deleteCharacters(in: NSRange(location: output.length - 1, length: 1))
-        }
+        for (index, block) in blocks.enumerated() { output.append(composeBlock(block, isFirst: index == 0)) }
+        if output.length > 0 { output.deleteCharacters(in: NSRange(location: output.length - 1, length: 1)) }
+        return output
+    }
+
+    /// One top-level block, ending in "\n". `compose(_:)` is exactly these joined with the final "\n" removed, which
+    /// is what lets `GlimmerStreamingDocument` re-compose only the blocks that changed.
+    func composeBlock(_ block: GlimmerBlock, isFirst: Bool) -> NSAttributedString {
+        let output = NSMutableAttributedString()
+        var context = Context()
+        context.isDocumentStart = isFirst
+        append(block, context: context, marker: nil, to: output)
         return output
     }
 
@@ -50,7 +60,7 @@ struct GlimmerComposer {
             }
         case .heading(let level, let inlines):
             appendTextParagraph(inlines, font: theme.headingFont(level: level), context: context, marker: marker,
-                                headingLevel: level, spacingBefore: output.length > 0 ? theme.blockSpacing : 0, to: output)
+                                headingLevel: level, spacingBefore: output.length > 0 || !context.isDocumentStart ? theme.blockSpacing : 0, to: output)
         case .blockQuote(let blocks):
             var inner = context
             inner.indent += theme.quoteIndent

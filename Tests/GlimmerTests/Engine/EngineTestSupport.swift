@@ -54,3 +54,30 @@ func layoutFragments(_ textView: UITextView) -> [NSTextLayoutFragment] {
     }
     return fragments
 }
+
+/// Compares two attributed strings run by run. Attachments compare by type, because every composition creates new
+/// attachment objects; every other attribute value must be `isEqual`.
+func assertEquivalent(
+    _ lhs: NSAttributedString, _ rhs: NSAttributedString, _ message: String,
+    file: StaticString = #filePath, line: UInt = #line
+) {
+    XCTAssertEqual(lhs.string, rhs.string, message, file: file, line: line)
+    guard lhs.string == rhs.string else { return }
+    var index = 0
+    while index < lhs.length {
+        var lhsRange = NSRange()
+        var rhsRange = NSRange()
+        let left = lhs.attributes(at: index, effectiveRange: &lhsRange)
+        let right = rhs.attributes(at: index, effectiveRange: &rhsRange)
+        XCTAssertEqual(Set(left.keys.map(\.rawValue)), Set(right.keys.map(\.rawValue)), "\(message): keys at \(index)", file: file, line: line)
+        for (key, leftValue) in left {
+            guard let rightValue = right[key] else { continue }
+            if let leftAttachment = leftValue as? NSTextAttachment, let rightAttachment = rightValue as? NSTextAttachment {
+                XCTAssertTrue(type(of: leftAttachment) == type(of: rightAttachment), "\(message): attachment at \(index)", file: file, line: line)
+            } else {
+                XCTAssertTrue((leftValue as AnyObject).isEqual(rightValue), "\(message): \(key.rawValue) at \(index)", file: file, line: line)
+            }
+        }
+        index = min(NSMaxRange(lhsRange), NSMaxRange(rhsRange))
+    }
+}

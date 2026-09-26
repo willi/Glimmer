@@ -10,6 +10,12 @@ public enum GlimmerParser {
     private static let registration: Void = cmark_gfm_core_extensions_ensure_registered()
 
     public static func parse(_ markdown: String) -> [GlimmerBlock] {
+        parseWithLines(markdown).map(\.block)
+    }
+
+    /// Top-level blocks with the 1-based source line each starts on. `GlimmerStreamingDocument` uses the last
+    /// block's line to re-parse only the open tail.
+    static func parseWithLines(_ markdown: String) -> [(block: GlimmerBlock, startLine: Int)] {
         _ = registration
         guard let parser = cmark_parser_new(CMARK_OPT_DEFAULT) else { return [] }
         defer { cmark_parser_free(parser) }
@@ -27,7 +33,9 @@ public enum GlimmerParser {
         }
         guard let document = cmark_parser_finish(parser) else { return [] }
         defer { cmark_node_free(document) }
-        return blocks(in: document)
+        return children(of: document).compactMap { node in
+            block(node).map { (block: $0, startLine: Int(cmark_node_get_start_line(node))) }
+        }
     }
 
     // MARK: - Blocks
