@@ -32,6 +32,11 @@ final class GlimmerBlockAttachment: NSTextAttachment {
         return provider
     }
 
+    /// A new attachment for the same embed, without a view: for a cached text shown by another view.
+    func freshCopy() -> GlimmerBlockAttachment {
+        GlimmerBlockAttachment(embed: embed, theme: theme, highlighter: highlighter, imageLoader: imageLoader)
+    }
+
     /// Moves the attachment to a grown embed and updates its view, if one was made. Main thread: it touches the view,
     /// and TextKit reads `embed` when it asks for a view.
     @MainActor

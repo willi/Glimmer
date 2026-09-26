@@ -32,6 +32,11 @@ public final class GlimmerView: UIView {
     private var worker: GlimmerDocumentWorker
     private var requestedUpdate = 0
     private var appliedUpdate = 0
+    /// False while the view shows a cached text its worker never composed: the worker's first result then replaces the
+    /// whole text instead of applying an edit to it.
+    private var viewHoldsWorkerText = true
+    /// The cache key of the settled text on screen, or nil (streaming, or edited since it was shown).
+    private var cacheKey: GlimmerDocumentCache.Key?
     private var lastWidth: CGFloat = 0
     private var lastReportedHeight: CGFloat = -1
     /// The text's height at the text view's width, as of a text version (see `fitTextViewToContent`).
@@ -216,11 +221,31 @@ public final class GlimmerView: UIView {
         ))
     }
 
-    /// Composes the whole current markdown on the main thread and restarts the worker from that document.
+    /// Composes the whole current markdown on the main thread and restarts the worker from that document. A settled
+    /// answer shown before (same source, theme and extensions) comes from `GlimmerDocumentCache` instead.
     private func composeSynchronously() {
+        let theme = configuration.theme.scaled(for: traitCollection)
+        let source = preprocessed(markdown)
+        let key = GlimmerDocumentCache.Key(source: source, theme: theme,
+                                           extensions: configuration.extensions.map { String(reflecting: type(of: $0)) })
+        // An empty answer (every new view starts with one) costs nothing to compose; keep it out of the cache.
+        let cacheable = !isStreaming && !source.isEmpty
+        if cacheable, let cached = GlimmerDocumentCache.shared.text(for: key) {
+            // The worker starts empty; its first result replaces the whole text (see `drainDocumentUpdates`).
+            worker = GlimmerDocumentWorker(document: makeDocument(), extensions: configuration.extensions)
+            viewHoldsWorkerText = false
+            cacheKey = key
+            appliedUpdate = requestedUpdate
+            textView.attributedText = cached
+            apply(GlimmerDocumentResult(edit: nil, embedUnits: [:], isStreaming: false), replacedText: true)
+            return
+        }
         let document = makeDocument()
-        _ = document.update(markdown: preprocessed(markdown), isStreaming: isStreaming)
+        _ = document.update(markdown: source, isStreaming: isStreaming)
+        if cacheable { GlimmerDocumentCache.shared.store(document.text, for: key) }
+        cacheKey = cacheable ? key : nil
         worker = GlimmerDocumentWorker(document: document, extensions: configuration.extensions)
+        viewHoldsWorkerText = true
         appliedUpdate = requestedUpdate
         textView.attributedText = document.text
         apply(GlimmerDocumentResult(edit: nil, embedUnits: document.embedUnits, isStreaming: isStreaming), replacedText: true)
@@ -234,7 +259,18 @@ public final class GlimmerView: UIView {
             let result = await worker.update(markdown: markdown, isStreaming: isStreaming)
             // A synchronous compose replaced the worker meanwhile, and already showed this text.
             guard worker === self.worker else { continue }
-            apply(result, replacedText: false)
+            if viewHoldsWorkerText {
+                apply(result, replacedText: false)
+            } else {
+                // The view shows a cached text the worker never composed: take its whole text instead of an edit.
+                let full = await worker.text().text
+                guard worker === self.worker else { continue }
+                textView.attributedText = full
+                viewHoldsWorkerText = true
+                cacheKey = nil
+                apply(GlimmerDocumentResult(edit: nil, embedUnits: result.embedUnits, isStreaming: result.isStreaming),
+                      replacedText: true)
+            }
             appliedUpdate = request
         }
         pendingDocument = nil
@@ -245,6 +281,7 @@ public final class GlimmerView: UIView {
         let started = ContinuousClock.now
         embedUnits = result.embedUnits
         if let edit = result.edit {
+            cacheKey = nil
             // Grown code blocks and tables update their views in place; the edit then re-lays them out.
             for update in edit.embedUpdates { update.attachment.update(to: update.embed) }
             textView.apply(edit)
@@ -294,7 +331,10 @@ public final class GlimmerView: UIView {
             if contentHeight?.version != textView.textVersion { fitTextViewToContent() }
             if let contentHeight { return contentHeight.height }
         }
-        return textView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
+        if let cacheKey, let cached = GlimmerDocumentCache.shared.height(for: cacheKey, width: width) { return cached }
+        let measured = textView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
+        if let cacheKey, engine == nil { GlimmerDocumentCache.shared.storeHeight(measured, for: cacheKey, width: width) }
+        return measured
     }
 
     /// Keeps the text view at least as tall as the document, with a slack band below it. The text container is
@@ -303,13 +343,25 @@ public final class GlimmerView: UIView {
     /// grows with the text.
     private func fitTextViewToContent() {
         guard bounds.width > 0 else { return }
-        if textView.bounds.width != bounds.width {
+        let widthChanged = textView.bounds.width != bounds.width
+        guard widthChanged || contentHeight?.version != textView.textVersion else { return }
+        // A settled answer shown before, whole (a new width, or a replaced text): its height is known.
+        if widthChanged || layoutChangedFrom == 0,
+           let cached = cacheKey.flatMap({ GlimmerDocumentCache.shared.height(for: $0, width: bounds.width) }) {
+            let slack = slack(forContentHeight: cached)
+            if widthChanged || textView.bounds.height < cached || textView.bounds.height > cached + 2 * slack {
+                textView.frame = CGRect(x: 0, y: 0, width: bounds.width, height: cached + slack)
+            }
+            if textView.bounds.height < bounds.height { textView.frame.size.height = bounds.height }
+            layoutChangedFrom = 0
+            contentHeight = (textView.textVersion, cached)
+            return
+        }
+        if widthChanged {
             // A new width re-wraps everything: measure it in full once.
             let fullHeight = textView.sizeThatFits(CGSize(width: bounds.width, height: .greatestFiniteMagnitude)).height
             textView.frame = CGRect(x: 0, y: 0, width: bounds.width, height: fullHeight + slack(forContentHeight: fullHeight))
             layoutChangedFrom = 0
-        } else if contentHeight?.version == textView.textVersion {
-            return
         }
         let height = textView.laidOutHeight(from: layoutChangedFrom)
         layoutChangedFrom = Int.max
@@ -319,6 +371,7 @@ public final class GlimmerView: UIView {
         }
         if textView.bounds.height < bounds.height { textView.frame.size.height = bounds.height }
         contentHeight = (textView.textVersion, height)
+        if let cacheKey, engine == nil { GlimmerDocumentCache.shared.storeHeight(height, for: cacheKey, width: textView.bounds.width) }
     }
 
     private func slack(forContentHeight height: CGFloat) -> CGFloat {

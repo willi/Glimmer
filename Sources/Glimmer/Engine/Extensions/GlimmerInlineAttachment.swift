@@ -17,6 +17,11 @@ final class GlimmerInlineAttachment: NSTextAttachment {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// A new attachment for the same token, without a view: for a cached text shown by another view.
+    func freshCopy() -> GlimmerInlineAttachment {
+        GlimmerInlineAttachment(token: token, glimmerExtension: glimmerExtension, theme: theme)
+    }
+
     override func viewProvider(
         for parentView: UIView?, location: any NSTextLocation, textContainer: NSTextContainer?
     ) -> NSTextAttachmentViewProvider? {

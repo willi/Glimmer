@@ -10,6 +10,11 @@ struct GlimmerDocumentResult: @unchecked Sendable {
     let isStreaming: Bool
 }
 
+/// A worker's whole text, handed to the main thread once (see `GlimmerDocumentResult` for the `@unchecked`).
+struct GlimmerTextBox: @unchecked Sendable {
+    let text: NSAttributedString
+}
+
 /// Runs a view's document off the main thread, one update at a time, in the order requested.
 actor GlimmerDocumentWorker {
     private let document: GlimmerStreamingDocument
@@ -24,5 +29,10 @@ actor GlimmerDocumentWorker {
         let source = extensions.reduce(markdown) { $1.preprocess($0) }
         let edit = document.update(markdown: source, isStreaming: isStreaming)
         return GlimmerDocumentResult(edit: edit, embedUnits: document.embedUnits, isStreaming: isStreaming)
+    }
+
+    /// A copy of the document's whole text.
+    func text() -> GlimmerTextBox {
+        GlimmerTextBox(text: NSAttributedString(attributedString: document.text))
     }
 }

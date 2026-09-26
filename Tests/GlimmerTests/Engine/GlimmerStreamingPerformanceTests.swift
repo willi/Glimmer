@@ -18,6 +18,8 @@ final class GlimmerStreamingPerformanceTests: XCTestCase {
     /// Measured before moving compose off-main (main-thread CPU, p95): mixed 12 ms, revealing 18 ms, long list 20 ms;
     /// after: 13, 19 and 6 ms.
     private let mainThreadBudget: Duration = .milliseconds(18)
+    /// A regression bound, not the spec's 4 ms: TextKit's first layout of the screen dominates a cached configure.
+    private let configureBudget: Duration = .milliseconds(24)
     private let revealingMainThreadBudget: Duration = .milliseconds(26)
 
     /// About 5,000 words of headings, prose, lists, quotes, code and tables.
@@ -87,6 +89,35 @@ final class GlimmerStreamingPerformanceTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(textView.laidOutHeight(from: 0), full)
         XCTAssertLessThan(samples.sorted()[5], .microseconds(300), "median measure after an append at 5,000 words")
         _ = window
+    }
+
+    /// Spec §3: configuring a settled answer on cell reuse ≤ 4 ms, with the document and height cached. What the cache
+    /// owns is parsing, composing and measuring; TextKit still lays out and draws the first screen, and builds its
+    /// embeds' views, on every configure. So this gates the cache's share against an uncached configure measured the
+    /// same way, and prints the absolute numbers for Plan 5's device run.
+    func testConfiguringACachedSettledAnswerStaysWithinBudget() {
+        let answer = Array(repeating: StreamingFixtures.all.map(\.markdown).joined(separator: "\n\n"), count: 7).joined(separator: "\n\n")
+        func configure() -> Duration {
+            let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
+            let window = hostInWindow(view, width: 390, height: 800)
+            defer { _ = window }
+            return ContinuousClock().measure {
+                view.update(markdown: answer)
+                view.layoutIfNeeded()
+            }
+        }
+        var uncached: [Duration] = []
+        for _ in 0..<9 {
+            GlimmerDocumentCache.shared.removeAll()
+            uncached.append(configure())
+        }
+        _ = configure()
+        var cached: [Duration] = []
+        for _ in 0..<9 { cached.append(configure()) }
+        let cachedMedian = cached.sorted()[4], uncachedMedian = uncached.sorted()[4]
+        print("PERF configure ~1,200 words: cached median \(cachedMedian), uncached median \(uncachedMedian)")
+        XCTAssertLessThan(cachedMedian, uncachedMedian * 0.7, "the cache saves parsing, composing and measuring")
+        XCTAssertLessThan(cachedMedian, configureBudget)
     }
 
     /// Streams all but the last 1,200 characters at once, then the rest in 30-character chunks, following the view's

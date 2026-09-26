@@ -125,3 +125,6 @@ extension GlimmerTheme {
         )
     }
 }
+
+/// Keys the settled-document cache: a different theme composes a different text.
+extension GlimmerTheme: Hashable {}
