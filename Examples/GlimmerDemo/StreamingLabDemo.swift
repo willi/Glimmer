@@ -111,6 +111,24 @@ struct StreamingLabDemo: View {
     | Fade | 0.6 s |
     | Minimum spacing | 60 ms |
 
+    ## Ten steps
+
+    1. Add the package.
+    2. Create a view:
+
+       ```swift
+       let view = GlimmerView()
+       ```
+
+    3. Send it the text received so far.
+    4. Pass one reveal ID per message.
+    5. Let the height follow the reveal.
+    6. Tap a link to open it.
+    7. Copy a code block.
+    8. Scroll a wide table.
+    9. Switch to dark mode.
+    10. Watch item 10 arrive without moving the list.
+
     That's the whole idea — the answer ends here.
     """
 }
