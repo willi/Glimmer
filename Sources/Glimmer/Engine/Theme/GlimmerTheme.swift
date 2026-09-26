@@ -55,9 +55,12 @@ public struct GlimmerTheme: Sendable {
     /// A copy with every font — and the spacing that must grow with text — scaled for the traits' content size
     /// category.
     public func scaled(for traits: UITraitCollection) -> GlimmerTheme {
-        let metrics = UIFontMetrics.default
-        func scale(_ font: UIFont) -> UIFont { metrics.scaledFont(for: font, compatibleWith: traits) }
-        func scale(_ value: CGFloat) -> CGFloat { metrics.scaledValue(for: value, compatibleWith: traits) }
+        func scale(_ font: UIFont, _ style: UIFont.TextStyle) -> UIFont {
+            UIFontMetrics(forTextStyle: style).scaledFont(for: font, compatibleWith: traits)
+        }
+        func scale(_ value: CGFloat) -> CGFloat { UIFontMetrics.default.scaledValue(for: value, compatibleWith: traits) }
+        // Each role follows its own Dynamic Type curve, so headings grow less than body text at accessibility sizes.
+        let headingStyles: [UIFont.TextStyle] = [.title1, .title2, .title3, .headline, .subheadline, .footnote]
         var copy = self
         copy.paragraphSpacing = scale(paragraphSpacing)
         copy.tightListSpacing = scale(tightListSpacing)
@@ -65,12 +68,14 @@ public struct GlimmerTheme: Sendable {
         copy.listIndent = scale(listIndent)
         copy.quoteIndent = scale(quoteIndent)
         copy.embedPadding = scale(embedPadding)
-        copy.bodyFont = scale(bodyFont)
-        copy.codeFont = scale(codeFont)
-        copy.headingFonts = headingFonts.map(scale)
-        copy.tableFont = scale(tableFont)
-        copy.tableHeaderFont = scale(tableHeaderFont)
-        copy.captionFont = scale(captionFont)
+        copy.bodyFont = scale(bodyFont, .body)
+        copy.codeFont = scale(codeFont, .body)
+        copy.headingFonts = headingFonts.enumerated().map { level, font in
+            scale(font, headingStyles[min(level, headingStyles.count - 1)])
+        }
+        copy.tableFont = scale(tableFont, .subheadline)
+        copy.tableHeaderFont = scale(tableHeaderFont, .subheadline)
+        copy.captionFont = scale(captionFont, .footnote)
         return copy
     }
 }

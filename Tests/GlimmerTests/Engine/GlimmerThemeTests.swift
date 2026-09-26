@@ -24,6 +24,18 @@ final class GlimmerThemeTests: XCTestCase {
         XCTAssertGreaterThan(huge.headingFonts[0].pointSize, large.headingFonts[0].pointSize)
     }
 
+    func testEachRoleScalesOnItsOwnTextStyleCurve() {
+        let traits = UITraitCollection(preferredContentSizeCategory: .accessibilityExtraExtraExtraLarge)
+        let base = GlimmerTheme.default
+        let scaled = base.scaled(for: traits)
+        let titleCurve = UIFontMetrics(forTextStyle: .title1).scaledFont(for: base.headingFonts[0], compatibleWith: traits)
+        let bodyCurve = UIFontMetrics(forTextStyle: .body).scaledFont(for: base.headingFonts[0], compatibleWith: traits)
+        XCTAssertEqual(scaled.headingFonts[0].pointSize, titleCurve.pointSize, accuracy: 0.01)
+        XCTAssertLessThan(scaled.headingFonts[0].pointSize, bodyCurve.pointSize, "headings grow less than body text at accessibility sizes")
+        XCTAssertEqual(scaled.bodyFont.pointSize,
+                       UIFontMetrics(forTextStyle: .body).scaledFont(for: base.bodyFont, compatibleWith: traits).pointSize, accuracy: 0.01)
+    }
+
     func testSpacingScalesWithDynamicType() {
         let theme = GlimmerTheme.default
         let large = theme.scaled(for: UITraitCollection(preferredContentSizeCategory: .large))
