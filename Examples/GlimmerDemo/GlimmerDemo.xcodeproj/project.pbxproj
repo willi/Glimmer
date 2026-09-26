@@ -26,6 +26,7 @@
 		A1F0010F2E49A00000DEMO01 /* StreamingRevealDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F000FF2E49A00000DEMO01 /* StreamingRevealDemo.swift */; };
 		A1F001312E49A00000DEMO01 /* EngineGalleryDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F001302E49A00000DEMO01 /* EngineGalleryDemo.swift */; };
 		A1F001332E49A00000DEMO01 /* StreamingLabDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F001322E49A00000DEMO01 /* StreamingLabDemo.swift */; };
+		A1F001422E49A00000DEMO01 /* LongAnswerDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F001412E49A00000DEMO01 /* LongAnswerDemo.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -48,6 +49,7 @@
 		A1F000FF2E49A00000DEMO01 /* StreamingRevealDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingRevealDemo.swift; sourceTree = SOURCE_ROOT; };
 		A1F001302E49A00000DEMO01 /* EngineGalleryDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineGalleryDemo.swift; sourceTree = SOURCE_ROOT; };
 		A1F001322E49A00000DEMO01 /* StreamingLabDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingLabDemo.swift; sourceTree = SOURCE_ROOT; };
+		A1F001412E49A00000DEMO01 /* LongAnswerDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LongAnswerDemo.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -181,6 +183,7 @@
 				A1F0010F2E49A00000DEMO01 /* StreamingRevealDemo.swift in Sources */,
 				A1F001312E49A00000DEMO01 /* EngineGalleryDemo.swift in Sources */,
 				A1F001332E49A00000DEMO01 /* StreamingLabDemo.swift in Sources */,
+				A1F001422E49A00000DEMO01 /* LongAnswerDemo.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

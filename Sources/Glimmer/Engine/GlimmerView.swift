@@ -15,6 +15,7 @@ public final class GlimmerView: UIView {
 
     let textView = GlimmerTextView()
     let revealMask = GlimmerRevealMask()
+    private let viewportTracker = GlimmerViewportTracker()
     /// The reveal's time source; tests substitute a manual clock.
     var clock: any GlimmerRevealClock = GlimmerSystemRevealClock()
     private(set) var markdown = ""
@@ -43,6 +44,7 @@ public final class GlimmerView: UIView {
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: GlimmerView, _: UITraitCollection) in
             view.rebuildDocument()
         }
+        viewportTracker.onScroll = { [weak self] in self?.textView.refreshVisibleBandIfNeeded() }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -87,10 +89,27 @@ public final class GlimmerView: UIView {
     public override func layoutSubviews() {
         super.layoutSubviews()
         fitTextViewToContent()
+        textView.refreshVisibleBandIfNeeded()
         if let engine { revealMask.update(in: textView, engine: engine, now: clock.now) }
         guard bounds.width != lastWidth else { return }
         lastWidth = bounds.width
         reportHeightIfChanged()
+    }
+
+    public override func didMoveToWindow() {
+        super.didMoveToWindow()
+        trackScrollViews()
+    }
+
+    public override func didMoveToSuperview() {
+        super.didMoveToSuperview()
+        trackScrollViews()
+    }
+
+    /// Follows the scroll views above this view while it is in a window.
+    private func trackScrollViews() {
+        if window == nil { viewportTracker.stop() } else { viewportTracker.track(ancestorsOf: self) }
+        textView.setNeedsLayout()
     }
 
     func linkAction(for url: URL) -> UIAction? {

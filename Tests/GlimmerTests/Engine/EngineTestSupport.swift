@@ -110,3 +110,32 @@ final class ManualRevealClock: GlimmerRevealClock {
         now = max(now, time)
     }
 }
+
+/// Whether `rect` of `view` shows dark pixels, meaning TextKit drew text there. Samples every seventh pixel.
+@MainActor
+func inked(_ view: UIView, in rect: CGRect) -> Bool {
+    let image = UIGraphicsImageRenderer(bounds: rect).image { context in view.layer.render(in: context.cgContext) }
+    guard let data = image.cgImage?.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else { return false }
+    var dark = 0
+    var index = 0
+    while index + 3 < CFDataGetLength(data) {
+        if bytes[index] < 128, bytes[index + 3] > 0 { dark += 1 }
+        index += 4 * 7
+    }
+    return dark > 20
+}
+
+/// The UTF-16 range TextKit's viewport covers right now.
+@MainActor
+func viewportRange(_ textView: UITextView) -> NSRange? {
+    guard let manager = textView.textLayoutManager, let content = manager.textContentManager,
+          let range = manager.textViewportLayoutController.viewportRange else { return nil }
+    let start = content.offset(from: content.documentRange.location, to: range.location)
+    return NSRange(location: start, length: content.offset(from: range.location, to: range.endLocation))
+}
+
+/// Every view below `view`: TextKit gives each rendered layout fragment its own view.
+@MainActor
+func renderedViewCount(_ view: UIView) -> Int {
+    view.subviews.reduce(view.subviews.count) { $0 + renderedViewCount($1) }
+}

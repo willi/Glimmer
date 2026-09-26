@@ -155,4 +155,48 @@ final class GlimmerTextView: UITextView {
         let offsetInParagraph = index - paragraphStart
         return fragment.textLineFragments.contains { $0.characterRange.location == offsetInParagraph }
     }
+
+    // MARK: - Visible band
+
+    /// How far past the screen, in screen heights, TextKit still renders. Enough that a fling lands on rendered text
+    /// before the next band update.
+    static let bandOverscan: CGFloat = 1
+
+    /// The rect TextKit rendered last, in this view's coordinates, or nil while it renders its own viewport.
+    private(set) var renderedBand: CGRect?
+
+    /// This view's part within `bandOverscan` screens of its window's bounds, full width. It is zero-height off screen
+    /// or outside a window (a cell sized before it is shown renders nothing), and nil before the view has a width.
+    func visibleBand() -> CGRect? {
+        guard bounds.width > 0 else { return nil }
+        guard let window else { return CGRect(x: 0, y: 0, width: bounds.width, height: 0) }
+        let screen = convert(window.bounds, from: window)
+        let band = screen.insetBy(dx: 0, dy: -window.bounds.height * Self.bandOverscan).intersection(bounds)
+        guard !band.isNull else { return CGRect(x: 0, y: 0, width: bounds.width, height: 0) }
+        return CGRect(x: 0, y: band.minY, width: bounds.width, height: band.height)
+    }
+
+    /// Re-renders when the screen has moved within half an overscan of the rendered band's edge.
+    func refreshVisibleBandIfNeeded() {
+        guard let window, let rendered = renderedBand else { return }
+        let screen = convert(window.bounds, from: window).intersection(bounds)
+        guard !screen.isNull else { return }
+        let needed = screen.insetBy(dx: 0, dy: -window.bounds.height * Self.bandOverscan / 2).intersection(bounds)
+        if !rendered.contains(needed) { textLayoutManager?.textViewportLayoutController.layoutViewport() }
+    }
+
+    /// TextKit renders whatever this returns. Public from iOS 27, where it is the band around the screen: without it,
+    /// TextKit renders the whole bounds of this full-height view — every paragraph of a long answer, on every change.
+    @available(iOS 27.0, *)
+    override func viewportBounds(for textViewportLayoutController: NSTextViewportLayoutController) -> CGRect {
+        // UIKit calls this on older systems too (the text view has always been its viewport's delegate), where it is
+        // untested: keep TextKit's own viewport there.
+        guard ProcessInfo.processInfo.isOperatingSystemAtLeast(OperatingSystemVersion(majorVersion: 27, minorVersion: 0, patchVersion: 0)),
+              let band = visibleBand() else {
+            renderedBand = nil
+            return super.viewportBounds(for: textViewportLayoutController)
+        }
+        renderedBand = band
+        return band
+    }
 }
