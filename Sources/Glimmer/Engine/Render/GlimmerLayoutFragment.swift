@@ -8,7 +8,9 @@ final class GlimmerLayoutFragment: NSTextLayoutFragment {
     static let quoteBarWidth: CGFloat = 3
 
     override var renderingSurfaceBounds: CGRect {
-        super.renderingSurfaceBounds.insetBy(dx: -(Self.pillHorizontalInset + 1), dy: -2)
+        quoteBarRects().reduce(super.renderingSurfaceBounds.insetBy(dx: -(Self.pillHorizontalInset + 1), dy: -2)) {
+            $0.union($1)
+        }
     }
 
     override func draw(at point: CGPoint, in context: CGContext) {
@@ -29,7 +31,8 @@ final class GlimmerLayoutFragment: NSTextLayoutFragment {
         super.draw(at: point, in: context)
     }
 
-    /// One full-height bar per quote level, at `level × quoteIndent`.
+    /// One full-height bar per quote level, at `level × quoteIndent` from the container's leading edge.
+    /// An indented paragraph's fragment frame starts at its indent, so these rects have negative x.
     func quoteBarRects() -> [CGRect] {
         guard let theme,
               let paragraph = textElement as? NSTextParagraph,
@@ -38,7 +41,7 @@ final class GlimmerLayoutFragment: NSTextLayoutFragment {
               depth > 0 else { return [] }
         let height = layoutFragmentFrame.height
         return (0..<depth).map { level in
-            CGRect(x: CGFloat(level) * theme.quoteIndent, y: 0, width: Self.quoteBarWidth, height: height)
+            CGRect(x: CGFloat(level) * theme.quoteIndent - layoutFragmentFrame.minX, y: 0, width: Self.quoteBarWidth, height: height)
         }
     }
 
