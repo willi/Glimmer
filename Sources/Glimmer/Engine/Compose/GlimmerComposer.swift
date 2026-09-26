@@ -9,6 +9,7 @@ struct GlimmerComposer {
     var theme: GlimmerTheme
     var highlighter: any GlimmerHighlighter = GlimmerBasicHighlighter()
     var imageLoader: (any GlimmerImageLoader)? = nil
+    var extensions: [any GlimmerExtension] = []
 
     struct Context {
         var indent: CGFloat = 0

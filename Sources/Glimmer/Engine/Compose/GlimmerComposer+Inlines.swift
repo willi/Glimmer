@@ -38,9 +38,28 @@ extension GlimmerComposer {
         }
     }
 
-    /// Appends plain text. Task 11 adds extension token scanning here.
+    /// Appends plain text, turning extension tokens into inline chips.
     func appendText(_ text: String, attributes: [NSAttributedString.Key: Any], to output: NSMutableAttributedString) {
-        output.append(NSAttributedString(string: text, attributes: attributes))
+        let tokens = extensions.flatMap { glimmerExtension in
+            glimmerExtension.scan(text)
+                .filter { $0.range.lowerBound >= text.startIndex && $0.range.upperBound <= text.endIndex }
+                .map { (glimmerExtension: glimmerExtension, token: $0) }
+        }.sorted { $0.token.range.lowerBound < $1.token.range.lowerBound }
+
+        var cursor = text.startIndex
+        for match in tokens where match.token.range.lowerBound >= cursor {
+            if cursor < match.token.range.lowerBound {
+                output.append(NSAttributedString(string: String(text[cursor..<match.token.range.lowerBound]), attributes: attributes))
+            }
+            var chip = attributes
+            chip[.attachment] = GlimmerInlineAttachment(token: match.token, glimmerExtension: match.glimmerExtension, theme: theme)
+            chip[.glimmerSource] = match.token.source
+            output.append(NSAttributedString(string: "\u{FFFC}", attributes: chip))
+            cursor = match.token.range.upperBound
+        }
+        if cursor < text.endIndex {
+            output.append(NSAttributedString(string: String(text[cursor...]), attributes: attributes))
+        }
     }
 
     private func adding(_ trait: UIFontDescriptor.SymbolicTraits, to attributes: [NSAttributedString.Key: Any]) -> [NSAttributedString.Key: Any] {
