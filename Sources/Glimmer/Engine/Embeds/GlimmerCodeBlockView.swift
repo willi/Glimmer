@@ -16,8 +16,10 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
     let textView = GlimmerTextView()
     let copyButton = UIButton(type: .system)
     let languageLabel = UILabel()
-    /// Where Copy writes. The general pasteboard unless a host redirects it.
-    var pasteboard: UIPasteboard = .general
+    /// Where Copy writes — the button and a selection's Copy alike. The general pasteboard unless a host redirects it.
+    var pasteboard: UIPasteboard = .general {
+        didSet { textView.pasteboard = pasteboard }
+    }
 
     private let theme: GlimmerTheme
     private let highlighter: any GlimmerHighlighter
@@ -51,6 +53,7 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
         textView.backgroundColor = .clear
         textView.textContainerInset = UIEdgeInsets(top: padding, left: padding, bottom: padding, right: padding)
         textView.attributedText = highlighted
+        textView.copiesMarkdown = false
         let container = NSTextContainer(size: CGSize(width: CGFloat.greatestFiniteMagnitude, height: 0))
         container.lineFragmentPadding = 0
         metricsManager.textContainer = container

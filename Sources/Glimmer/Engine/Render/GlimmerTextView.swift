@@ -1,4 +1,5 @@
 import UIKit
+import UniformTypeIdentifiers
 
 /// The TextKit 2 surface for a composed markdown document: selectable, not editable, and never scrolled (the host scrolls).
 /// Never read `layoutManager` here — it silently switches the view to TextKit 1.
@@ -11,6 +12,10 @@ final class GlimmerTextView: UITextView {
     private var fittedSize: (version: Int, width: CGFloat, height: CGFloat)?
     /// Strongly held: the text layout manager's delegate is weak.
     private let fragmentProvider = GlimmerLayoutFragmentProvider(theme: .default)
+    /// Where Copy writes. The general pasteboard unless a host (or a test) redirects it.
+    var pasteboard: UIPasteboard = .general
+    /// False for a code block's text, which copies as the code itself.
+    var copiesMarkdown = true
 
     init() {
         // On iOS 16+, a nil text container gives a TextKit 2 text view.
@@ -42,6 +47,23 @@ final class GlimmerTextView: UITextView {
     override var contentOffset: CGPoint {
         get { super.contentOffset }
         set { super.contentOffset = .zero }
+    }
+
+    /// Copies the selection as plain text and as markdown (`net.daringfireball.markdown`), so a paste into a
+    /// markdown-aware app keeps lists, code and emphasis.
+    override func copy(_ sender: Any?) {
+        let range = selectedRange
+        guard range.length > 0 else { return }
+        guard copiesMarkdown else {
+            pasteboard.string = (textStorage.string as NSString).substring(with: range)
+            return
+        }
+        let plain = GlimmerMarkdownSerializer.plainText(from: textStorage, range: range)
+        let markdown = GlimmerMarkdownSerializer.markdown(from: textStorage, range: range)
+        pasteboard.setItems([[
+            UTType.utf8PlainText.identifier: plain,
+            "net.daringfireball.markdown": Data(markdown.utf8),
+        ]])
     }
 
     override func setContentOffset(_ contentOffset: CGPoint, animated: Bool) {

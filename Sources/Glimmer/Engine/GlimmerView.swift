@@ -12,6 +12,10 @@ public final class GlimmerView: UIView {
     }
     public var onLinkTap: ((URL) -> Void)?
     public var onHeightChange: (() -> Void)?
+    /// Items appended to the edit menu for a selection (for example "Ask about this").
+    public var editMenuActions: ((GlimmerSelection) -> [UIMenuElement])?
+    /// Items appended to a link's menu.
+    public var linkMenuActions: ((URL) -> [UIMenuElement])?
 
     let textView = GlimmerTextView()
     let revealMask = GlimmerRevealMask()
@@ -135,6 +139,12 @@ public final class GlimmerView: UIView {
         return GlimmerMarkdownSerializer.markdown(from: textView.textStorage, range: range)
     }
 
+    /// The link's default menu plus the host's items.
+    func linkMenu(for url: URL, defaultMenu: UIMenu) -> UIMenu {
+        guard let linkMenuActions else { return defaultMenu }
+        return defaultMenu.replacingChildren(defaultMenu.children + linkMenuActions(url))
+    }
+
     func linkAction(for url: URL) -> UIAction? {
         guard let onLinkTap else { return nil }
         return UIAction { _ in onLinkTap(url) }
@@ -219,6 +229,8 @@ public final class GlimmerView: UIView {
     /// Re-composes everything (theme, configuration or text size changed).
     private func rebuildDocument() {
         textView.apply(theme: configuration.theme.scaled(for: traitCollection))
+        textView.dataDetectorTypes = configuration.dataDetectors
+        textView.isFindInteractionEnabled = configuration.allowsFind
         if revealOptions == nil { endReveal() }
         composeSynchronously()
     }
@@ -408,5 +420,32 @@ extension GlimmerView: UITextViewDelegate {
     public func textView(_ textView: UITextView, primaryActionFor textItem: UITextItem, defaultAction: UIAction) -> UIAction? {
         guard case .link(let url) = textItem.content else { return defaultAction }
         return linkAction(for: url) ?? defaultAction
+    }
+
+    public func textView(
+        _ textView: UITextView, menuConfigurationFor textItem: UITextItem, defaultMenu: UIMenu
+    ) -> UITextItem.MenuConfiguration? {
+        guard case .link(let url) = textItem.content, linkMenuActions != nil else { return nil }
+        return UITextItem.MenuConfiguration(menu: linkMenu(for: url, defaultMenu: defaultMenu))
+    }
+
+    /// While a reveal runs, the selection stops at the revealed text: nobody can select or copy words not shown yet.
+    public func textViewDidChangeSelection(_ textView: UITextView) {
+        guard let engine else { return }
+        let limit = min(engine.revealedLength, textView.textStorage.length)
+        let selected = textView.selectedRange
+        guard NSMaxRange(selected) > limit else { return }
+        let start = min(selected.location, limit)
+        textView.selectedRange = NSRange(location: start, length: limit - start)
+    }
+
+    public func textView(_ textView: UITextView, editMenuForTextIn range: NSRange, suggestedActions: [UIMenuElement]) -> UIMenu? {
+        guard let editMenuActions, range.length > 0 else { return nil }
+        let selection = GlimmerSelection(
+            range: range,
+            plainText: GlimmerMarkdownSerializer.plainText(from: textView.textStorage, range: range),
+            markdown: GlimmerMarkdownSerializer.markdown(from: textView.textStorage, range: range)
+        )
+        return UIMenu(children: suggestedActions + editMenuActions(selection))
     }
 }
