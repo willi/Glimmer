@@ -1,6 +1,6 @@
 import UIKit
 
-/// The TextKit 2 surface for a composed markdown document: non-scrolling, selectable, not editable.
+/// The TextKit 2 surface for a composed markdown document: selectable, not editable, and never scrolled (the host scrolls).
 /// Never read `layoutManager` here — it silently switches the view to TextKit 1.
 @MainActor
 final class GlimmerTextView: UITextView {
@@ -18,7 +18,17 @@ final class GlimmerTextView: UITextView {
         backgroundColor = .clear
         isEditable = false
         isSelectable = true
-        isScrollEnabled = false
+        // Scrolling stays on only so TextKit keeps the text container unbounded. A non-scrolling text view pins the
+        // container to its frame height, and with any finite height TextKit finds late text in linear time (about
+        // 2 ms per lookup at 5,000 words, against 25 µs). The frame always covers the text, so there is nothing to
+        // scroll, and the pan gesture is off so the host's scroll view keeps every drag.
+        isScrollEnabled = true
+        panGestureRecognizer.isEnabled = false
+        bounces = false
+        showsVerticalScrollIndicator = false
+        showsHorizontalScrollIndicator = false
+        scrollsToTop = false
+        contentInsetAdjustmentBehavior = .never
         textContainerInset = .zero
         textContainer.lineFragmentPadding = 0
         dataDetectorTypes = []
@@ -27,6 +37,22 @@ final class GlimmerTextView: UITextView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Always zero: the text view never scrolls itself (selection autoscroll, `scrollRangeToVisible`); the host does.
+    override var contentOffset: CGPoint {
+        get { super.contentOffset }
+        set { super.contentOffset = .zero }
+    }
+
+    override func setContentOffset(_ contentOffset: CGPoint, animated: Bool) {
+        super.setContentOffset(.zero, animated: false)
+    }
+
+    /// The pan never begins, so every drag reaches the host's scroll view. (Disabling the recognizer is not enough:
+    /// UIKit turns it back on while laying the text view out.)
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        gestureRecognizer === panGestureRecognizer ? false : super.gestureRecognizerShouldBegin(gestureRecognizer)
+    }
 
     override var attributedText: NSAttributedString! {
         didSet { textVersion &+= 1 }
@@ -41,10 +67,9 @@ final class GlimmerTextView: UITextView {
         linkTextAttributes = link
     }
 
-    /// Measured by `UITextView`: a full layout at `size.width`, so it is cached per text version and width. TextKit 2
-    /// inside a text view lays out only what its viewport covers — even after `ensureLayout(for: documentRange)` — so
-    /// usage bounds under-report a view shorter than its content (see `laidOutHeight`). The attachments cache their
-    /// views, so the provider churn this measurement causes rebuilds nothing.
+    /// Measured by `UITextView`: a full layout at `size.width`, so it is cached per text version and width. Use it only
+    /// for a width the view is not laid out at; at the current width `laidOutHeight()` is exact and incremental. The
+    /// attachments cache their views, so the provider churn this measurement causes rebuilds nothing.
     override func sizeThatFits(_ size: CGSize) -> CGSize {
         guard size.width > 0, textStorage.length > 0 else { return CGSize(width: max(size.width, 0), height: 0) }
         if let fittedSize, fittedSize.version == textVersion, fittedSize.width == size.width {
@@ -55,9 +80,8 @@ final class GlimmerTextView: UITextView {
         return CGSize(width: size.width, height: ceil(fitted.height))
     }
 
-    /// The height of the laid-out text at the current width: cheap, since only changed paragraphs lay out again. Exact
-    /// only while the whole text lies inside the frame — TextKit 2 lays out only the viewport — so a caller keeps the
-    /// frame taller than the text and grows it when the result nears the bottom.
+    /// The height of the laid-out text at the current width. Cheap, because only changed paragraphs lay out again, and
+    /// exact at any frame height, because the text container is unbounded (see `init`).
     func laidOutHeight() -> CGFloat {
         guard textStorage.length > 0, let manager = textLayoutManager else { return 0 }
         manager.ensureLayout(for: manager.documentRange)

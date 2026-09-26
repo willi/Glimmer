@@ -33,6 +33,21 @@ final class GlimmerStreamingPerformanceTests: XCTestCase {
         XCTAssertLessThan(streamTail(of: longList, reveal: .none), .milliseconds(25), "p95 per update")
     }
 
+    /// Spec §3: starting a phrase ≤ 0.2 ms, and its segment lookup is most of that. TextKit's time, so the budget holds
+    /// in Debug too.
+    func testFindingLateTextStaysCheap() {
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
+        let window = hostInWindow(view, width: 390, height: 800)
+        view.update(markdown: longMixedAnswer)
+        view.layoutIfNeeded()
+        let late = NSRange(location: view.textView.textStorage.length - 2, length: 1)
+        let timer = ContinuousClock()
+        var samples: [Duration] = []
+        for _ in 0..<21 { samples.append(timer.measure { _ = view.textView.segmentRects(for: late) }) }
+        XCTAssertLessThan(samples.sorted()[10], .microseconds(200), "median segment lookup at the end of 5,000 words")
+        _ = window
+    }
+
     /// Streams all but the last 1,200 characters at once, then the rest in 30-character chunks, and returns the p95
     /// time of those chunk updates (without the layout pass after each).
     private func streamTail(of markdown: String, reveal: GlimmerReveal, file: StaticString = #filePath) -> Duration {

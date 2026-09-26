@@ -26,9 +26,21 @@ final class GlimmerTextViewTests: XCTestCase {
         let textView = GlimmerTextView()
         textView.attributedText = NSAttributedString(string: "Hello")
         XCTAssertNotNil(textView.textLayoutManager)
-        XCTAssertFalse(textView.isScrollEnabled)
         XCTAssertFalse(textView.isEditable)
         XCTAssertTrue(textView.isSelectable)
+    }
+
+    func testKeepsAnUnboundedContainerAndNeverScrolls() {
+        let textView = GlimmerTextView()
+        textView.attributedText = GlimmerComposer(theme: .default).compose(GlimmerParser.parse(String(repeating: "A line of text.\n\n", count: 80)))
+        let window = hostInWindow(textView, width: 390, height: 400)
+        XCTAssertEqual(textView.textContainer.size.height, CGFloat.greatestFiniteMagnitude, "a finite container makes late lookups linear")
+        XCTAssertFalse(textView.gestureRecognizerShouldBegin(textView.panGestureRecognizer), "the host's scroll view keeps every drag")
+        textView.scrollRangeToVisible(NSRange(location: textView.textStorage.length - 1, length: 1))
+        textView.setContentOffset(CGPoint(x: 0, y: 300), animated: false)
+        textView.contentOffset = CGPoint(x: 0, y: 120)
+        XCTAssertEqual(textView.contentOffset, .zero)
+        _ = window
     }
 
     func testEmptyTextAndZeroWidthMeasureZero() {

@@ -193,26 +193,23 @@ public final class GlimmerView: UIView {
         return textView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
     }
 
-    /// Keeps the text view taller than the whole document, with a slack band below the text. TextKit 2 inside a text
-    /// view lays out only what its viewport covers, and the mask needs geometry for text below the revealed line. The
-    /// band lets most updates measure from the laid-out text (`laidOutHeight`) and leave the frame alone: resizing a
-    /// long text view costs as much as laying it out again. The band grows with the text, so resizes stay rare.
+    /// Keeps the text view at least as tall as the document, with a slack band below it. The text container is
+    /// unbounded, so `laidOutHeight()` is exact whatever the frame; the band exists only because resizing a tall text
+    /// view costs about as much as laying it out (8–10 ms at 5,000 words), so the frame should change rarely. The band
+    /// grows with the text.
     private func fitTextViewToContent() {
         guard bounds.width > 0 else { return }
         if textView.bounds.width != bounds.width {
             // A new width re-wraps everything: measure it in full once.
             let fullHeight = textView.sizeThatFits(CGSize(width: bounds.width, height: .greatestFiniteMagnitude)).height
             textView.frame = CGRect(x: 0, y: 0, width: bounds.width, height: fullHeight + slack(forContentHeight: fullHeight))
+        } else if contentHeight?.version == textView.textVersion {
+            return
         }
-        var height = textView.laidOutHeight()
-        // Text reaching into the band may run on past the frame, unlaid-out: grow the frame and measure again.
-        while height > textView.bounds.height - slack(forContentHeight: height) / 2 {
-            textView.frame.size.height = height + slack(forContentHeight: height)
-            height = textView.laidOutHeight()
-        }
-        // Far more band than text (a regenerated, shorter answer): give the space back.
-        if textView.bounds.height > height + 2 * slack(forContentHeight: height) {
-            textView.frame.size.height = height + slack(forContentHeight: height)
+        let height = textView.laidOutHeight()
+        let slack = slack(forContentHeight: height)
+        if textView.bounds.height < height || textView.bounds.height > height + 2 * slack {
+            textView.frame.size.height = height + slack
         }
         if textView.bounds.height < bounds.height { textView.frame.size.height = bounds.height }
         contentHeight = (textView.textVersion, height)
