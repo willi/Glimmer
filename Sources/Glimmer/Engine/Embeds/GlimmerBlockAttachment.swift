@@ -3,7 +3,7 @@ import UIKit
 /// A full-width attachment whose view comes from `GlimmerEmbedViewFactory`.
 /// Put it in its own paragraph (`\n` before and after).
 final class GlimmerBlockAttachment: NSTextAttachment {
-    let embed: GlimmerEmbed
+    private(set) var embed: GlimmerEmbed
     let theme: GlimmerTheme
     let highlighter: any GlimmerHighlighter
     let imageLoader: (any GlimmerImageLoader)?
@@ -30,6 +30,14 @@ final class GlimmerBlockAttachment: NSTextAttachment {
         )
         provider.tracksTextAttachmentViewBounds = true
         return provider
+    }
+
+    /// Moves the attachment to a grown embed and updates its view, if one was made. Main thread: it touches the view,
+    /// and TextKit reads `embed` when it asks for a view.
+    @MainActor
+    func update(to embed: GlimmerEmbed) {
+        self.embed = embed
+        cachedView?.update(to: embed)
     }
 
     /// The embed's view, created on first use and reused for the attachment's lifetime.

@@ -39,6 +39,48 @@ final class GlimmerStreamingDocumentTests: XCTestCase {
         assertEquivalent(document.text, freshCompose(items + " grows", isStreaming: true), "matches a fresh compose")
     }
 
+    func testGrowingCodeBlockKeepsItsAttachment() throws {
+        let document = GlimmerStreamingDocument(composer: composer)
+        _ = document.update(markdown: "Run:\n\n```swift\nlet a", isStreaming: true)
+        let before = try XCTUnwrap(blockAttachments(in: document.text).first)
+        let edit = try XCTUnwrap(document.update(markdown: "Run:\n\n```swift\nlet a = 1\nlet b", isStreaming: true))
+        XCTAssertTrue(blockAttachments(in: document.text).first === before, "the growing code block keeps its attachment")
+        let update = try XCTUnwrap(edit.embedUpdates.first)
+        XCTAssertTrue(update.attachment === before)
+        guard case .codeBlock(_, let code) = update.embed else { return XCTFail("expected a code block, got \(update.embed)") }
+        XCTAssertEqual(code, "let a = 1\nlet b")
+    }
+
+    func testGrowingTableKeepsItsAttachment() throws {
+        let document = GlimmerStreamingDocument(composer: composer)
+        _ = document.update(markdown: "| a | b |\n|---|---|\n| 1 | 2 |", isStreaming: true)
+        let before = try XCTUnwrap(blockAttachments(in: document.text).first)
+        let edit = try XCTUnwrap(document.update(markdown: "| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |", isStreaming: true))
+        XCTAssertTrue(blockAttachments(in: document.text).first === before)
+        guard case .table(_, let rows, _) = edit.embedUpdates.first?.embed else { return XCTFail("expected a table update") }
+        XCTAssertEqual(rows.count, 2)
+    }
+
+    func testChangedFenceLanguageGetsANewAttachment() throws {
+        let document = GlimmerStreamingDocument(composer: composer)
+        _ = document.update(markdown: "```py", isStreaming: true)
+        let before = try XCTUnwrap(blockAttachments(in: document.text).first)
+        _ = document.update(markdown: "```python\nx = 1", isStreaming: true)
+        let after = try XCTUnwrap(blockAttachments(in: document.text).first)
+        XCTAssertFalse(after === before, "a different language is a different code block")
+        guard case .codeBlock(let language, _) = after.embed else { return XCTFail("expected a code block") }
+        XCTAssertEqual(language, "python")
+    }
+
+    func testEmbeddedAttachmentsReportDocumentOffsets() {
+        let document = GlimmerStreamingDocument(composer: composer)
+        _ = document.update(markdown: "Intro.\n\n```\nx\n```\n\nMiddle.\n\n---", isStreaming: false)
+        let offsets = document.embeddedAttachments.map(\.offset)
+        let string = document.text.string as NSString
+        XCTAssertEqual(offsets.count, 2)
+        for offset in offsets { XCTAssertEqual(string.character(at: offset), 0xFFFC) }
+    }
+
     func testNewBlockReinsertsTheSeparator() throws {
         let document = GlimmerStreamingDocument(composer: composer)
         _ = document.update(markdown: "One", isStreaming: true)

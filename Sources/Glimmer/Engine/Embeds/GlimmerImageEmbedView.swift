@@ -47,6 +47,9 @@ final class GlimmerImageEmbedView: UIView, GlimmerEmbedView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// An image embed continues only an identical one (`GlimmerEmbed.continues`), so there is nothing to update.
+    func update(to embed: GlimmerEmbed) {}
+
     isolated deinit {
         loadTask?.cancel()
     }

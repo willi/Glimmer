@@ -64,6 +64,8 @@ public final class GlimmerView: UIView {
         self.isStreaming = isStreaming
         self.revealID = revealID
         if let edit = document.update(markdown: preprocessed(markdown), isStreaming: isStreaming) {
+            // Grown code blocks and tables update their views in place; the edit then re-lays them out.
+            for update in edit.embedUpdates { update.attachment.update(to: update.embed) }
             textView.apply(edit)
             fitTextViewToContent()
             // Revealed text changed or reflowed (a list turned loose, a header became a table): fading phrases move.

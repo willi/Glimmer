@@ -6,8 +6,8 @@ import UIKit
 final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
     static let headerHeight: CGFloat = 44
 
-    let code: String
-    let language: String?
+    private(set) var code: String
+    private(set) var language: String?
     /// Scrolls the unwrapped code horizontally. A TextKit 2 `UITextView` resets its container to its own width, so
     /// the text view itself never scrolls; it is sized to the full line width inside this scroll view instead.
     let scrollView = UIScrollView()
@@ -18,13 +18,15 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
     var pasteboard: UIPasteboard = .general
 
     private let theme: GlimmerTheme
-    private let highlighted: NSAttributedString
+    private let highlighter: any GlimmerHighlighter
+    private var highlighted: NSAttributedString
     private var cachedTextSize: CGSize?
 
     init(code: String, language: String?, theme: GlimmerTheme, highlighter: any GlimmerHighlighter) {
         self.code = code
         self.language = language
         self.theme = theme
+        self.highlighter = highlighter
         highlighted = Self.highlightedCode(code, language: language, theme: theme, highlighter: highlighter)
         super.init(frame: .zero)
 
@@ -54,7 +56,7 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
         copyButton.accessibilityLabel = "Copy code"
         copyButton.addAction(UIAction { [weak self] _ in
             guard let self else { return }
-            pasteboard.string = code
+            pasteboard.string = self.code
         }, for: .primaryActionTriggered)
         if theme.showsCodeBlockHeader {
             addSubview(languageLabel)
@@ -79,6 +81,17 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
 
     func embedHeight(forWidth width: CGFloat) -> CGFloat {
         (theme.showsCodeBlockHeader ? Self.headerHeight : 0) + theme.embedPadding * 2 + textSize.height
+    }
+
+    func update(to embed: GlimmerEmbed) {
+        guard case .codeBlock(let language, let code) = embed, code != self.code || language != self.language else { return }
+        self.code = code
+        self.language = language
+        highlighted = Self.highlightedCode(code, language: language, theme: theme, highlighter: highlighter)
+        textView.attributedText = highlighted
+        languageLabel.text = language?.lowercased() ?? "code"
+        cachedTextSize = nil
+        setNeedsLayout()
     }
 
     override func layoutSubviews() {

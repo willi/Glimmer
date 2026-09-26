@@ -4,6 +4,8 @@ import UIKit
 struct GlimmerDocumentEdit {
     let range: NSRange
     let replacement: NSAttributedString
+    /// Attachments kept across the re-compose whose embeds grew, in document order.
+    var embedUpdates: [GlimmerEmbedUpdate] = []
 }
 
 /// The document behind a streaming `GlimmerView`.
@@ -21,6 +23,15 @@ final class GlimmerStreamingDocument {
     private(set) var blockOffsets: [Int] = []
 
     private var fragments: [NSAttributedString] = []
+    /// Each block's attachments, with the embeds they were composed with and their offsets in the block's fragment.
+    private var blockAttachments: [[GlimmerEmbeddedAttachment]] = []
+
+    /// Every block attachment in `text`, at its document offset, with its current embed.
+    var embeddedAttachments: [(offset: Int, attachment: GlimmerBlockAttachment, embed: GlimmerEmbed)] {
+        zip(blockOffsets, blockAttachments).flatMap { blockOffset, records in
+            records.map { (blockOffset + $0.offset, $0.attachment, $0.embed) }
+        }
+    }
     private var startLines: [Int] = []
     private var source = ""
     /// UTF-8 offset in `source` where the second-to-last block starts: where the next tail re-parse begins.
@@ -61,11 +72,17 @@ final class GlimmerStreamingDocument {
         let prefixLength = firstChanged > 0 ? blockOffsets[firstChanged - 1] + fragments[firstChanged - 1].length : 0
         var newFragments = Array(fragments[..<firstChanged])
         var newOffsets = Array(blockOffsets[..<firstChanged])
+        var newAttachments = Array(blockAttachments[..<min(firstChanged, blockAttachments.count)])
+        var embedUpdates: [GlimmerEmbedUpdate] = []
         var running = prefixLength
         for index in firstChanged..<parsed.blocks.count {
-            let fragment = composer.composeBlock(parsed.blocks[index], isFirst: index == 0)
+            // Only this block's own previous attachments are offered back, so an unchanged block never loses one.
+            let reuse = GlimmerAttachmentReuse(index < blockAttachments.count ? blockAttachments[index] : [])
+            let fragment = composer.composeBlock(parsed.blocks[index], isFirst: index == 0, reusing: reuse)
             newFragments.append(fragment)
             newOffsets.append(running)
+            newAttachments.append(reuse.emitted)
+            embedUpdates += reuse.updates
             running += fragment.length
         }
         let newTextLength = max(0, running - 1)
@@ -85,7 +102,8 @@ final class GlimmerStreamingDocument {
         }
 
         let edit = Self.trimmingUnchangedParagraphs(
-            of: GlimmerDocumentEdit(range: NSRange(location: editStart, length: text.length - editStart), replacement: replacement),
+            of: GlimmerDocumentEdit(range: NSRange(location: editStart, length: text.length - editStart), replacement: replacement,
+                                    embedUpdates: embedUpdates),
             in: text
         )
         text.replaceCharacters(in: edit.range, with: edit.replacement)
@@ -93,6 +111,7 @@ final class GlimmerStreamingDocument {
         startLines = parsed.startLines
         fragments = newFragments
         blockOffsets = newOffsets
+        blockAttachments = newAttachments
         return edit
     }
 
@@ -122,7 +141,8 @@ final class GlimmerStreamingDocument {
             .isEqual(to: new.attributedSubstring(from: NSRange(location: 0, length: keep))) else { return edit }
         return GlimmerDocumentEdit(
             range: NSRange(location: edit.range.location + keep, length: edit.range.length - keep),
-            replacement: new.attributedSubstring(from: NSRange(location: keep, length: new.length - keep))
+            replacement: new.attributedSubstring(from: NSRange(location: keep, length: new.length - keep)),
+            embedUpdates: edit.embedUpdates
         )
     }
 

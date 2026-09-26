@@ -16,6 +16,8 @@ final class GlimmerRuleView: UIView, GlimmerEmbedView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    func update(to embed: GlimmerEmbed) {}
+
     func embedHeight(forWidth width: CGFloat) -> CGFloat { spacing + 1 }
 
     override func layoutSubviews() {

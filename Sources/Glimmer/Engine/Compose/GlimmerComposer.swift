@@ -23,6 +23,8 @@ struct GlimmerComposer {
         var listStep: CGFloat = 0
         /// Markers end a fixed gap before the text (numbers) instead of starting the marker column (bullets).
         var alignsMarkersToText = false
+        /// Attachments offered back while re-composing a block, and the record of the ones emitted. Nil composes fresh.
+        var reuse: GlimmerAttachmentReuse?
     }
 
     func compose(_ blocks: [GlimmerBlock]) -> NSAttributedString {
@@ -35,9 +37,15 @@ struct GlimmerComposer {
     /// One top-level block, ending in "\n". `compose(_:)` is exactly these joined with the final "\n" removed, which
     /// is what lets `GlimmerStreamingDocument` re-compose only the blocks that changed.
     func composeBlock(_ block: GlimmerBlock, isFirst: Bool) -> NSAttributedString {
+        composeBlock(block, isFirst: isFirst, reusing: nil)
+    }
+
+    /// Like `composeBlock(_:isFirst:)`, and offers `reuse`'s attachments back for embeds that continue them.
+    func composeBlock(_ block: GlimmerBlock, isFirst: Bool, reusing reuse: GlimmerAttachmentReuse?) -> NSAttributedString {
         let output = NSMutableAttributedString()
         var context = Context()
         context.isDocumentStart = isFirst
+        context.reuse = reuse
         append(block, context: context, marker: nil, to: output)
         return output
     }
@@ -140,7 +148,9 @@ struct GlimmerComposer {
     ) {
         if let marker { appendTextParagraph([], font: theme.bodyFont, context: context, marker: marker, to: output) }
         let start = output.length
-        let attachment = GlimmerBlockAttachment(embed: embed, theme: theme, highlighter: highlighter, imageLoader: imageLoader)
+        let attachment = context.reuse?.attachment(for: embed)
+            ?? GlimmerBlockAttachment(embed: embed, theme: theme, highlighter: highlighter, imageLoader: imageLoader)
+        context.reuse?.record(attachment, embed: embed, at: output.length)
         output.append(NSAttributedString(attachment: attachment))
         output.append(NSAttributedString(string: "\n"))
         let range = NSRange(location: start, length: output.length - start)

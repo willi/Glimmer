@@ -20,17 +20,14 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
     private let content = UIView()
     private let headerBackground = UIView()
     private let grid = CAShapeLayer()
-    private let cells: [[NSAttributedString]]
+    private var cells: [[NSAttributedString]] = []
+    private var alignments: [GlimmerTable.Alignment]
     private let theme: GlimmerTheme
     private var cachedLayout: (width: CGFloat, layout: Layout)?
 
     init(header: [NSAttributedString], rows: [[NSAttributedString]], alignments: [GlimmerTable.Alignment], theme: GlimmerTheme) {
         self.theme = theme
-        let columns = max(header.count, rows.map(\.count).max() ?? 0, alignments.count)
-        func padded(_ row: [NSAttributedString]) -> [NSAttributedString] {
-            row + Array(repeating: NSAttributedString(), count: max(0, columns - row.count))
-        }
-        cells = [padded(header)] + rows.map(padded)
+        self.alignments = alignments
         super.init(frame: .zero)
 
         layer.cornerRadius = theme.embedCornerRadius
@@ -47,6 +44,35 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
         grid.lineWidth = 1
         content.layer.addSublayer(grid)
 
+        rebuildCells(header: header, rows: rows)
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: GlimmerTableView, _: UITraitCollection) in
+            view.updateColors()
+        }
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    func update(to embed: GlimmerEmbed) {
+        guard case .table(let header, let rows, let alignments) = embed else { return }
+        let columns = cells.first?.count ?? 0
+        let unchanged = rows.count + 1 == cells.count
+            && alignments == self.alignments
+            && rows.map { $0.map(\.string) } == cells.dropFirst().map { $0.prefix(max(columns, 0)).map(\.string) }
+        guard !unchanged else { return }
+        self.alignments = alignments
+        rebuildCells(header: header, rows: rows)
+        cachedLayout = nil
+        setNeedsLayout()
+    }
+
+    /// Replaces every cell label: rows padded to the widest row, aligned per column.
+    private func rebuildCells(header: [NSAttributedString], rows: [[NSAttributedString]]) {
+        for label in cellLabels.joined() { label.removeFromSuperview() }
+        let columns = max(header.count, rows.map(\.count).max() ?? 0, alignments.count)
+        func padded(_ row: [NSAttributedString]) -> [NSAttributedString] {
+            row + Array(repeating: NSAttributedString(), count: max(0, columns - row.count))
+        }
+        cells = [padded(header)] + rows.map(padded)
         cellLabels = cells.map { row in
             row.enumerated().map { column, text in
                 let label = UILabel()
@@ -58,12 +84,7 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
             }
         }
         updateColors()
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: GlimmerTableView, _: UITraitCollection) in
-            view.updateColors()
-        }
     }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func embedHeight(forWidth width: CGFloat) -> CGFloat { layout(forWidth: width).height }
 

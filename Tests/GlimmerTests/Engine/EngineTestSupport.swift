@@ -139,3 +139,12 @@ func viewportRange(_ textView: UITextView) -> NSRange? {
 func renderedViewCount(_ view: UIView) -> Int {
     view.subviews.reduce(view.subviews.count) { $0 + renderedViewCount($1) }
 }
+
+/// The block attachments in `text`, in order.
+func blockAttachments(in text: NSAttributedString) -> [GlimmerBlockAttachment] {
+    var attachments: [GlimmerBlockAttachment] = []
+    text.enumerateAttribute(.attachment, in: NSRange(location: 0, length: text.length)) { value, _, _ in
+        if let attachment = value as? GlimmerBlockAttachment { attachments.append(attachment) }
+    }
+    return attachments
+}
