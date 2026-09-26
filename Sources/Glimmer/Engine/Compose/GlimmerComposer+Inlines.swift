@@ -13,9 +13,13 @@ extension GlimmerComposer {
                 codeAttributes[.glimmerInlineCode] = true
                 output.append(NSAttributedString(string: code, attributes: codeAttributes))
             case .emphasis(let children):
-                appendInlines(children, attributes: adding(.traitItalic, to: attributes), to: output)
+                var emphasized = adding(.traitItalic, to: attributes)
+                emphasized[.glimmerEmphasis] = true
+                appendInlines(children, attributes: emphasized, to: output)
             case .strong(let children):
-                appendInlines(children, attributes: adding(.traitBold, to: attributes), to: output)
+                var strong = adding(.traitBold, to: attributes)
+                strong[.glimmerStrong] = true
+                appendInlines(children, attributes: strong, to: output)
             case .strikethrough(let children):
                 var struck = attributes
                 struck[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
@@ -24,9 +28,10 @@ extension GlimmerComposer {
                 var linked = attributes
                 if let url = URL(string: destination) { linked[.link] = url }
                 appendInlines(children, attributes: linked, to: output)
-            case .image(_, _, let alt):
+            case .image(let source, _, let alt):
                 var faded = attributes
                 faded[.foregroundColor] = theme.secondaryTextColor
+                faded[.glimmerSource] = "![\(alt)](\(source))"
                 output.append(NSAttributedString(string: alt, attributes: faded))
             case .softBreak:
                 output.append(NSAttributedString(string: " ", attributes: attributes))

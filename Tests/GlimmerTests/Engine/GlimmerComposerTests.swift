@@ -205,4 +205,46 @@ final class GlimmerComposerTests: XCTestCase {
         XCTAssertEqual(compose("a\nb").string, "a b")
         XCTAssertEqual(compose("a  \nb").string, "a\u{2028}b")
     }
+
+    private func prefix(of substring: String, in text: NSAttributedString) -> String? {
+        attributes(of: substring, in: text)[.glimmerMarkdownPrefix] as? String
+    }
+
+    func testParagraphsRecordTheirMarkdownPrefix() {
+        let text = compose("> - outer\n>   - inner\n>\n>   more of outer")
+        XCTAssertEqual(prefix(of: "outer", in: text), "> ", "a marker line inside a quote")
+        XCTAssertEqual(prefix(of: "inner", in: text), ">   ", "nested under a two-character marker")
+        XCTAssertEqual(prefix(of: "more of outer", in: text), ">   ", "a continuation paragraph of the outer item")
+        XCTAssertEqual(prefix(of: "Plain", in: compose("Plain")), "")
+    }
+
+    func testOrderedMarkersIndentTheirContentByTheirWidth() {
+        let text = compose("10. ten\n\n    ```\n    code\n    ```")
+        let code = (text.string as NSString).range(of: "\u{FFFC}").location
+        XCTAssertEqual(text.attribute(.glimmerMarkdownPrefix, at: code, effectiveRange: nil) as? String, "    ")
+    }
+
+    func testQuoteOpeningAListItemPutsItsMarkerAfterTheBullet() {
+        let text = compose("- > quoted")
+        XCTAssertEqual(prefix(of: "quoted", in: text), "")
+        XCTAssertEqual(attributes(of: "•", in: text)[.glimmerListMarker] as? String, "- > ")
+    }
+
+    func testTightListParagraphsAreMarked() {
+        XCTAssertEqual(attributes(of: "b", in: compose("- a\n- b"))[.glimmerTightList] as? Bool, true)
+        XCTAssertNil(attributes(of: "b", in: compose("- a\n\n- b"))[.glimmerTightList])
+        XCTAssertNil(attributes(of: "p", in: compose("p"))[.glimmerTightList])
+    }
+
+    func testStrongAndEmphasisAreMarkedButHeadingsAreNot() {
+        let text = compose("# Head\n\n**b** and *i*")
+        XCTAssertEqual(attributes(of: "b", in: text)[.glimmerStrong] as? Bool, true)
+        XCTAssertEqual(attributes(of: "i", in: text)[.glimmerEmphasis] as? Bool, true)
+        XCTAssertNil(attributes(of: "Head", in: text)[.glimmerStrong], "a heading's bold font is not strong text")
+    }
+
+    func testInlineImageKeepsItsMarkdown() {
+        let text = compose("see ![alt](https://example.com/a.png) here")
+        XCTAssertEqual(attributes(of: "alt", in: text)[.glimmerSource] as? String, "![alt](https://example.com/a.png)")
+    }
 }

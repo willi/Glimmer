@@ -24,6 +24,12 @@ struct GlimmerComposer {
         var alignsMarkersToText = false
         /// Attachments offered back while re-composing a block, and the record of the ones emitted. Nil composes fresh.
         var reuse: GlimmerAttachmentReuse?
+        /// Markdown written before a paragraph's content on continuation lines: quote markers and list indentation.
+        var markdownPrefix = ""
+        /// Markdown written before the marker on an item's first line (the enclosing container's prefix).
+        var markerLinePrefix = ""
+        /// Inside a tight list's item.
+        var isTight = false
     }
 
     func compose(_ blocks: [GlimmerBlock]) -> NSAttributedString {
@@ -74,9 +80,17 @@ struct GlimmerComposer {
             var inner = context
             inner.indent += theme.quoteIndent
             inner.quoteDepth += 1
+            inner.markdownPrefix += "> "
+            // A quote that opens a list item is written "- > …": the marker's source carries the quote's ">".
+            let quotedMarker = marker.map { marker in
+                let copy = NSMutableAttributedString(attributedString: marker)
+                let source = copy.attribute(.glimmerListMarker, at: 0, effectiveRange: nil) as? String ?? ""
+                copy.addAttribute(.glimmerListMarker, value: source + "> ", range: NSRange(location: 0, length: copy.length))
+                return copy as NSAttributedString
+            }
             let start = output.length
             for (index, child) in blocks.enumerated() {
-                append(child, context: inner, marker: index == 0 ? marker : nil, to: output)
+                append(child, context: inner, marker: index == 0 ? quotedMarker : nil, to: output)
             }
             if output.length > start { markQuoteEnd(continuingLevels: context.quoteDepth, in: output) }
         case .list(let list):
@@ -114,11 +128,17 @@ struct GlimmerComposer {
         inner.paragraphSpacing = list.isTight ? theme.tightListSpacing : nil
         for (offset, item) in list.items.enumerated() {
             let marker = markers[offset]
+            // The item's content is indented by its marker's source width, which is what continuation lines need.
+            let markerSource = marker.attribute(.glimmerListMarker, at: 0, effectiveRange: nil) as? String ?? ""
+            var itemContext = inner
+            itemContext.markerLinePrefix = context.markdownPrefix
+            itemContext.markdownPrefix = context.markdownPrefix + String(repeating: " ", count: markerSource.count)
+            itemContext.isTight = list.isTight
             if item.blocks.isEmpty {
-                appendTextParagraph([], font: theme.bodyFont, context: inner, marker: marker, to: output)
+                appendTextParagraph([], font: theme.bodyFont, context: itemContext, marker: marker, to: output)
             }
             for (index, block) in item.blocks.enumerated() {
-                append(block, context: inner, marker: index == 0 ? marker : nil, to: output)
+                append(block, context: itemContext, marker: index == 0 ? marker : nil, to: output)
             }
         }
         if list.isTight { setSpacingOfLastParagraph(context.paragraphSpacing ?? theme.paragraphSpacing, in: output) }
@@ -139,6 +159,7 @@ struct GlimmerComposer {
         output.addAttribute(.paragraphStyle, value: style, range: range)
         if context.quoteDepth > 0 { output.addAttribute(.glimmerQuoteDepth, value: context.quoteDepth, range: range) }
         if let headingLevel { output.addAttribute(.accessibilityTextHeadingLevel, value: headingLevel, range: range) }
+        stampMarkdown(context: context, hasMarker: marker != nil, range: range, in: output)
     }
 
     private func appendEmbed(
@@ -158,6 +179,13 @@ struct GlimmerComposer {
         style.paragraphSpacing = theme.blockSpacing
         output.addAttributes([.paragraphStyle: style, .font: theme.bodyFont, .glimmerSource: source], range: range)
         if context.quoteDepth > 0 { output.addAttribute(.glimmerQuoteDepth, value: context.quoteDepth, range: range) }
+        stampMarkdown(context: context, hasMarker: false, range: range, in: output)
+    }
+
+    /// Records what copy needs to write this paragraph back as markdown.
+    private func stampMarkdown(context: Context, hasMarker: Bool, range: NSRange, in output: NSMutableAttributedString) {
+        output.addAttribute(.glimmerMarkdownPrefix, value: hasMarker ? context.markerLinePrefix : context.markdownPrefix, range: range)
+        if context.isTight { output.addAttribute(.glimmerTightList, value: true, range: range) }
     }
 
     // MARK: - Styles
