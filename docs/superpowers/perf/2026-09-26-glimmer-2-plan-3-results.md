@@ -50,6 +50,23 @@ tight list. The configure case is about 1,200 words.
 The configure numbers above were taken under load. With a quieter machine (load average about 6, earlier the same
 day) a cached configure measured 9.7 ms against 32.2 ms uncached.
 
+## Streaming a long code block or table (added in the final-review fix pass)
+
+The code case is a 150-line code block streamed a line at a time; the table case is a 40-row table streamed a row at a
+time. Release, same machine:
+
+| Metric | Gate | Before the fix | After |
+|---|---|---|---|
+| Apply p95, long code block | ≤ 4 ms (not yet the spec's 2) | 15 ms | 3.4 ms |
+| Rest of main thread p95, long code block | ≤ 26 ms | 49 ms | 18 ms |
+| Apply p95, long table | ≤ 4 ms (not yet the spec's 2) | 3.7 ms | 3.3 ms |
+| Rest of main thread p95, long table | ≤ 18 ms | 5.4 ms | 4.8 ms |
+
+A streaming code block is now highlighted again in full (a closing `*/` can recolor earlier lines), but only the lines
+whose text or colors changed reach TextKit and are measured. What keeps the apply over 2 ms: the highlight itself runs
+on main (~1.3 ms; spec §4.2 wants it on the worker, on closed lines), and a table rebuilds its labels per row. Both are
+Plan 5 work.
+
 ## Before and after Plan 3 (5,000-word answer, Debug)
 
 | | Before Plan 3 | After |

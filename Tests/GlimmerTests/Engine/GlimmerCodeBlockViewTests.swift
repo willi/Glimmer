@@ -94,4 +94,18 @@ final class GlimmerCodeBlockViewTests: XCTestCase {
         view.layoutIfNeeded()
         XCTAssertEqual(view.scrollView.frame.maxY, view.bounds.height, accuracy: 0.5, "a settled code block scrolls over its full height")
     }
+
+    func testStreamedCodeMatchesAFreshCodeBlock() {
+        let highlighter = GlimmerBasicHighlighter()
+        let final = "let a = 1\n/* a comment\nthat spans lines */\nlet b = \"two\"\nlet widerLine = compute(value: 42, scale: 2.5)"
+        let streamed = GlimmerCodeBlockView(code: "let a = 1\n/* a comment", language: "swift", theme: theme, highlighter: highlighter)
+        // Grows line by line; the closing */ recolors a line that was already shown.
+        for end in ["let a = 1\n/* a comment\nthat spans", "let a = 1\n/* a comment\nthat spans lines */", final] {
+            streamed.update(to: .codeBlock(language: "swift", code: end))
+        }
+        let fresh = GlimmerCodeBlockView(code: final, language: "swift", theme: theme, highlighter: highlighter)
+        XCTAssertTrue(streamed.textView.textStorage.isEqual(to: fresh.textView.textStorage), "same text and colors")
+        XCTAssertEqual(streamed.textSize, fresh.textSize)
+        XCTAssertEqual(streamed.embedHeight(forWidth: 300), fresh.embedHeight(forWidth: 300))
+    }
 }
