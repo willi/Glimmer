@@ -31,6 +31,7 @@ enum GlimmerTailHealer {
         let tailStart = lastParagraphStart(in: markdown)
         var tail = String(markdown[tailStart...])
         tail = holdBackTableHeader(tail)
+        tail = holdBackSetextUnderline(tail)
         tail = healLinks(tail)
         tail = closeInlineDelimiters(tail)
         return String(markdown[..<tailStart]) + tail
@@ -162,6 +163,17 @@ enum GlimmerTailHealer {
         return body.split(separator: "|", omittingEmptySubsequences: false)
     }
 
+    /// A line of only `-` or `=` right under paragraph text is a setext underline, or the start of a list item or
+    /// rule; shown early it would flip the paragraph above into a heading and back. Hold it back until the next line.
+    private static func holdBackSetextUnderline(_ tail: String) -> String {
+        var lines = tail.components(separatedBy: "\n")
+        guard lines.count >= 2, let last = lines.last,
+              last.contains(#/^ {0,3}(-+|=+) *$/#),
+              !lines[lines.count - 2].trimmingCharacters(in: .whitespaces).isEmpty else { return tail }
+        lines.removeLast()
+        return lines.joined(separator: "\n") + "\n"
+    }
+
     // MARK: - Links and images
 
     private static func healLinks(_ tail: String) -> String {
@@ -188,7 +200,7 @@ enum GlimmerTailHealer {
 
     // MARK: - Emphasis, strikethrough, code spans
 
-    /// Closes `**`, `*`, `~~` and `` ` `` left open, innermost first, before any trailing whitespace (a closer after a
+    /// Closes `**`, `*`, `__`, `_`, `~~` and `` ` `` left open, innermost first, before any trailing whitespace (a closer after a
     /// space would not be right-flanking). A dangling opener with nothing after it is dropped instead.
     private static func closeInlineDelimiters(_ tail: String) -> String {
         var body = tail
@@ -220,6 +232,12 @@ enum GlimmerTailHealer {
         func next(_ offset: Int) -> Character? {
             index + offset < characters.count ? characters[index + offset] : nil
         }
+        /// Underscores between letters or digits never open or close emphasis (`snake_case` stays literal).
+        func isIntraword(at position: Int, length: Int) -> Bool {
+            let before = position > 0 ? characters[position - 1] : " "
+            let after = position + length < characters.count ? characters[position + length] : " "
+            return (before.isLetter || before.isNumber) && (after.isLetter || after.isNumber)
+        }
         while index < characters.count {
             let character = characters[index]
             if open.last == "`" {
@@ -247,6 +265,13 @@ enum GlimmerTailHealer {
                 break // a list bullet, not emphasis
             case "*":
                 toggle("*")
+            case "_" where next(1) == "_":
+                if !isIntraword(at: index, length: 2) { toggle("__") }
+                index += 2
+                atLineStart = false
+                continue
+            case "_":
+                if !isIntraword(at: index, length: 1) { toggle("_") }
             case "~" where next(1) == "~":
                 toggle("~~")
                 index += 2

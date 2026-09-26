@@ -49,4 +49,9 @@ final class GlimmerPhraseChunkerTests: XCTestCase {
     func testNothingLeftReturnsNil() {
         XCTAssertNil(end("done", from: 4, streaming: false))
     }
+
+    func testPunctuationBeforeAClosingQuoteEndsAPhrase() {
+        let text = "He said \"stop now.\" Then more words follow here"
+        XCTAssertEqual(end(text, streaming: true), (text as NSString).range(of: "Then").location)
+    }
 }

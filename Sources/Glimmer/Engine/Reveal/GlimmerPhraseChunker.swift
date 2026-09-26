@@ -30,7 +30,10 @@ enum GlimmerPhraseChunker {
                 lastCompleteEnd = NSMaxRange(range)
             } else {
                 inWord = true
-                lastWordEndsWithPunctuation = character.count == 1 && ",.;:!?".contains(character)
+                // A closing quote or bracket after punctuation ("stop.") keeps the sentence end.
+                if !(character.count == 1 && "\"'\u{201D}\u{2019})]\u{00BB}".contains(character)) {
+                    lastWordEndsWithPunctuation = character.count == 1 && ",.;:!?".contains(character)
+                }
             }
             index = NSMaxRange(range)
         }

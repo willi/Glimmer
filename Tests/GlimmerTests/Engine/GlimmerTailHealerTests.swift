@@ -4,6 +4,12 @@ import XCTest
 final class GlimmerTailHealerTests: XCTestCase {
     private let cases: [(input: String, healed: String)] = [
         ("Hello **wor", "Hello **wor**"),
+        ("Hello __wor", "Hello __wor__"),
+        ("a _b", "a _b_"),
+        ("snake_case_name", "snake_case_name"),
+        ("Title\n-", "Title\n"),
+        ("Title\n---", "Title\n"),
+        ("text\n\n---", "text\n\n---"),
         ("Hello **wor ", "Hello **wor** "),
         ("Hello **", "Hello "),
         ("**b *", "**b** "),

@@ -140,7 +140,9 @@ public final class GlimmerView: UIView {
         guard var current = engine else { return }
         let now = clock.now
         current.advance(to: now)
-        if let revealID { GlimmerRevealStore.shared.record(current.revealedLength, for: revealID) }
+        if let revealID {
+            GlimmerRevealStore.shared.record(current.revealedLength, text: textView.textStorage.string as NSString, for: revealID)
+        }
         if current.isComplete {
             endReveal()
             reportHeightIfChanged()
@@ -164,7 +166,9 @@ public final class GlimmerView: UIView {
 
     private func startRevealIfNeeded(isStreaming: Bool) {
         guard engine == nil, isStreaming, let options = revealOptions else { return }
-        let resumed = revealID.flatMap { GlimmerRevealStore.shared.revealedLength(for: $0) } ?? 0
+        let resumed = revealID.flatMap {
+            GlimmerRevealStore.shared.revealedLength(for: $0, text: textView.textStorage.string as NSString)
+        } ?? 0
         engine = GlimmerRevealEngine(options: options, alreadyRevealed: min(resumed, textView.textStorage.length))
         revealMask.invalidateGeometry()
         revealedHeight = nil

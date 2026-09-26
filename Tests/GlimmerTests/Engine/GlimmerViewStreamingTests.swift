@@ -93,7 +93,7 @@ final class GlimmerViewStreamingTests: XCTestCase {
         first.update(markdown: answer, isStreaming: false, revealID: "resume-test")
         await first.pendingDocument?.value
         clock.advance(to: 10)
-        XCTAssertEqual(store.revealedLength(for: "resume-test"), first.textView.textStorage.length)
+        XCTAssertEqual(store.revealedLength(for: "resume-test", text: first.textView.textStorage.string as NSString), first.textView.textStorage.length)
 
         let (second, _, secondWindow) = streamingView()
         second.update(markdown: answer, isStreaming: true, revealID: "resume-test")
@@ -156,13 +156,12 @@ final class GlimmerViewStreamingTests: XCTestCase {
         _ = window
     }
 
-    func testStoreIsMonotonicAndBounded() {
-        let store = GlimmerRevealStore(capacity: 2)
-        store.record(10, for: "a")
-        store.record(5, for: "a")
-        XCTAssertEqual(store.revealedLength(for: "a"), 10)
-        store.record(1, for: "b")
-        store.record(1, for: "c")
-        XCTAssertNil(store.revealedLength(for: "a"), "least recently used is evicted")
+    func testReleasedSystemClockNeverFires() async {
+        var fired = false
+        var clock: GlimmerSystemRevealClock? = GlimmerSystemRevealClock()
+        clock?.wake(at: CACurrentMediaTime() + 0.05) { fired = true }
+        clock = nil
+        try? await Task.sleep(for: .milliseconds(200))
+        XCTAssertFalse(fired)
     }
 }

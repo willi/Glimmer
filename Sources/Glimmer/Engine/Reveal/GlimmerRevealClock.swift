@@ -30,4 +30,9 @@ final class GlimmerSystemRevealClock: GlimmerRevealClock {
         task?.cancel()
         task = nil
     }
+
+    /// A released clock never wakes anyone.
+    isolated deinit {
+        task?.cancel()
+    }
 }
