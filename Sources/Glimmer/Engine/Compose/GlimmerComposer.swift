@@ -4,7 +4,6 @@ import UIKit
 ///
 /// Prose becomes text with paragraph styles; code blocks, tables, standalone images and rules become full-width
 /// `GlimmerBlockAttachment`s. The theme must already be scaled for Dynamic Type (`GlimmerTheme.scaled(for:)`).
-@MainActor
 struct GlimmerComposer {
     var theme: GlimmerTheme
     var highlighter: any GlimmerHighlighter = GlimmerBasicHighlighter()

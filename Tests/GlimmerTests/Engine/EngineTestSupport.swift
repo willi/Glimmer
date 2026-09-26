@@ -148,3 +148,20 @@ func blockAttachments(in text: NSAttributedString) -> [GlimmerBlockAttachment] {
     }
     return attachments
 }
+
+/// CPU time the calling thread has used so far. On the main thread, the difference across a stretch of work is its
+/// main-thread cost wherever UIKit ran it — including layout and drawing Core Animation does while a test awaits a
+/// worker — and excludes other threads and idle waiting.
+func threadCPUTime() -> Duration {
+    var info = thread_basic_info()
+    var count = mach_msg_type_number_t(MemoryLayout<thread_basic_info>.size / MemoryLayout<natural_t>.size)
+    let thread = mach_thread_self()
+    defer { mach_port_deallocate(mach_task_self_, thread) }
+    let result = withUnsafeMutablePointer(to: &info) { pointer in
+        pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { thread_info(thread, thread_flavor_t(THREAD_BASIC_INFO), $0, &count) }
+    }
+    guard result == KERN_SUCCESS else { return .zero }
+    let micros = Int64(info.user_time.seconds + info.system_time.seconds) * 1_000_000
+        + Int64(info.user_time.microseconds + info.system_time.microseconds)
+    return .microseconds(micros)
+}

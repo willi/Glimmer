@@ -40,7 +40,7 @@ final class GlimmerStreamParityTests: XCTestCase {
         }
     }
 
-    func testStreamedViewEndsIdenticalToASettledView() throws {
+    func testStreamedViewEndsIdenticalToASettledView() async throws {
         for fixture in StreamingFixtures.all {
             let streamed = GlimmerView(configuration: configuration)
             let clock = ManualRevealClock()
@@ -51,11 +51,13 @@ final class GlimmerStreamParityTests: XCTestCase {
             var time = 0.0
             for end in stride(from: 1, through: characters.count, by: 25) {
                 streamed.update(markdown: String(characters[..<end]), isStreaming: true, revealID: "parity-\(fixture.name)")
+                await streamed.pendingDocument?.value
                 time += 0.05
                 clock.advance(to: time)
                 heights.append(streamed.intrinsicContentSize.height)
             }
             streamed.update(markdown: fixture.markdown, isStreaming: false, revealID: "parity-\(fixture.name)")
+            await streamed.pendingDocument?.value
             clock.advance(to: time + 10)
             GlimmerRevealStore.shared.clear("parity-\(fixture.name)")
 

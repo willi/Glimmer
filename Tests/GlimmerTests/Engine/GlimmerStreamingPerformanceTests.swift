@@ -2,18 +2,23 @@ import UIKit
 import XCTest
 @testable import Glimmer
 
-/// Main-thread cost of one streamed `update`, and of the layout pass after it, near the end of a long answer followed
-/// by its scroll view the way a chat follows a streaming reply. The spec's budget (§3) is ≤ 2 ms p95 in a Release
-/// build on an iPhone 16 Pro Max; these run in Debug on the simulator, so they gate at a looser bound — one that still
-/// fails for any cost that grows with the whole answer (re-measuring it, re-scanning it, re-laying it out, rendering
-/// all of it).
+/// Main-thread cost of one streamed `update` near the end of a long answer, followed by its scroll view the way a chat
+/// follows a streaming reply. Two numbers per update:
+/// - the apply (`lastApplyDuration`): the spec's §3 metric, ≤ 2 ms p95 in Release on an iPhone 16 Pro Max. Parse and
+///   compose run on the worker, so this is the edit, measuring and the reveal's bookkeeping.
+/// - the rest of the main thread's CPU for that update: layout and drawing (Core Animation runs them while the test
+///   awaits the worker) and the reveal's wake-ups. It is mostly TextKit drawing the changed and newly scrolled-in
+///   lines. Gated as a regression bound: rendering every paragraph (no visible band) costs well over 30 ms here.
+/// These run in Debug on the simulator, so the gates are looser than the spec's.
 @MainActor
 final class GlimmerStreamingPerformanceTests: XCTestCase {
     private let budget: Duration = .milliseconds(8)
     /// TextKit re-lays out the ~60 fragments of the rendered band after every change: 3–4 ms p95 here, 4–6 ms with a
     /// reveal's mask (it was 30 ms before the band). Plan 5's on-device harness checks the Release cost against hitches.
-    private let layoutBudget: Duration = .milliseconds(6)
-    private let revealingLayoutBudget: Duration = .milliseconds(8)
+    /// Measured before moving compose off-main (main-thread CPU, p95): mixed 12 ms, revealing 18 ms, long list 20 ms;
+    /// after: 13, 19 and 6 ms.
+    private let mainThreadBudget: Duration = .milliseconds(18)
+    private let revealingMainThreadBudget: Duration = .milliseconds(26)
 
     /// About 5,000 words of headings, prose, lists, quotes, code and tables.
     private let longMixedAnswer = Array(repeating: StreamingFixtures.all.map(\.markdown).joined(separator: "\n\n"), count: 29)
@@ -22,26 +27,26 @@ final class GlimmerStreamingPerformanceTests: XCTestCase {
     /// About 5,000 words in one tight list: no blank line anywhere.
     private let longList = (1...500).map { "- Item \($0) keeps the list going with a few more words" }.joined(separator: "\n")
 
-    func testUpdatesNearTheEndOfALongAnswerStayWithinBudget() {
-        let p95 = streamTail(of: longMixedAnswer, reveal: .none)
+    func testUpdatesNearTheEndOfALongAnswerStayWithinBudget() async {
+        let p95 = await streamTail(of: longMixedAnswer, reveal: .none)
         XCTAssertLessThan(p95.update, budget, "update p95")
-        XCTAssertLessThan(p95.layout, layoutBudget, "layout pass p95")
+        XCTAssertLessThan(p95.layout, mainThreadBudget, "main-thread work p95")
     }
 
     /// The tail holds a code block and a table, which reveal a line or row at a time: each unit start grows the box,
-    /// and TextKit re-lays it out with the text after it (about 3.5 ms here). Hence a looser layout gate.
-    func testRevealingUpdatesNearTheEndOfALongAnswerStayWithinBudget() {
-        let p95 = streamTail(of: longMixedAnswer, reveal: .smooth(GlimmerRevealOptions()))
+    /// and TextKit re-lays it out and redraws it with the text after it. Hence a looser main-thread gate.
+    func testRevealingUpdatesNearTheEndOfALongAnswerStayWithinBudget() async {
+        let p95 = await streamTail(of: longMixedAnswer, reveal: .smooth(GlimmerRevealOptions()))
         XCTAssertLessThan(p95.update, budget, "update p95")
-        XCTAssertLessThan(p95.layout, revealingLayoutBudget, "layout pass p95")
+        XCTAssertLessThan(p95.layout, revealingMainThreadBudget, "main-thread work p95")
     }
 
-    /// A list is one block, so every update still re-composes all of it; what this bounds is the rest — TextKit
-    /// re-laying out every item took 35 ms here before edits were trimmed.
-    func testUpdatesNearTheEndOfALongListStayWithinBudget() {
-        let p95 = streamTail(of: longList, reveal: .none)
-        XCTAssertLessThan(p95.update, .milliseconds(25), "update p95")
-        XCTAssertLessThan(p95.layout, layoutBudget, "layout pass p95")
+    /// A list is one block, so every update re-composes all of it — on the worker. On the main thread it cost 14 ms
+    /// before compose moved off it, and 35 ms before edits were trimmed.
+    func testUpdatesNearTheEndOfALongListStayWithinBudget() async {
+        let p95 = await streamTail(of: longList, reveal: .none)
+        XCTAssertLessThan(p95.update, budget, "update p95")
+        XCTAssertLessThan(p95.layout, mainThreadBudget, "main-thread work p95")
     }
 
     /// Spec §3: starting a phrase ≤ 0.2 ms, and its segment lookup is most of that. TextKit's time, so the budget holds
@@ -85,8 +90,11 @@ final class GlimmerStreamingPerformanceTests: XCTestCase {
     }
 
     /// Streams all but the last 1,200 characters at once, then the rest in 30-character chunks, following the view's
-    /// bottom in a scroll view. Returns the p95 of the updates and of the layout passes after them.
-    private func streamTail(of markdown: String, reveal: GlimmerReveal) -> (update: Duration, layout: Duration) {
+    /// bottom in a scroll view. Returns the p95 of each update's main-thread apply (parse and compose run on the
+    /// worker) and of the rest of the main thread's work for that update: layout and drawing (wherever Core Animation
+    /// ran them, including while the test awaited the worker) plus the reveal's wake-ups — main-thread CPU time for
+    /// the whole update, less the apply.
+    private func streamTail(of markdown: String, reveal: GlimmerReveal) async -> (update: Duration, layout: Duration) {
         var configuration = GlimmerConfiguration(imageLoader: nil)
         configuration.reveal = reveal
         let view = GlimmerView(configuration: configuration)
@@ -105,6 +113,7 @@ final class GlimmerStreamingPerformanceTests: XCTestCase {
         let characters = Array(markdown)
         var end = characters.count - 1_200
         view.update(markdown: String(characters[..<end]), isStreaming: true)
+        await view.pendingDocument?.value
         follow()
         view.layoutIfNeeded()
         var time = 1.0
@@ -112,23 +121,24 @@ final class GlimmerStreamingPerformanceTests: XCTestCase {
         var samples: [Duration] = []
         var updates: [Duration] = []
         var layouts: [Duration] = []
-        let timer = ContinuousClock()
         while end < characters.count {
             end = min(end + 30, characters.count)
             let prefix = String(characters[..<end])
             time += 0.05
-            let update = timer.measure { view.update(markdown: prefix, isStreaming: true) }
-            let layout = timer.measure {
-                follow()
-                view.layoutIfNeeded()
-                clock.advance(to: time)
-            }
+            let cpuStart = threadCPUTime()
+            view.update(markdown: prefix, isStreaming: true)
+            await view.pendingDocument?.value
+            follow()
+            view.layoutIfNeeded()
+            clock.advance(to: time)
+            let update = view.lastApplyDuration
+            let layout = max(.zero, threadCPUTime() - cpuStart - update)
             updates.append(update)
             layouts.append(layout)
             samples.append(update + layout)
         }
         func p(_ values: [Duration], _ percent: Int) -> Duration { values.sorted()[values.count * percent / 100] }
-        print("PERF \(name): update p50 \(p(updates, 50)) p95 \(p(updates, 95)); layout pass p95 \(p(layouts, 95)); total p95 \(p(samples, 95)) over \(samples.count) updates, \(markdown.count) characters")
+        print("PERF \(name): update p50 \(p(updates, 50)) p95 \(p(updates, 95)); rest of main thread p95 \(p(layouts, 95)); total p95 \(p(samples, 95)) over \(samples.count) updates, \(markdown.count) characters")
         _ = window
         return (p(updates, 95), p(layouts, 95))
     }

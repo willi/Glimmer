@@ -15,8 +15,10 @@ struct GlimmerDocumentEdit {
 /// into its predecessor (a lone `|` line parses as a paragraph until its cells arrive and it joins the table above).
 /// Anything that is not an append, or that uses link reference definitions, re-parses in full. `text` always equals a
 /// fresh `compose(parse(…))` of the same (healed) markdown.
-@MainActor
-final class GlimmerStreamingDocument {
+///
+/// One owner at a time: it is built on the main thread for a synchronous configure, then handed to a
+/// `GlimmerDocumentWorker`, which alone uses it from then on.
+final class GlimmerStreamingDocument: @unchecked Sendable {
     private(set) var text = NSMutableAttributedString()
     private(set) var blocks: [GlimmerBlock] = []
     /// UTF-16 offset in `text` where each block's composed text starts.

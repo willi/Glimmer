@@ -22,8 +22,16 @@ public final class GlimmerView: UIView {
     private(set) var isStreaming = false
     private(set) var revealID: String?
     private(set) var engine: GlimmerRevealEngine?
+    /// The worker update in flight, if any. Tests await it.
+    private(set) var pendingDocument: Task<Void, Never>?
+    /// Main-thread time spent applying the last document change: the spec's "applying one network update" metric.
+    private(set) var lastApplyDuration: Duration = .zero
 
-    private var document: GlimmerStreamingDocument
+    /// Parses and composes streaming updates off the main thread. Replaced (with its document) on every synchronous
+    /// compose, which also drops any result still in flight from the old one.
+    private var worker: GlimmerDocumentWorker
+    private var requestedUpdate = 0
+    private var appliedUpdate = 0
     private var lastWidth: CGFloat = 0
     private var lastReportedHeight: CGFloat = -1
     /// The text's height at the text view's width, as of a text version (see `fitTextViewToContent`).
@@ -38,7 +46,10 @@ public final class GlimmerView: UIView {
 
     public init(configuration: GlimmerConfiguration = .default) {
         self.configuration = configuration
-        document = GlimmerStreamingDocument(composer: GlimmerComposer(theme: configuration.theme))
+        worker = GlimmerDocumentWorker(
+            document: GlimmerStreamingDocument(composer: GlimmerComposer(theme: configuration.theme)),
+            extensions: configuration.extensions
+        )
         super.init(frame: .zero)
         // While revealing, this view is shorter than the text and clips the rest (see `fitTextViewToContent`).
         clipsToBounds = true
@@ -67,24 +78,15 @@ public final class GlimmerView: UIView {
         self.markdown = markdown
         self.isStreaming = isStreaming
         self.revealID = revealID
-        if let edit = document.update(markdown: preprocessed(markdown), isStreaming: isStreaming) {
-            // Grown code blocks and tables update their views in place; the edit then re-lays them out.
-            for update in edit.embedUpdates { update.attachment.update(to: update.embed) }
-            textView.apply(edit)
-            layoutChangedFrom = min(layoutChangedFrom, edit.range.location)
-            fitTextViewToContent()
-            // Revealed text changed or reflowed (a list turned loose, a header became a table): fading phrases move.
-            if let engine, edit.range.location < engine.revealedLength {
-                revealMask.invalidateGeometry()
-                revealedHeight = nil
-            }
+        if !isStreaming, engine == nil, pendingDocument == nil {
+            // A settled answer: compose now, so the host can size it in this layout pass.
+            composeSynchronously()
+            return
         }
-        startRevealIfNeeded()
-        embedUnits = document.embedUnits
-        engine?.textChanged(NSString(string: textView.textStorage.string), isStreaming: isStreaming, now: clock.now,
-                            embedUnits: embedUnits)
-        advanceReveal()
-        reportHeightIfChanged()
+        requestedUpdate += 1
+        if pendingDocument == nil {
+            pendingDocument = Task { [weak self] in await self?.drainDocumentUpdates() }
+        }
     }
 
     public override func sizeThatFits(_ size: CGSize) -> CGSize {
@@ -155,7 +157,7 @@ public final class GlimmerView: UIView {
         return options
     }
 
-    private func startRevealIfNeeded() {
+    private func startRevealIfNeeded(isStreaming: Bool) {
         guard engine == nil, isStreaming, let options = revealOptions else { return }
         let resumed = revealID.flatMap { GlimmerRevealStore.shared.revealedLength(for: $0) } ?? 0
         engine = GlimmerRevealEngine(options: options, alreadyRevealed: min(resumed, textView.textStorage.length))
@@ -200,26 +202,71 @@ public final class GlimmerView: UIView {
 
     /// Re-composes everything (theme, configuration or text size changed).
     private func rebuildDocument() {
-        let theme = configuration.theme.scaled(for: traitCollection)
-        textView.apply(theme: theme)
-        document = GlimmerStreamingDocument(composer: GlimmerComposer(
-            theme: theme,
+        textView.apply(theme: configuration.theme.scaled(for: traitCollection))
+        if revealOptions == nil { endReveal() }
+        composeSynchronously()
+    }
+
+    private func makeDocument() -> GlimmerStreamingDocument {
+        GlimmerStreamingDocument(composer: GlimmerComposer(
+            theme: configuration.theme.scaled(for: traitCollection),
             highlighter: configuration.highlighter,
             imageLoader: configuration.imageLoader,
             extensions: configuration.extensions
         ))
+    }
+
+    /// Composes the whole current markdown on the main thread and restarts the worker from that document.
+    private func composeSynchronously() {
+        let document = makeDocument()
         _ = document.update(markdown: preprocessed(markdown), isStreaming: isStreaming)
+        worker = GlimmerDocumentWorker(document: document, extensions: configuration.extensions)
+        appliedUpdate = requestedUpdate
         textView.attributedText = document.text
-        layoutChangedFrom = 0
-        revealedHeight = nil
-        fitTextViewToContent()
-        if revealOptions == nil { endReveal() }
-        revealMask.invalidateGeometry()
-        embedUnits = document.embedUnits
-        engine?.textChanged(NSString(string: textView.textStorage.string), isStreaming: isStreaming, now: clock.now,
-                            embedUnits: embedUnits)
+        apply(GlimmerDocumentResult(edit: nil, embedUnits: document.embedUnits, isStreaming: isStreaming), replacedText: true)
+    }
+
+    /// Applies worker results in request order. When one lands, only the latest request is computed next.
+    private func drainDocumentUpdates() async {
+        while appliedUpdate < requestedUpdate {
+            let request = requestedUpdate
+            let worker = self.worker
+            let result = await worker.update(markdown: markdown, isStreaming: isStreaming)
+            // A synchronous compose replaced the worker meanwhile, and already showed this text.
+            guard worker === self.worker else { continue }
+            apply(result, replacedText: false)
+            appliedUpdate = request
+        }
+        pendingDocument = nil
+    }
+
+    /// Everything after the document changed: embed updates, the text edit, fitting, the reveal and the height.
+    private func apply(_ result: GlimmerDocumentResult, replacedText: Bool) {
+        let started = ContinuousClock.now
+        embedUnits = result.embedUnits
+        if let edit = result.edit {
+            // Grown code blocks and tables update their views in place; the edit then re-lays them out.
+            for update in edit.embedUpdates { update.attachment.update(to: update.embed) }
+            textView.apply(edit)
+            layoutChangedFrom = min(layoutChangedFrom, edit.range.location)
+            // Revealed text changed or reflowed (a list turned loose, a header became a table): fading phrases move.
+            if let engine, edit.range.location < engine.revealedLength {
+                revealMask.invalidateGeometry()
+                revealedHeight = nil
+            }
+        }
+        if replacedText {
+            layoutChangedFrom = 0
+            revealedHeight = nil
+            revealMask.invalidateGeometry()
+        }
+        if replacedText || result.edit != nil { fitTextViewToContent() }
+        startRevealIfNeeded(isStreaming: result.isStreaming)
+        engine?.textChanged(NSString(string: textView.textStorage.string), isStreaming: result.isStreaming,
+                            now: clock.now, embedUnits: embedUnits)
         advanceReveal()
         reportHeightIfChanged()
+        lastApplyDuration = ContinuousClock.now - started
     }
 
     // MARK: - Height

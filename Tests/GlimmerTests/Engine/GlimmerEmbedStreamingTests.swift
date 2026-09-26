@@ -11,13 +11,15 @@ final class GlimmerEmbedStreamingTests: XCTestCase {
         return (view, hostInWindow(view, width: 390, height: 800))
     }
 
-    func testStreamingCodeBlockKeepsItsView() throws {
+    func testStreamingCodeBlockKeepsItsView() async throws {
         let (view, window) = noRevealView()
         view.update(markdown: "```swift\nlet a = 1", isStreaming: true)
+        await view.pendingDocument?.value
         settle(view)
         let first = try XCTUnwrap(findSubview(GlimmerCodeBlockView.self, in: view))
         let firstHeight = first.bounds.height
         view.update(markdown: "```swift\nlet a = 1\nlet b = 2\nlet c = 3", isStreaming: true)
+        await view.pendingDocument?.value
         settle(view)
         let second = try XCTUnwrap(findSubview(GlimmerCodeBlockView.self, in: view))
         XCTAssertTrue(first === second, "the view updates in place")
@@ -26,12 +28,14 @@ final class GlimmerEmbedStreamingTests: XCTestCase {
         _ = window
     }
 
-    func testStreamingTableKeepsItsView() throws {
+    func testStreamingTableKeepsItsView() async throws {
         let (view, window) = noRevealView()
         view.update(markdown: "| a | b |\n|---|---|\n| 1 | 2 |", isStreaming: true)
+        await view.pendingDocument?.value
         settle(view)
         let first = try XCTUnwrap(findSubview(GlimmerTableView.self, in: view))
         view.update(markdown: "| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |", isStreaming: true)
+        await view.pendingDocument?.value
         settle(view)
         let second = try XCTUnwrap(findSubview(GlimmerTableView.self, in: view))
         XCTAssertTrue(first === second)
@@ -46,10 +50,11 @@ final class GlimmerEmbedStreamingTests: XCTestCase {
         return (view, clock, hostInWindow(view, width: width, height: 800))
     }
 
-    func testCodeBlockRevealsLineByLine() throws {
+    func testCodeBlockRevealsLineByLine() async throws {
         let (view, clock, window) = revealingView()
         let markdown = "```swift\nlet a = 1\nlet b = 2\nlet c = 3\n```"
         view.update(markdown: markdown, isStreaming: true)
+        await view.pendingDocument?.value
         settle(view)
         let code = try XCTUnwrap(findSubview(GlimmerCodeBlockView.self, in: view))
         XCTAssertEqual(code.visibleUnitCount, 1, "the first line starts alone")
@@ -65,6 +70,7 @@ final class GlimmerEmbedStreamingTests: XCTestCase {
         XCTAssertEqual(rects[0].minY, onScreen.minY, accuracy: 1)
         XCTAssertEqual(rects[(code.visibleUnitCount ?? 1) - 1].maxY, onScreen.maxY, accuracy: 1)
         view.update(markdown: markdown, isStreaming: false)
+        await view.pendingDocument?.value
         clock.advance(to: 10)
         settle(view)
         XCTAssertNil(code.visibleUnitCount, "a settled code block shows every line")
@@ -72,9 +78,10 @@ final class GlimmerEmbedStreamingTests: XCTestCase {
         _ = window
     }
 
-    func testUnitPhraseFadesOverItsLine() throws {
+    func testUnitPhraseFadesOverItsLine() async throws {
         let (view, clock, window) = revealingView()
         view.update(markdown: "```\nfirst line\nsecond line\nthird line\n```", isStreaming: true)
+        await view.pendingDocument?.value
         var time = 0.0
         while (view.engine?.unitsRevealed.values.max() ?? 0) < 2, time < 0.5 {
             time += 0.02
@@ -90,15 +97,17 @@ final class GlimmerEmbedStreamingTests: XCTestCase {
         _ = window
     }
 
-    func testWidthChangeDuringAnEmbedRevealEndsIdenticalToSettled() throws {
+    func testWidthChangeDuringAnEmbedRevealEndsIdenticalToSettled() async throws {
         let markdown = "Intro.\n\n```\none\ntwo\nthree\nfour\n```\n\nOutro."
         let (view, clock, window) = revealingView(width: 390)
         view.update(markdown: markdown, isStreaming: true)
+        await view.pendingDocument?.value
         clock.advance(to: 0.3)
         window.frame.size.width = 320
         view.frame.size.width = 320
         settle(view)
         view.update(markdown: markdown, isStreaming: false)
+        await view.pendingDocument?.value
         clock.advance(to: 20)
         settle(view)
         let settled = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
