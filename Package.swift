@@ -9,28 +9,35 @@ let package = Package(
         .iOS(.v18)
     ],
     products: [
-        // Products define the executables and libraries a package produces, making them visible to other packages.
         .library(
             name: "Glimmer",
             targets: ["Glimmer"]),
     ],
-    dependencies: [
-        // Dependencies declare other packages that this package depends on.
-    ],
+    dependencies: [],
     targets: [
-        // Targets are the basic building blocks of a package, defining a module or a test suite.
-        // Targets can depend on other targets in this package and products from dependencies.
+        // Vendored from swiftlang/swift-cmark (gfm branch). See Sources/cmark-gfm/VENDORED.md.
+        .target(
+            name: "cmark-gfm",
+            path: "Sources/cmark-gfm",
+            exclude: ["scanners.re", "libcmark-gfm.pc.in", "config.h.in", "CMakeLists.txt", "COPYING", "VENDORED.md"]
+        ),
+        .target(
+            name: "cmark-gfm-extensions",
+            dependencies: ["cmark-gfm"],
+            path: "Sources/cmark-gfm-extensions",
+            exclude: ["CMakeLists.txt", "ext_scanners.re", "COPYING"]
+        ),
         .target(
             name: "Glimmer",
-            dependencies: [],
+            dependencies: ["cmark-gfm", "cmark-gfm-extensions"],
             resources: [
-                // Emoji URL map for optional lazy loading
+                // Emoji URL map for optional lazy loading (1.x; removed in Plan 3)
                 .process("Resources/emoji_urls.json")
             ]
         ),
         .testTarget(
             name: "GlimmerTests",
-            dependencies: ["Glimmer"]
+            dependencies: ["Glimmer", "cmark-gfm", "cmark-gfm-extensions"]
         ),
     ]
 )
