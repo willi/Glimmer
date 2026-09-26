@@ -49,7 +49,8 @@ public struct GlimmerTheme: Sendable {
     public var showsCodeBlockHeader: Bool
 
     public func headingFont(level: Int) -> UIFont {
-        headingFonts[min(max(level, 1), headingFonts.count) - 1]
+        guard !headingFonts.isEmpty else { return bodyFont }
+        return headingFonts[min(max(level, 1), headingFonts.count) - 1]
     }
 
     /// A copy with every font — and the spacing that must grow with text — scaled for the traits' content size

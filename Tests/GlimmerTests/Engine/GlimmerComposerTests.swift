@@ -253,4 +253,10 @@ final class GlimmerComposerTests: XCTestCase {
         let text = compose("see ![alt](https://example.com/a.png) here")
         XCTAssertEqual(attributes(of: "alt", in: text)[.glimmerSource] as? String, "![alt](https://example.com/a.png)")
     }
+
+    func testBulletsAndNumbersShareTheTextColor() {
+        XCTAssertEqual(attributes(of: "•", in: compose("- a"))[.foregroundColor] as? UIColor, theme.textColor)
+        XCTAssertEqual(attributes(of: "1.", in: compose("1. a"))[.foregroundColor] as? UIColor, theme.textColor)
+        XCTAssertEqual(attributes(of: "•", in: compose("> - a"))[.foregroundColor] as? UIColor, theme.secondaryTextColor)
+    }
 }

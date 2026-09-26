@@ -119,4 +119,11 @@ final class GlimmerParserTests: XCTestCase {
         let inlines: [GlimmerInline] = [.text("a "), .strong([.text("b")]), .softBreak, .code("c"), .image(source: "u", title: nil, alt: "d")]
         XCTAssertEqual(GlimmerInline.plainText(inlines), "a b cd")
     }
+
+    func testFenceLanguageStopsAtAnyWhitespace() {
+        guard case .codeBlock(let language, _) = GlimmerParser.parse("```swift\tlinenos\nlet x = 1\n```").first else {
+            return XCTFail("expected a code block")
+        }
+        XCTAssertEqual(language, "swift")
+    }
 }

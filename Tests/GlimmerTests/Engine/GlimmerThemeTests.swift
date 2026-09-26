@@ -65,4 +65,10 @@ final class GlimmerThemeTests: XCTestCase {
         XCTAssertEqual(NSAttributedString.Key.glimmerStrong.rawValue, "glimmer.strong")
         XCTAssertEqual(NSAttributedString.Key.glimmerEmphasis.rawValue, "glimmer.emphasis")
     }
+
+    func testHeadingFontFallsBackToBodyWithoutHeadingFonts() {
+        var theme = GlimmerTheme.default
+        theme.headingFonts = []
+        XCTAssertEqual(theme.headingFont(level: 2), theme.bodyFont)
+    }
 }

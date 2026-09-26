@@ -259,8 +259,9 @@ struct GlimmerComposer {
             switch kind {
             case .bullet:
                 let bullets = ["•", "◦", "▪︎"]
+                // One color for every marker, like a browser's ::marker: the text's, dimmed inside quotes.
                 marker.append(NSAttributedString(string: bullets[(context.listDepth - 1) % bullets.count], attributes: [
-                    .font: theme.bodyFont, .foregroundColor: theme.secondaryTextColor,
+                    .font: theme.bodyFont, .foregroundColor: color,
                 ]))
                 source = "- "
             case .ordered(let start):

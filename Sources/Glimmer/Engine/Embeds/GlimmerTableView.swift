@@ -19,7 +19,7 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
 
     private let content = UIView()
     private let headerBackground = UIView()
-    private let grid = CAShapeLayer()
+    let grid = CAShapeLayer()
     private var cells: [[NSAttributedString]] = []
     private var alignments: [GlimmerTable.Alignment]
     private let theme: GlimmerTheme
@@ -57,10 +57,16 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
 
     func update(to embed: GlimmerEmbed) {
         guard case .table(let header, let rows, let alignments) = embed else { return }
-        let columns = cells.first?.count ?? 0
-        let unchanged = rows.count + 1 == cells.count
-            && alignments == self.alignments
-            && rows.map { $0.map(\.string) } == cells.dropFirst().map { $0.prefix(max(columns, 0)).map(\.string) }
+        // Compared as `rebuildCells` stores them (padded to the widest row), styles included.
+        let columns = max(header.count, rows.map(\.count).max() ?? 0, alignments.count)
+        func padded(_ row: [NSAttributedString]) -> [NSAttributedString] {
+            row + Array(repeating: NSAttributedString(), count: max(0, columns - row.count))
+        }
+        let incoming = [padded(header)] + rows.map(padded)
+        let unchanged = alignments == self.alignments && incoming.count == cells.count
+            && zip(incoming, cells).allSatisfy { new, old in
+                new.count == old.count && zip(new, old).allSatisfy { $0.isEqual(to: $1) }
+            }
         guard !unchanged else { return }
         self.alignments = alignments
         rebuildCells(header: header, rows: rows)

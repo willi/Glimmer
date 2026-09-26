@@ -75,4 +75,32 @@ final class GlimmerTableViewTests: XCTestCase {
         XCTAssertEqual(table.layout(forWidth: 300), table.layout(forWidth: 300))
         XCTAssertNotEqual(table.layout(forWidth: 300).columnWidths, table.layout(forWidth: 200).columnWidths)
     }
+
+    func testGridChangesDoNotAnimate() {
+        let cell = { (text: String) in NSAttributedString(string: text) }
+        let table = GlimmerTableView(header: [cell("a"), cell("b")], rows: [[cell("1"), cell("2")]], alignments: [.none, .none], theme: .default)
+        let window = hostInWindow(table, width: 300, height: 200)
+        window.makeKeyAndVisible()
+        settle(table)  // commits the grid layer: an uncommitted layer never animates
+        let before = table.grid.path
+        table.frame.size.width = 200
+        table.layoutIfNeeded()
+        XCTAssertNotEqual(table.grid.path, before, "the width change redrew the grid")
+        XCTAssertNil(table.grid.animationKeys(), "the grid redraws in place")
+        _ = window
+    }
+
+    func testUpdateKeepsLabelsForARaggedTableThatDidNotChange() {
+        let cell = { (text: String) in NSAttributedString(string: text) }
+        let header = [cell("a"), cell("b")]
+        let rows = [[cell("1")]]
+        let table = GlimmerTableView(header: header, rows: rows, alignments: [.none, .none], theme: .default)
+        let label = table.cellLabels[1][0]
+        table.update(to: .table(header: header, rows: rows, alignments: [.none, .none]))
+        XCTAssertTrue(table.cellLabels[1][0] === label, "an unchanged ragged row keeps its labels")
+        let bold = NSAttributedString(string: "1", attributes: [.font: UIFont.boldSystemFont(ofSize: 17)])
+        table.update(to: .table(header: header, rows: [[bold]], alignments: [.none, .none]))
+        XCTAssertEqual(table.cellLabels[1][0].attributedText?.attribute(.font, at: 0, effectiveRange: nil) as? UIFont,
+                       UIFont.boldSystemFont(ofSize: 17), "a restyled cell updates")
+    }
 }

@@ -61,6 +61,15 @@ final class GlimmerExtensionTests: XCTestCase {
         XCTAssertEqual(chip.frame.height, ceil(theme.bodyFont.lineHeight), accuracy: 1)
         _ = window
     }
+
+    func testChipAfterEmojiKeepsItsRange() {
+        let text = compose("👋🏽 [3] after", extensions: [CitationExtension()])
+        let chip = (text.string as NSString).range(of: "\u{FFFC}").location
+        XCTAssertEqual(text.string, "👋🏽 \u{FFFC} after")
+        XCTAssertTrue(text.attribute(.attachment, at: chip, effectiveRange: nil) is GlimmerInlineAttachment)
+        XCTAssertEqual(text.attribute(.glimmerSource, at: chip, effectiveRange: nil) as? String, "[3]")
+        XCTAssertNil(text.attribute(.attachment, at: chip + 2, effectiveRange: nil))
+    }
 }
 
 private extension UIView {

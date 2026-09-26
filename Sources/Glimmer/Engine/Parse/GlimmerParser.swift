@@ -105,7 +105,7 @@ public enum GlimmerParser {
 
     private static func language(_ node: Node) -> String? {
         let info = string(cmark_node_get_fence_info(node)).trimmingCharacters(in: .whitespaces)
-        guard let word = info.split(separator: " ").first, !word.isEmpty else { return nil }
+        guard let word = info.split(whereSeparator: \.isWhitespace).first, !word.isEmpty else { return nil }
         return String(word)
     }
 
