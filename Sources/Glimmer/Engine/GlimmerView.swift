@@ -59,6 +59,8 @@ public final class GlimmerView: UIView {
         if let edit = document.update(markdown: preprocessed(markdown), isStreaming: isStreaming) {
             textView.apply(edit)
             fitTextViewToContent()
+            // Revealed text changed or reflowed (a list turned loose, a header became a table): fading phrases move.
+            if let engine, edit.range.location < engine.revealedLength { revealMask.invalidateGeometry() }
         }
         startRevealIfNeeded()
         engine?.textChanged(NSString(string: textView.textStorage.string), isStreaming: isStreaming, now: clock.now)

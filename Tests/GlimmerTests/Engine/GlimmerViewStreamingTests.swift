@@ -117,6 +117,27 @@ final class GlimmerViewStreamingTests: XCTestCase {
         _ = window
     }
 
+    func testReflowingRevealedTextMovesItsFadingPhrases() throws {
+        let (view, clock, window) = streamingView()
+        let tight = "- alpha beta gamma\n- delta epsilon zeta"
+        view.update(markdown: tight, isStreaming: true)
+        let delta = (view.textView.textStorage.string as NSString).range(of: "delta").location
+        var time = 0.0
+        while let engine = view.engine, !engine.phrases.contains(where: { NSMaxRange($0.range) > delta }), time < 5 {
+            time += 0.02
+            clock.advance(to: time)
+        }
+        // A third item after a blank line makes the list loose: the revealed second item moves down.
+        view.update(markdown: tight + "\n\n- eta", isStreaming: true)
+        let engine = try XCTUnwrap(view.engine)
+        let moved = try XCTUnwrap(engine.phrases.last { NSMaxRange($0.range) > delta })
+        let covered = try XCTUnwrap(view.revealMask.phraseLayer(startingAt: moved.range.location)?.path?.boundingBox)
+        for rect in view.textView.segmentRects(for: moved.range) {
+            XCTAssertTrue(covered.insetBy(dx: -0.5, dy: -0.5).contains(rect), "the fading phrase follows its glyphs: \(covered) vs \(rect)")
+        }
+        _ = window
+    }
+
     func testStoreIsMonotonicAndBounded() {
         let store = GlimmerRevealStore(capacity: 2)
         store.record(10, for: "a")
