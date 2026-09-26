@@ -37,7 +37,8 @@ let package = Package(
         ),
         .testTarget(
             name: "GlimmerTests",
-            dependencies: ["Glimmer", "cmark-gfm", "cmark-gfm-extensions"]
+            dependencies: ["Glimmer", "cmark-gfm", "cmark-gfm-extensions"],
+            resources: [.copy("Fixtures")]
         ),
     ]
 )
