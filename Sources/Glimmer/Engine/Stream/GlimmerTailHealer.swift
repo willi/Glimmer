@@ -4,11 +4,31 @@ import Foundation
 /// final style instead of as raw markers that restyle a moment later. Only an open code fence or the last paragraph is
 /// touched; everything before it is returned unchanged. Apply it only while streaming.
 enum GlimmerTailHealer {
+    /// Fence state carried across calls on a growing buffer, so each call scans only lines it has not seen. Reset it
+    /// (assign a fresh value) whenever the buffer is replaced rather than appended to.
+    struct FenceScan {
+        /// UTF-8 offset just past the last complete line scanned.
+        fileprivate var scannedTo = 0
+        fileprivate var open: OpenFence?
+    }
+
+    fileprivate struct OpenFence {
+        let marker: Character
+        let count: Int
+        let prefix: String
+    }
+
     static func heal(_ markdown: String) -> String {
-        if let fence = openFence(in: markdown) {
+        var scan = FenceScan()
+        return heal(markdown, fenceScan: &scan)
+    }
+
+    /// Heals `markdown`, which extends the buffer `fenceScan` last saw.
+    static func heal(_ markdown: String, fenceScan: inout FenceScan) -> String {
+        if let fence = openFence(in: markdown, scan: &fenceScan) {
             return markdown + (markdown.hasSuffix("\n") ? "" : "\n") + fence
         }
-        let tailStart = markdown.range(of: "\n\n", options: .backwards)?.upperBound ?? markdown.startIndex
+        let tailStart = lastParagraphStart(in: markdown)
         var tail = String(markdown[tailStart...])
         tail = holdBackTableHeader(tail)
         tail = healLinks(tail)
@@ -16,32 +36,63 @@ enum GlimmerTailHealer {
         return String(markdown[..<tailStart]) + tail
     }
 
+    /// Where the paragraph still being typed starts: after the last blank line, or at the last line opening a list
+    /// item, whichever is later. Inline syntax cannot span either, so nothing before it needs healing — and a long
+    /// answer is not re-scanned on every update.
+    private static func lastParagraphStart(in markdown: String) -> String.Index {
+        var lineEnd = markdown.endIndex
+        var isLastLine = true
+        while true {
+            let lineStart = markdown[..<lineEnd].lastIndex(of: "\n").map { markdown.index(after: $0) } ?? markdown.startIndex
+            if lineStart == lineEnd, !isLastLine { return markdown.index(after: lineEnd) }
+            if lineStart == markdown.startIndex || containerPrefix(of: markdown[lineStart..<lineEnd]).opensListItem {
+                return lineStart
+            }
+            lineEnd = markdown.index(before: lineStart)
+            isLastLine = false
+        }
+    }
+
     // MARK: - Code fences
 
     /// The line that would close a fence still open at the end of `markdown`, or nil. It repeats the opener's quote
     /// markers and indentation, so a fence inside a list item or a quote closes there instead of starting a new block.
     static func openFence(in markdown: String) -> String? {
-        var open: (marker: Character, count: Int, prefix: String)?
-        for line in markdown.split(separator: "\n", omittingEmptySubsequences: false) {
-            let (prefix, content) = containerPrefix(of: line)
-            guard let first = content.first, first == "`" || first == "~" else { continue }
-            let run = content.prefix { $0 == first }.count
-            guard run >= 3 else { continue }
-            let rest = content.dropFirst(run)
-            if let current = open {
-                if first == current.marker, run >= current.count, rest.allSatisfy({ $0 == " " }) { open = nil }
-            } else if first == "~" || !rest.contains("`") {
-                open = (first, run, prefix)
-            }
+        var scan = FenceScan()
+        return openFence(in: markdown, scan: &scan)
+    }
+
+    private static func openFence(in markdown: String, scan: inout FenceScan) -> String? {
+        let utf8 = markdown.utf8
+        var lineStart = utf8.index(utf8.startIndex, offsetBy: min(scan.scannedTo, utf8.count))
+        while let newline = utf8[lineStart...].firstIndex(of: UInt8(ascii: "\n")) {
+            scan.open = fenceState(after: markdown[lineStart..<newline], from: scan.open)
+            lineStart = utf8.index(after: newline)
+            scan.scannedTo = utf8.distance(from: utf8.startIndex, to: lineStart)
         }
-        return open.map { $0.prefix + String(repeating: $0.marker, count: $0.count) }
+        // The last line may still change, so it is scanned every time but never committed.
+        return fenceState(after: markdown[lineStart...], from: scan.open).map { $0.prefix + String(repeating: $0.marker, count: $0.count) }
+    }
+
+    /// The open fence after `line`, given the open fence before it.
+    private static func fenceState(after line: Substring, from open: OpenFence?) -> OpenFence? {
+        let (prefix, content, _) = containerPrefix(of: line)
+        guard let first = content.first, first == "`" || first == "~" else { return open }
+        let run = content.prefix { $0 == first }.count
+        guard run >= 3 else { return open }
+        let rest = content.dropFirst(run)
+        if let open {
+            return first == open.marker && run >= open.count && rest.allSatisfy({ $0 == " " }) ? nil : open
+        }
+        return first == "~" || !rest.contains("`") ? OpenFence(marker: first, count: run, prefix: prefix) : nil
     }
 
     /// Splits a line into its container prefix — indentation, quote markers, list markers — and its content. The
     /// prefix comes back as a continuation line would write it: quote markers kept, list markers turned into spaces.
-    private static func containerPrefix(of line: Substring) -> (prefix: String, content: Substring) {
+    private static func containerPrefix(of line: Substring) -> (prefix: String, content: Substring, opensListItem: Bool) {
         var prefix = ""
         var rest = line
+        var opensListItem = false
         while let first = rest.first {
             if first == " " || first == ">" {
                 prefix.append(first)
@@ -52,14 +103,16 @@ enum GlimmerTailHealer {
             } else if "-*+".contains(first), rest.dropFirst().first == " " {
                 prefix.append("  ")
                 rest = rest.dropFirst(2)
+                opensListItem = true
             } else if let number = orderedListMarkerLength(rest) {
                 prefix.append(String(repeating: " ", count: number))
                 rest = rest.dropFirst(number)
+                opensListItem = true
             } else {
                 break
             }
         }
-        return (prefix, rest)
+        return (prefix, rest, opensListItem)
     }
 
     /// The length of an ordered list marker and its space (`12. `) at the start of `text`, or nil.

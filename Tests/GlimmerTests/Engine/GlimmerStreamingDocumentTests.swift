@@ -27,6 +27,18 @@ final class GlimmerStreamingDocumentTests: XCTestCase {
         XCTAssertEqual(document.text.string, "Para one.\nPara two.")
     }
 
+    func testAppendingToALongListReplacesOnlyTheItemsThatChanged() throws {
+        let document = GlimmerStreamingDocument(composer: composer)
+        let items = (1...50).map { "- Item \($0) of a long list" }.joined(separator: "\n")
+        _ = document.update(markdown: items, isStreaming: true)
+        let edit = try XCTUnwrap(document.update(markdown: items + " grows", isStreaming: true))
+        // The whole list re-composes, but TextKit should re-lay out only the last item (and, for a tight list, the
+        // item before it, whose spacing may change).
+        let secondToLast = (document.text.string as NSString).range(of: "Item 49").location
+        XCTAssertGreaterThanOrEqual(edit.range.location, secondToLast - 2)
+        assertEquivalent(document.text, freshCompose(items + " grows", isStreaming: true), "matches a fresh compose")
+    }
+
     func testNewBlockReinsertsTheSeparator() throws {
         let document = GlimmerStreamingDocument(composer: composer)
         _ = document.update(markdown: "One", isStreaming: true)

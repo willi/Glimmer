@@ -23,6 +23,13 @@ final class GlimmerStreamingDocument {
     private var fragments: [NSAttributedString] = []
     private var startLines: [Int] = []
     private var source = ""
+    /// UTF-8 offset in `source` where the second-to-last block starts: where the next tail re-parse begins.
+    private var tailOffset: Int?
+    /// The unhealed markdown of the last update, to tell an append from a replacement.
+    private var rawMarkdown = ""
+    private var fenceScan = GlimmerTailHealer.FenceScan()
+    /// Whether `rawMarkdown` defines link references; once one appears, every update re-parses in full.
+    private var usesReferenceDefinitions = false
     private let composer: GlimmerComposer
 
     init(composer: GlimmerComposer) {
@@ -32,10 +39,15 @@ final class GlimmerStreamingDocument {
     /// Moves the document to `markdown` (already preprocessed by extensions). Returns the edit that turns the previous
     /// `text` into the new one, or nil when nothing changed.
     func update(markdown: String, isStreaming: Bool) -> GlimmerDocumentEdit? {
-        let newSource = isStreaming ? GlimmerTailHealer.heal(markdown) : markdown
+        let isAppend = Self.utf8(of: markdown, startsWith: rawMarkdown, count: rawMarkdown.utf8.count)
+        noteReferenceDefinitions(in: markdown, isAppend: isAppend)
+        if !isAppend || !isStreaming { fenceScan = GlimmerTailHealer.FenceScan() }
+        rawMarkdown = markdown
+        let newSource = isStreaming ? GlimmerTailHealer.heal(markdown, fenceScan: &fenceScan) : markdown
         guard newSource != source else { return nil }
         let parsed = parse(newSource)
         source = newSource
+        tailOffset = parsed.tailOffset
 
         var firstChanged = parsed.searchFrom
         while firstChanged < min(blocks.count, parsed.blocks.count), blocks[firstChanged] == parsed.blocks[firstChanged] {
@@ -72,8 +84,11 @@ final class GlimmerStreamingDocument {
             replacement.deleteCharacters(in: NSRange(location: expectedLength, length: replacement.length - expectedLength))
         }
 
-        let edit = GlimmerDocumentEdit(range: NSRange(location: editStart, length: text.length - editStart), replacement: replacement)
-        text.replaceCharacters(in: edit.range, with: replacement)
+        let edit = Self.trimmingUnchangedParagraphs(
+            of: GlimmerDocumentEdit(range: NSRange(location: editStart, length: text.length - editStart), replacement: replacement),
+            in: text
+        )
+        text.replaceCharacters(in: edit.range, with: edit.replacement)
         blocks = parsed.blocks
         startLines = parsed.startLines
         fragments = newFragments
@@ -81,45 +96,99 @@ final class GlimmerStreamingDocument {
         return edit
     }
 
+    /// Drops the leading paragraphs of `edit` that already match `text`. A block re-composes whole — a long list
+    /// when only its last item grew — but TextKit then re-lays out only the paragraphs that really changed.
+    static func trimmingUnchangedParagraphs(of edit: GlimmerDocumentEdit, in text: NSAttributedString) -> GlimmerDocumentEdit {
+        let old = text.attributedSubstring(from: edit.range)
+        let new = edit.replacement
+        let commonCharacters = (old.string as NSString).commonPrefix(with: new.string, options: .literal).utf16.count
+        let newString = new.string as NSString
+        func paragraphStart(before end: Int) -> Int {
+            guard end > 0 else { return 0 }
+            let newline = newString.range(of: "\n", options: .backwards, range: NSRange(location: 0, length: end))
+            return newline.location == NSNotFound ? 0 : NSMaxRange(newline)
+        }
+        // The paragraph where the text diverges changes; so may the ones before it (a tight list's old last item
+        // changes its spacing). Walk back to the last paragraph whose attributes still match.
+        var keep = paragraphStart(before: commonCharacters)
+        while keep > 0 {
+            let previous = paragraphStart(before: keep - 1)
+            let range = NSRange(location: previous, length: keep - previous)
+            if old.attributedSubstring(from: range).isEqual(to: new.attributedSubstring(from: range)) { break }
+            keep = previous
+        }
+        // Everything kept must match, not just the paragraph checked last.
+        guard keep > 0, old.attributedSubstring(from: NSRange(location: 0, length: keep))
+            .isEqual(to: new.attributedSubstring(from: NSRange(location: 0, length: keep))) else { return edit }
+        return GlimmerDocumentEdit(
+            range: NSRange(location: edit.range.location + keep, length: edit.range.length - keep),
+            replacement: new.attributedSubstring(from: NSRange(location: keep, length: new.length - keep))
+        )
+    }
+
     // MARK: - Parsing
 
-    /// Blocks and start lines for `newSource`, plus the first block index that could differ from the current blocks.
-    private func parse(_ newSource: String) -> (blocks: [GlimmerBlock], startLines: [Int], searchFrom: Int) {
+    /// Blocks and start lines for `newSource`, the first block index that could differ from the current blocks, and
+    /// where the next update's tail re-parse starts.
+    private func parse(_ newSource: String) -> (blocks: [GlimmerBlock], startLines: [Int], searchFrom: Int, tailOffset: Int?) {
         let tailIndex = max(0, startLines.count - 2)
-        if tailIndex < startLines.count,
-           !Self.hasLinkReferenceDefinition(newSource),
-           let oldTailStart = Self.index(ofLine: startLines[tailIndex], in: source),
-           newSource.utf8.starts(with: source.utf8[..<oldTailStart]),
-           let newTailStart = Self.index(ofLine: startLines[tailIndex], in: newSource) {
+        if tailIndex < startLines.count, !usesReferenceDefinitions, let tailOffset,
+           Self.utf8(of: newSource, startsWith: source, count: tailOffset) {
             let tailLine = startLines[tailIndex]
+            let newTailStart = newSource.utf8.index(newSource.startIndex, offsetBy: tailOffset)
             let tail = GlimmerParser.parseWithLines(String(newSource[newTailStart...]))
-            return (
-                Array(blocks[..<tailIndex]) + tail.map(\.block),
-                Array(startLines[..<tailIndex]) + tail.map { $0.startLine + tailLine - 1 },
-                tailIndex
-            )
+            let blocks = Array(blocks[..<tailIndex]) + tail.map(\.block)
+            let lines = Array(startLines[..<tailIndex]) + tail.map { $0.startLine + tailLine - 1 }
+            // The next tail usually starts inside this one: count lines from here rather than from the top.
+            guard let nextLine = lines.isEmpty ? nil : lines[max(0, lines.count - 2)] else { return (blocks, lines, tailIndex, nil) }
+            let nextOffset = nextLine >= tailLine
+                ? Self.utf8Offset(ofLine: nextLine - tailLine + 1, in: newSource, from: newTailStart).map { tailOffset + $0 }
+                : Self.utf8Offset(ofLine: nextLine, in: newSource, from: newSource.startIndex)
+            return (blocks, lines, tailIndex, nextOffset)
         }
         let all = GlimmerParser.parseWithLines(newSource)
-        return (all.map(\.block), all.map(\.startLine), 0)
+        let lines = all.map(\.startLine)
+        let nextOffset = lines.isEmpty ? nil : Self.utf8Offset(ofLine: lines[max(0, lines.count - 2)], in: newSource, from: newSource.startIndex)
+        return (all.map(\.block), lines, 0, nextOffset)
     }
 
-    /// Where 1-based `line` starts in `string`, or nil if the string has fewer lines.
-    static func index(ofLine line: Int, in string: String) -> String.Index? {
-        guard line > 1 else { return string.startIndex }
-        var newlines = 0
-        var index = string.utf8.startIndex
-        while index < string.utf8.endIndex {
-            if string.utf8[index] == UInt8(ascii: "\n") {
-                newlines += 1
-                if newlines == line - 1 { return string.utf8.index(after: index) }
-            }
-            index = string.utf8.index(after: index)
+    /// The UTF-8 offset, from `start`, where 1-based `line` (counted from `start`) begins; nil past the last line.
+    static func utf8Offset(ofLine line: Int, in string: String, from start: String.Index) -> Int? {
+        let utf8 = string.utf8
+        var index = start
+        var remaining = line - 1
+        while remaining > 0 {
+            guard let newline = utf8[index...].firstIndex(of: UInt8(ascii: "\n")) else { return nil }
+            index = utf8.index(after: newline)
+            remaining -= 1
         }
-        return nil
+        return utf8.distance(from: start, to: index)
     }
 
-    /// Link reference definitions can change earlier blocks, so a document using them always re-parses in full.
-    static func hasLinkReferenceDefinition(_ markdown: String) -> Bool {
+    /// Whether the first `count` UTF-8 bytes of `string` equal those of `prefix`.
+    static func utf8(of string: String, startsWith prefix: String, count: Int) -> Bool {
+        guard count > 0 else { return true }
+        guard string.utf8.count >= count, prefix.utf8.count >= count else { return false }
+        return string.utf8.withContiguousStorageIfAvailable { lhs in
+            prefix.utf8.withContiguousStorageIfAvailable { rhs in
+                memcmp(lhs.baseAddress!, rhs.baseAddress!, count) == 0
+            }
+        }.flatMap { $0 } ?? string.utf8.prefix(count).elementsEqual(prefix.utf8.prefix(count))
+    }
+
+    /// Link reference definitions can change earlier blocks, so once one appears every update re-parses in full. An
+    /// append is checked from the line it extends, not from the top.
+    private func noteReferenceDefinitions(in markdown: String, isAppend: Bool) {
+        guard !isAppend || !usesReferenceDefinitions else { return }
+        var checkFrom = markdown.startIndex
+        if isAppend, let lastNewline = rawMarkdown.utf8.lastIndex(of: UInt8(ascii: "\n")) {
+            checkFrom = markdown.utf8.index(markdown.startIndex, offsetBy: rawMarkdown.utf8.distance(from: rawMarkdown.startIndex, to: lastNewline) + 1)
+        }
+        let found = Self.hasLinkReferenceDefinition(markdown[checkFrom...])
+        usesReferenceDefinitions = isAppend ? usesReferenceDefinitions || found : found
+    }
+
+    static func hasLinkReferenceDefinition(_ markdown: Substring) -> Bool {
         markdown.contains(#/(?m)^ {0,3}\[[^\]]+\]:/#)
     }
 }
