@@ -6,6 +6,8 @@ import UIKit
 final class GlimmerTextView: UITextView {
     private(set) var theme: GlimmerTheme = .default
     private var lastLayoutWidth: CGFloat = 0
+    /// Strongly held: the text layout manager's delegate is weak.
+    private let fragmentProvider = GlimmerLayoutFragmentProvider(theme: .default)
 
     init() {
         // On iOS 16+, a nil text container gives a TextKit 2 text view.
@@ -17,6 +19,7 @@ final class GlimmerTextView: UITextView {
         textContainerInset = .zero
         textContainer.lineFragmentPadding = 0
         dataDetectorTypes = []
+        textLayoutManager?.delegate = fragmentProvider
         apply(theme: .default)
     }
 
@@ -24,6 +27,7 @@ final class GlimmerTextView: UITextView {
 
     func apply(theme: GlimmerTheme) {
         self.theme = theme
+        fragmentProvider.theme = theme
         var link: [NSAttributedString.Key: Any] = [.foregroundColor: theme.linkColor]
         if theme.underlinesLinks { link[.underlineStyle] = NSUnderlineStyle.single.rawValue }
         linkTextAttributes = link

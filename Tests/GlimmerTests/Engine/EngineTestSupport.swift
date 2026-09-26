@@ -41,3 +41,16 @@ func waitUntil(timeout: TimeInterval = 2, _ condition: @MainActor () -> Bool) as
     }
     return true
 }
+
+/// Every layout fragment of a TextKit 2 text view, with layout ensured.
+@MainActor
+func layoutFragments(_ textView: UITextView) -> [NSTextLayoutFragment] {
+    guard let manager = textView.textLayoutManager else { return [] }
+    manager.ensureLayout(for: manager.documentRange)
+    var fragments: [NSTextLayoutFragment] = []
+    manager.enumerateTextLayoutFragments(from: manager.documentRange.location, options: [.ensuresLayout]) { fragment in
+        fragments.append(fragment)
+        return true
+    }
+    return fragments
+}
