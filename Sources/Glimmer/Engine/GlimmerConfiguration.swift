@@ -7,17 +7,21 @@ public struct GlimmerConfiguration: Sendable {
     /// Loads standalone images. `nil` shows each image's alt text in its reserved box.
     public var imageLoader: (any GlimmerImageLoader)?
     public var highlighter: any GlimmerHighlighter
+    /// How streaming text appears. Reduce Motion always shows text immediately.
+    public var reveal: GlimmerReveal
 
     public init(
         theme: GlimmerTheme = .default,
         extensions: [any GlimmerExtension] = [],
         imageLoader: (any GlimmerImageLoader)? = GlimmerURLSessionImageLoader(),
-        highlighter: any GlimmerHighlighter = GlimmerBasicHighlighter()
+        highlighter: any GlimmerHighlighter = GlimmerBasicHighlighter(),
+        reveal: GlimmerReveal = .smooth(GlimmerRevealOptions())
     ) {
         self.theme = theme
         self.extensions = extensions
         self.imageLoader = imageLoader
         self.highlighter = highlighter
+        self.reveal = reveal
     }
 
     public static var `default`: GlimmerConfiguration { GlimmerConfiguration() }

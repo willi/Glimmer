@@ -5,11 +5,21 @@ import SwiftUI
 /// identity, for example `.id(themeVersion)`.
 public struct GlimmerText: UIViewRepresentable {
     public var markdown: String
+    public var isStreaming: Bool
+    public var revealID: String?
     public var configuration: GlimmerConfiguration
     public var onLinkTap: ((URL) -> Void)?
 
-    public init(_ markdown: String, configuration: GlimmerConfiguration = .default, onLinkTap: ((URL) -> Void)? = nil) {
+    public init(
+        _ markdown: String,
+        isStreaming: Bool = false,
+        revealID: String? = nil,
+        configuration: GlimmerConfiguration = .default,
+        onLinkTap: ((URL) -> Void)? = nil
+    ) {
         self.markdown = markdown
+        self.isStreaming = isStreaming
+        self.revealID = revealID
         self.configuration = configuration
         self.onLinkTap = onLinkTap
     }
@@ -22,7 +32,7 @@ public struct GlimmerText: UIViewRepresentable {
 
     public func updateUIView(_ view: GlimmerView, context: Context) {
         view.onLinkTap = onLinkTap
-        view.update(markdown: markdown)
+        view.update(markdown: markdown, isStreaming: isStreaming, revealID: revealID)
     }
 
     public func sizeThatFits(_ proposal: ProposedViewSize, uiView: GlimmerView, context: Context) -> CGSize? {

@@ -1,5 +1,6 @@
 import UIKit
 import XCTest
+@testable import Glimmer
 
 /// Puts `view` in a visible window at the given size and lets layout finish.
 /// Keep the returned window alive for the rest of the test (`let window = …`).
@@ -79,5 +80,33 @@ func assertEquivalent(
             }
         }
         index = min(NSMaxRange(lhsRange), NSMaxRange(rhsRange))
+    }
+}
+
+/// A reveal clock tests drive by hand: `advance(to:)` fires every due wake-up in order.
+@MainActor
+final class ManualRevealClock: GlimmerRevealClock {
+    private(set) var now: TimeInterval = 0
+    private(set) var scheduled: TimeInterval?
+    private var action: (@MainActor () -> Void)?
+
+    func wake(at time: TimeInterval, _ action: @escaping @MainActor () -> Void) {
+        scheduled = time
+        self.action = action
+    }
+
+    func cancel() {
+        scheduled = nil
+        action = nil
+    }
+
+    func advance(to time: TimeInterval) {
+        while let due = scheduled, due <= time, let pending = action {
+            now = due
+            scheduled = nil
+            action = nil
+            pending()
+        }
+        now = max(now, time)
     }
 }
