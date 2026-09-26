@@ -30,3 +30,14 @@ func findSubview<T: UIView>(_ type: T.Type, in root: UIView) -> T? {
     }
     return nil
 }
+
+/// Polls `condition` until it is true or `timeout` (wall clock) passes.
+@MainActor
+func waitUntil(timeout: TimeInterval = 2, _ condition: @MainActor () -> Bool) async -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while !condition() {
+        if Date() > deadline { return false }
+        try? await Task.sleep(for: .milliseconds(10))
+    }
+    return true
+}
