@@ -53,4 +53,46 @@ final class GlimmerTextView: UITextView {
         lastLayoutWidth = bounds.width
         invalidateIntrinsicContentSize()
     }
+
+    // MARK: - Streaming edits
+
+    /// Applies a document edit in one TextKit 2 editing transaction, so only the changed paragraphs lay out again.
+    func apply(_ edit: GlimmerDocumentEdit) {
+        if let content = textLayoutManager?.textContentManager as? NSTextContentStorage {
+            content.performEditingTransaction {
+                textStorage.replaceCharacters(in: edit.range, with: edit.replacement)
+            }
+        } else {
+            textStorage.replaceCharacters(in: edit.range, with: edit.replacement)
+        }
+        invalidateIntrinsicContentSize()
+    }
+
+    // MARK: - Reveal geometry
+
+    func textRange(for range: NSRange) -> NSTextRange? {
+        guard let content = textLayoutManager?.textContentManager,
+              let start = content.location(content.documentRange.location, offsetBy: range.location),
+              let end = content.location(start, offsetBy: range.length) else { return nil }
+        return NSTextRange(location: start, end: end)
+    }
+
+    /// Rects covering the glyphs of `range`, one per line segment, in the text view's coordinates.
+    func segmentRects(for range: NSRange) -> [CGRect] {
+        guard range.length > 0, NSMaxRange(range) <= textStorage.length,
+              let manager = textLayoutManager, let textRange = textRange(for: range) else { return [] }
+        manager.ensureLayout(for: textRange)
+        var rects: [CGRect] = []
+        manager.enumerateTextSegments(in: textRange, type: .standard, options: [.rangeNotRequired]) { _, frame, _, _ in
+            rects.append(frame)
+            return true
+        }
+        return rects
+    }
+
+    /// The line box holding the character at `index`, or nil past the end of the text.
+    func lineRect(atCharacter index: Int) -> CGRect? {
+        guard index >= 0, index < textStorage.length else { return nil }
+        return segmentRects(for: NSRange(location: index, length: 1)).first
+    }
 }
