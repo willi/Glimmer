@@ -9,6 +9,7 @@ public struct ContentView: View {
             List {
                 Section("Core Demos") {
                     NavigationLink("Engine Gallery (2.0)", destination: EngineGalleryDemo())
+                    NavigationLink("Streaming Lab (2.0)", destination: StreamingLabDemo())
                     NavigationLink("Basic Features", destination: BasicFeaturesDemo())
                     NavigationLink("Advanced Features", destination: AdvancedDemo())
                     NavigationLink("Markdown Linter", destination: LinterDemoView())
