@@ -23,6 +23,18 @@ final class GlimmerCodeBlockViewTests: XCTestCase {
         XCTAssertEqual(spans.last?.kind, .comment)
     }
 
+    func testCommentMarkersInsideStringsStayString() {
+        // The string is 8..<23; the real comment "// c" is 24..<28.
+        let spans = GlimmerBasicHighlighter().highlight(#"let u = "https://x.y/z" // c"#, language: "swift")
+        XCTAssertTrue(spans.contains(GlimmerHighlightSpan(range: NSRange(location: 8, length: 15), kind: .string)))
+        XCTAssertEqual(spans.filter { $0.kind == .comment }.map(\.range), [NSRange(location: 24, length: 4)])
+    }
+
+    func testQuotesInsideCommentsStayComment() {
+        let spans = GlimmerBasicHighlighter().highlight(#"// say "hi" to 42 people"#, language: "swift")
+        XCTAssertEqual(spans.map(\.kind), [.comment])
+    }
+
     func testUnknownLanguageHasNoSpans() {
         XCTAssertEqual(GlimmerBasicHighlighter().highlight("let x = 1", language: "klingon"), [])
         XCTAssertEqual(GlimmerBasicHighlighter().highlight("let x = 1", language: nil), [])

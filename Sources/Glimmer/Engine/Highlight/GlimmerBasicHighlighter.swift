@@ -7,19 +7,26 @@ public struct GlimmerBasicHighlighter: GlimmerHighlighter {
 
     public func highlight(_ code: String, language: String?) -> [GlimmerHighlightSpan] {
         guard let family = Family(language) else { return [] }
+        // One alternation scanned left to right: whichever token starts first wins, so `//` inside a string stays
+        // string and a quote inside a comment stays comment.
+        let pattern = [
+            "(?<comment>" + family.commentPatterns.joined(separator: "|") + ")",
+            #"(?<string>"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*')"#,
+            "(?<number>\\b\\d+(?:\\.\\d+)?\\b)",
+            "(?<keyword>\\b(?:" + family.keywords.joined(separator: "|") + ")\\b)",
+        ].joined(separator: "|")
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let kinds: [(name: String, kind: GlimmerHighlightSpan.Kind)] = [
+            ("comment", .comment), ("string", .string), ("number", .number), ("keyword", .keyword),
+        ]
         let whole = NSRange(location: 0, length: (code as NSString).length)
-        var spans: [GlimmerHighlightSpan] = []
-        func collect(_ pattern: String, _ kind: GlimmerHighlightSpan.Kind) {
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
-            for match in regex.matches(in: code, range: whole) {
-                spans.append(GlimmerHighlightSpan(range: match.range, kind: kind))
+        return regex.matches(in: code, range: whole).compactMap { match in
+            for entry in kinds {
+                let range = match.range(withName: entry.name)
+                if range.location != NSNotFound { return GlimmerHighlightSpan(range: range, kind: entry.kind) }
             }
+            return nil
         }
-        collect("\\b(?:" + family.keywords.joined(separator: "|") + ")\\b", .keyword)
-        collect("\\b\\d+(?:\\.\\d+)?\\b", .number)
-        collect(#""(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'"#, .string)
-        for pattern in family.commentPatterns { collect(pattern, .comment) }
-        return spans
     }
 }
 
