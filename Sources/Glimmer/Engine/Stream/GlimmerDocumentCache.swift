@@ -11,6 +11,10 @@ final class GlimmerDocumentCache {
         let theme: GlimmerTheme
         /// Extension type names: a different extension set composes differently.
         let extensions: [String]
+        /// The highlighter's and image loader's types: the cached text's embeds carry them, and every view must get
+        /// its own. (Two loaders of one type are assumed interchangeable.)
+        let highlighter: String
+        let imageLoader: String?
     }
 
     private struct Entry {
@@ -38,7 +42,18 @@ final class GlimmerDocumentCache {
         guard let entry = entries[key] else { return nil }
         hits += 1
         touch(key)
-        let copy = NSMutableAttributedString(attributedString: entry.text)
+        return Self.detached(entry.text)
+    }
+
+    /// Stores a copy with fresh attachments: the view that composed `text` keeps using (and may grow) its own.
+    func store(_ text: NSAttributedString, for key: Key) {
+        entries[key] = Entry(text: Self.detached(text))
+        touch(key)
+    }
+
+    /// `text` with every attachment replaced by a view-less copy of it.
+    private static func detached(_ text: NSAttributedString) -> NSAttributedString {
+        let copy = NSMutableAttributedString(attributedString: text)
         copy.enumerateAttribute(.attachment, in: NSRange(location: 0, length: copy.length)) { value, range, _ in
             if let block = value as? GlimmerBlockAttachment {
                 copy.addAttribute(.attachment, value: block.freshCopy(), range: range)
@@ -47,11 +62,6 @@ final class GlimmerDocumentCache {
             }
         }
         return copy
-    }
-
-    func store(_ text: NSAttributedString, for key: Key) {
-        entries[key] = Entry(text: NSAttributedString(attributedString: text))
-        touch(key)
     }
 
     func height(for key: Key, width: CGFloat) -> CGFloat? {

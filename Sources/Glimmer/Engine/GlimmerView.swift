@@ -40,7 +40,7 @@ public final class GlimmerView: UIView {
     private var lastWidth: CGFloat = 0
     private var lastReportedHeight: CGFloat = -1
     /// The text's height at the text view's width, as of a text version (see `fitTextViewToContent`).
-    private var contentHeight: (version: Int, height: CGFloat)?
+    private var contentHeight: (version: Int, width: CGFloat, height: CGFloat)?
     /// The bottom of the last revealed line, for a revealed length and width. Appends after the revealed text do not
     /// move it; edits that reach into the revealed text clear it.
     private var revealedHeight: (revealed: Int, width: CGFloat, height: CGFloat)?
@@ -230,8 +230,12 @@ public final class GlimmerView: UIView {
     private func composeSynchronously() {
         let theme = configuration.theme.scaled(for: traitCollection)
         let source = preprocessed(markdown)
-        let key = GlimmerDocumentCache.Key(source: source, theme: theme,
-                                           extensions: configuration.extensions.map { String(reflecting: type(of: $0)) })
+        let key = GlimmerDocumentCache.Key(
+            source: source, theme: theme,
+            extensions: configuration.extensions.map { String(reflecting: type(of: $0)) },
+            highlighter: String(reflecting: type(of: configuration.highlighter)),
+            imageLoader: configuration.imageLoader.map { String(reflecting: type(of: $0)) }
+        )
         // An empty answer (every new view starts with one) costs nothing to compose; keep it out of the cache.
         let cacheable = !isStreaming && !source.isEmpty
         if cacheable, let cached = GlimmerDocumentCache.shared.text(for: key) {
@@ -332,7 +336,7 @@ public final class GlimmerView: UIView {
             return height
         }
         if width == textView.bounds.width, width == bounds.width {
-            if contentHeight?.version != textView.textVersion { fitTextViewToContent() }
+            if contentHeight?.version != textView.textVersion || contentHeight?.width != width { fitTextViewToContent() }
             if let contentHeight { return contentHeight.height }
         }
         if let cacheKey, let cached = GlimmerDocumentCache.shared.height(for: cacheKey, width: width) { return cached }
@@ -347,7 +351,9 @@ public final class GlimmerView: UIView {
     /// grows with the text.
     private func fitTextViewToContent() {
         guard bounds.width > 0 else { return }
-        let widthChanged = textView.bounds.width != bounds.width
+        // The text view may already have this width (a size query during a reveal resized it) while the height on
+        // record is for another width: that is a width change too.
+        let widthChanged = textView.bounds.width != bounds.width || contentHeight?.width != bounds.width
         guard widthChanged || contentHeight?.version != textView.textVersion else { return }
         // A settled answer shown before, whole (a new width, or a replaced text): its height is known.
         if widthChanged || layoutChangedFrom == 0,
@@ -358,7 +364,7 @@ public final class GlimmerView: UIView {
             }
             if textView.bounds.height < bounds.height { textView.frame.size.height = bounds.height }
             layoutChangedFrom = 0
-            contentHeight = (textView.textVersion, cached)
+            contentHeight = (textView.textVersion, bounds.width, cached)
             return
         }
         if widthChanged {
@@ -374,7 +380,7 @@ public final class GlimmerView: UIView {
             textView.frame.size.height = height + slack
         }
         if textView.bounds.height < bounds.height { textView.frame.size.height = bounds.height }
-        contentHeight = (textView.textVersion, height)
+        contentHeight = (textView.textVersion, textView.bounds.width, height)
         if let cacheKey, engine == nil { GlimmerDocumentCache.shared.storeHeight(height, for: cacheKey, width: textView.bounds.width) }
     }
 

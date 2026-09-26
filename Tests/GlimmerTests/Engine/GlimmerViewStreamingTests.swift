@@ -133,6 +133,28 @@ final class GlimmerViewStreamingTests: XCTestCase {
         _ = window
     }
 
+    func testWidthQueriedDuringARevealEndsWithTheNewWidthsHeight() async {
+        let (view, clock, window) = streamingView(width: 390)
+        let prose = String(repeating: "Prose that wraps across several lines of the view. ", count: 12)
+        view.update(markdown: prose, isStreaming: true)
+        await view.pendingDocument?.value
+        clock.advance(to: 0.3)
+        XCTAssertNotNil(view.engine, "a reveal is under way")
+        // A host sizes its cell at a new width (rotation) before the frame follows.
+        _ = view.sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude))
+        view.frame.size.width = 320
+        settle(view)
+        view.update(markdown: prose, isStreaming: false)
+        await view.pendingDocument?.value
+        clock.advance(to: 30)
+        XCTAssertNil(view.engine)
+        let settled = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
+        let settledWindow = hostInWindow(settled, width: 320, height: 800)
+        settled.update(markdown: prose)
+        XCTAssertEqual(view.intrinsicContentSize.height, settled.intrinsicContentSize.height, accuracy: 0.5)
+        _ = (window, settledWindow)
+    }
+
     func testReflowingRevealedTextMovesItsFadingPhrases() async throws {
         let (view, clock, window) = streamingView()
         let tight = "- alpha beta gamma\n- delta epsilon zeta"
