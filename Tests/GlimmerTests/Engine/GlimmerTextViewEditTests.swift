@@ -56,4 +56,28 @@ final class GlimmerTextViewEditTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(rect.maxY, embedFrame.maxY - 0.5)
         _ = window
     }
+
+    func testLineStartIsKnownForJustAppendedText() throws {
+        let full = "Para.\n\n> quote " + String(repeating: "wrapping words ", count: 12)
+        // A laid-out reference view finds the quote's first character and its first wrap point.
+        let reference = GlimmerTextView()
+        reference.attributedText = composer.compose(GlimmerParser.parse(full))
+        let window = hostInWindow(reference, width: 200, height: 1000)
+        let quoteStart = (reference.textStorage.string as NSString).range(of: "quote").location
+        let firstLineY = try XCTUnwrap(reference.lineRect(atCharacter: quoteStart)).minY
+        let wrap = try XCTUnwrap((quoteStart..<reference.textStorage.length).first {
+            (reference.lineRect(atCharacter: $0)?.minY ?? 0) > firstLineY + 1
+        })
+        // The mask asks about a phrase in text appended a moment ago, before the view has laid it out.
+        let document = GlimmerStreamingDocument(composer: composer)
+        let textView = GlimmerTextView()
+        if let edit = document.update(markdown: "Para.", isStreaming: false) { textView.apply(edit) }
+        let streamingWindow = hostInWindow(textView, width: 200, height: 1000)
+        textView.apply(try XCTUnwrap(document.update(markdown: full, isStreaming: false)))
+        XCTAssertTrue(textView.isLineStart(atCharacter: quoteStart), "a paragraph start")
+        XCTAssertTrue(textView.isLineStart(atCharacter: wrap), "a wrap point")
+        XCTAssertFalse(textView.isLineStart(atCharacter: quoteStart + 1))
+        _ = window
+        _ = streamingWindow
+    }
 }

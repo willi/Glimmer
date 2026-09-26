@@ -100,8 +100,10 @@ final class GlimmerTextView: UITextView {
     func isLineStart(atCharacter index: Int) -> Bool {
         guard index > 0 else { return true }
         guard let manager = textLayoutManager, let content = manager.textContentManager,
-              let location = content.location(content.documentRange.location, offsetBy: index),
-              let fragment = manager.textLayoutFragment(for: location) else { return false }
+              let location = content.location(content.documentRange.location, offsetBy: index) else { return false }
+        // Text appended a moment ago has no line fragments until laid out.
+        manager.ensureLayout(for: NSTextRange(location: location))
+        guard let fragment = manager.textLayoutFragment(for: location) else { return false }
         let paragraphStart = content.offset(from: content.documentRange.location, to: fragment.rangeInElement.location)
         let offsetInParagraph = index - paragraphStart
         return fragment.textLineFragments.contains { $0.characterRange.location == offsetInParagraph }
