@@ -21,6 +21,8 @@ struct GlimmerComposer {
         var isDocumentStart = false
         /// Width of the innermost list's marker column: its text starts this far right of the marker.
         var listStep: CGFloat = 0
+        /// Markers end a fixed gap before the text (numbers) instead of starting the marker column (bullets).
+        var alignsMarkersToText = false
     }
 
     func compose(_ blocks: [GlimmerBlock]) -> NSAttributedString {
@@ -99,8 +101,9 @@ struct GlimmerComposer {
             let digits = max(2, String(start + list.items.count - 1).count)
             widestMarker = max(widestMarker, reservedNumberWidth(digits: digits))
         }
-        inner.listStep = max(theme.listIndent, ceil(widestMarker + theme.bodyFont.pointSize * 0.4))
+        inner.listStep = max(theme.listIndent, ceil(widestMarker + markerGap))
         inner.indent += inner.listStep
+        if case .ordered = list.kind { inner.alignsMarkersToText = true } else { inner.alignsMarkersToText = false }
         inner.paragraphSpacing = list.isTight ? theme.tightListSpacing : nil
         for (offset, item) in list.items.enumerated() {
             let marker = markers[offset]
@@ -124,7 +127,7 @@ struct GlimmerComposer {
         appendInlines(inlines, attributes: attributes, to: output)
         output.append(NSAttributedString(string: "\n", attributes: attributes))
         let range = NSRange(location: start, length: output.length - start)
-        let style = paragraphStyle(context: context, hasMarker: marker != nil)
+        let style = paragraphStyle(context: context, marker: marker)
         style.paragraphSpacingBefore = spacingBefore
         output.addAttribute(.paragraphStyle, value: style, range: range)
         if context.quoteDepth > 0 { output.addAttribute(.glimmerQuoteDepth, value: context.quoteDepth, range: range) }
@@ -141,7 +144,7 @@ struct GlimmerComposer {
         output.append(NSAttributedString(attachment: attachment))
         output.append(NSAttributedString(string: "\n"))
         let range = NSRange(location: start, length: output.length - start)
-        let style = paragraphStyle(context: context, hasMarker: false)
+        let style = paragraphStyle(context: context, marker: nil)
         style.lineHeightMultiple = 1
         style.paragraphSpacing = theme.blockSpacing
         output.addAttributes([.paragraphStyle: style, .font: theme.bodyFont, .glimmerSource: source], range: range)
@@ -154,12 +157,23 @@ struct GlimmerComposer {
         [.font: font, .foregroundColor: context.quoteDepth > 0 ? theme.secondaryTextColor : theme.textColor]
     }
 
-    private func paragraphStyle(context: Context, hasMarker: Bool) -> NSMutableParagraphStyle {
+    /// The space between a list marker and its item's text.
+    private var markerGap: CGFloat { ceil(theme.bodyFont.pointSize * 0.4) }
+
+    private func paragraphStyle(context: Context, marker: NSAttributedString?) -> NSMutableParagraphStyle {
         let style = NSMutableParagraphStyle()
         style.lineHeightMultiple = theme.lineHeightMultiple
         style.headIndent = context.indent
-        style.firstLineHeadIndent = hasMarker ? max(0, context.indent - context.listStep) : context.indent
-        style.tabStops = hasMarker ? [NSTextTab(textAlignment: .natural, location: context.indent, options: [:])] : []
+        if let marker {
+            // Numbers share a right edge, like a browser's list: "10." grows to the left, not into the gap.
+            let width = marker.attributedSubstring(from: NSRange(location: 0, length: marker.length - 1)).size().width
+            style.firstLineHeadIndent = context.alignsMarkersToText
+                ? max(0, context.indent - markerGap - width)
+                : max(0, context.indent - context.listStep)
+            style.tabStops = [NSTextTab(textAlignment: .natural, location: context.indent, options: [:])]
+        } else {
+            style.firstLineHeadIndent = context.indent
+        }
         style.paragraphSpacing = context.paragraphSpacing ?? theme.paragraphSpacing
         return style
     }

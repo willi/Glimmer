@@ -50,4 +50,19 @@ final class GlimmerComposerBlockTests: XCTestCase {
         XCTAssertEqual(headIndent(items: 3), headIndent(items: 10))
         XCTAssertEqual(headIndent(items: 10), headIndent(items: 99))
     }
+
+    func testNumbersEndTheSameGapBeforeTheText() throws {
+        let text = GlimmerComposer(theme: theme).compose(GlimmerParser.parse((1...10).map { "\($0). item" }.joined(separator: "\n")))
+        let string = text.string as NSString
+        // Like a browser's list: "1." sits a small gap before its text, and "10." grows to the left, not into the gap.
+        func markerEnd(_ number: Int) throws -> CGFloat {
+            let location = string.range(of: "\(number).\t").location
+            let style = try XCTUnwrap(text.attribute(.paragraphStyle, at: location, effectiveRange: nil) as? NSParagraphStyle)
+            let width = text.attributedSubstring(from: NSRange(location: location, length: "\(number).".count)).size().width
+            return style.firstLineHeadIndent + width
+        }
+        let style = try XCTUnwrap(text.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)
+        XCTAssertEqual(try markerEnd(1), try markerEnd(10), accuracy: 0.5)
+        XCTAssertEqual(style.headIndent - (try markerEnd(1)), ceil(theme.bodyFont.pointSize * 0.4), accuracy: 0.5)
+    }
 }

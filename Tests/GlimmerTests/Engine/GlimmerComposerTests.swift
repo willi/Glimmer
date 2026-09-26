@@ -87,7 +87,8 @@ final class GlimmerComposerTests: XCTestCase {
         let markerWidth = NSAttributedString(string: "1000.", attributes: [.font: theme.bodyFont]).size().width
         let paragraph = style(of: "item", in: text)
         XCTAssertGreaterThanOrEqual(paragraph?.headIndent ?? 0, markerWidth + 4, "the text never touches its marker")
-        XCTAssertEqual(paragraph?.firstLineHeadIndent, 0)
+        XCTAssertGreaterThanOrEqual(paragraph?.firstLineHeadIndent ?? -1, 0, "the marker stays inside the column")
+        XCTAssertLessThanOrEqual((paragraph?.firstLineHeadIndent ?? 0) + markerWidth + 4, paragraph?.headIndent ?? 0, "and ends before the text")
         XCTAssertEqual(paragraph?.tabStops.first?.location, paragraph?.headIndent)
     }
 
