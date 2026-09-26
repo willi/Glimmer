@@ -80,6 +80,10 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
             addSubview(languageLabel)
             addSubview(copyButton)
         }
+        // VoiceOver: "Code, swift", then the code, then the Copy button. The header label would repeat the language.
+        textView.accessibilityLabel = language.map { "Code, \($0)" } ?? "Code"
+        languageLabel.isAccessibilityElement = false
+        accessibilityElements = theme.showsCodeBlockHeader ? [textView, copyButton] : [textView]
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }

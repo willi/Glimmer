@@ -10,13 +10,19 @@ public struct GlimmerInlineToken: Equatable, Sendable {
     public var displayText: String
     /// Markdown copied for this token.
     public var source: String
+    /// What VoiceOver reads for the chip, e.g. "Mention, Ada". Defaults to `displayText`.
+    public var accessibilityLabel: String?
 
-    public init(range: Range<String.Index>, kind: String, payload: [String: String] = [:], displayText: String, source: String) {
+    public init(
+        range: Range<String.Index>, kind: String, payload: [String: String] = [:], displayText: String, source: String,
+        accessibilityLabel: String? = nil
+    ) {
         self.range = range
         self.kind = kind
         self.payload = payload
         self.displayText = displayText
         self.source = source
+        self.accessibilityLabel = accessibilityLabel
     }
 }
 

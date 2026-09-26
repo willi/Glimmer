@@ -47,6 +47,14 @@ final class GlimmerInlineAttachment: NSTextAttachment {
             label.textColor = theme.linkColor
             view = label
         }
+        // The token's label wins; otherwise a view the extension labeled keeps its label, and a plain label reads the
+        // display text.
+        if let label = token.accessibilityLabel {
+            view.accessibilityLabel = label
+        } else if view is UILabel || view.accessibilityLabel == nil {
+            view.accessibilityLabel = token.displayText
+        }
+        view.isAccessibilityElement = true
         cachedView = view
         return view
     }

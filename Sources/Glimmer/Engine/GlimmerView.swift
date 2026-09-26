@@ -139,6 +139,30 @@ public final class GlimmerView: UIView {
         return GlimmerMarkdownSerializer.markdown(from: textView.textStorage, range: range)
     }
 
+    // MARK: - Accessibility
+
+    /// While a reveal runs the view is one element that reads what is revealed so far. The text view underneath is
+    /// hidden, because its unrevealed text is laid out but invisible. At settle the text view takes over, with
+    /// line and word navigation and the links rotor.
+    public override var isAccessibilityElement: Bool {
+        get { engine != nil }
+        set {}
+    }
+
+    public override var accessibilityLabel: String? {
+        get {
+            guard let engine else { return super.accessibilityLabel }
+            let revealed = min(engine.revealedLength, textView.textStorage.length)
+            return GlimmerMarkdownSerializer.plainText(from: textView.textStorage, range: NSRange(location: 0, length: revealed))
+        }
+        set { super.accessibilityLabel = newValue }
+    }
+
+    public override var accessibilityTraits: UIAccessibilityTraits {
+        get { engine != nil ? [.staticText, .updatesFrequently] : super.accessibilityTraits }
+        set { super.accessibilityTraits = newValue }
+    }
+
     /// The link's default menu plus the host's items.
     func linkMenu(for url: URL, defaultMenu: UIMenu) -> UIMenu {
         guard let linkMenuActions else { return defaultMenu }
@@ -190,6 +214,8 @@ public final class GlimmerView: UIView {
         revealMask.invalidateGeometry()
         revealedHeight = nil
         textView.layer.mask = revealMask.layer
+        // VoiceOver reads this view's label (the revealed text) instead: the text view's unrevealed text is laid out.
+        textView.accessibilityElementsHidden = true
     }
 
     /// Shows the frontier embed's started units, one more line or row per unit phrase. Embeds already passed, or not
@@ -214,10 +240,15 @@ public final class GlimmerView: UIView {
     }
 
     private func endReveal() {
+        // Read before `engine` clears: while revealing, this view is the element VoiceOver focuses.
+        let hadFocus = engine != nil && accessibilityElementIsFocused()
         engine = nil
         syncEmbedUnits()
         clock.cancel()
         textView.layer.mask = nil
+        textView.accessibilityElementsHidden = false
+        // Move VoiceOver to the text only when it was on this answer; moving it from elsewhere would yank the reader.
+        if hadFocus { UIAccessibility.post(notification: .layoutChanged, argument: textView) }
     }
 
     // MARK: - Document

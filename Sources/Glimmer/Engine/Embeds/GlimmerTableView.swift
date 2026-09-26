@@ -24,6 +24,8 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
     private var alignments: [GlimmerTable.Alignment]
     private let theme: GlimmerTheme
     private var cachedLayout: (width: CGFloat, layout: Layout)?
+    /// VoiceOver's cells, one per label, header row first.
+    private var cellElements: [[GlimmerTableCellElement]] = []
 
     init(header: [NSAttributedString], rows: [[NSAttributedString]], alignments: [GlimmerTable.Alignment], theme: GlimmerTheme) {
         self.theme = theme
@@ -44,6 +46,7 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
         grid.lineWidth = 1
         content.layer.addSublayer(grid)
 
+        accessibilityContainerType = .dataTable
         rebuildCells(header: header, rows: rows)
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: GlimmerTableView, _: UITraitCollection) in
             view.updateColors()
@@ -83,7 +86,17 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
                 return label
             }
         }
+        cellElements = cellLabels.enumerated().map { row, labels in
+            labels.enumerated().map { column, label in
+                GlimmerTableCellElement(container: self, row: row, column: column, label: label)
+            }
+        }
         updateColors()
+    }
+
+    override var accessibilityElements: [Any]? {
+        get { Array(cellElements.joined()) }
+        set {}
     }
 
     /// Rows shown while a reveal runs (the header counts as one); nil shows all.
@@ -184,4 +197,46 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
         case .none: .natural
         }
     }
+}
+
+extension GlimmerTableView: UIAccessibilityContainerDataTable {
+    func accessibilityRowCount() -> Int { cellElements.count }
+    func accessibilityColumnCount() -> Int { cellElements.first?.count ?? 0 }
+
+    func accessibilityDataTableCellElement(forRow row: Int, column: Int) -> (any UIAccessibilityContainerDataTableCell)? {
+        guard row < cellElements.count, column < cellElements[row].count else { return nil }
+        return cellElements[row][column]
+    }
+
+    func accessibilityHeaderElements(forColumn column: Int) -> [any UIAccessibilityContainerDataTableCell]? {
+        guard let header = cellElements.first, column < header.count else { return nil }
+        return [header[column]]
+    }
+
+    func accessibilityHeaderElements(forRow row: Int) -> [any UIAccessibilityContainerDataTableCell]? { nil }
+}
+
+/// One table cell for VoiceOver: its text, its position, and where its label is on screen. The frame is read when
+/// VoiceOver asks, so a table scrolled sideways still points at the right cell.
+final class GlimmerTableCellElement: UIAccessibilityElement, UIAccessibilityContainerDataTableCell {
+    let row: Int
+    let column: Int
+    private weak var label: UILabel?
+
+    init(container: GlimmerTableView, row: Int, column: Int, label: UILabel) {
+        self.row = row
+        self.column = column
+        self.label = label
+        super.init(accessibilityContainer: container)
+        accessibilityLabel = label.attributedText?.string
+        accessibilityTraits = row == 0 ? .header : .staticText
+    }
+
+    override var accessibilityFrame: CGRect {
+        get { label.map { UIAccessibility.convertToScreenCoordinates($0.bounds, in: $0) } ?? .zero }
+        set {}
+    }
+
+    func accessibilityRowRange() -> NSRange { NSRange(location: row, length: 1) }
+    func accessibilityColumnRange() -> NSRange { NSRange(location: column, length: 1) }
 }
