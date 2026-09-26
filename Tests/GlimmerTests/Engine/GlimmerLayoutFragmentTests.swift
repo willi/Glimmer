@@ -49,6 +49,33 @@ final class GlimmerLayoutFragmentTests: XCTestCase {
         _ = window
     }
 
+    func testQuoteBarStopsAtTheTextWhenTheQuoteEnds() throws {
+        let (textView, window) = hostedTextView("> quoted\n\nafter")
+        let fragment = try XCTUnwrap(layoutFragments(textView).first as? GlimmerLayoutFragment)
+        let bar = try XCTUnwrap(fragment.quoteBarRects().first)
+        XCTAssertEqual(bar.height, fragment.layoutFragmentFrame.height - theme.blockSpacing, accuracy: 0.5,
+                       "the bar must not run through the gap into the next block")
+        _ = window
+    }
+
+    func testQuoteBarBridgesToTheNextQuotedParagraph() throws {
+        let (textView, window) = hostedTextView("> one\n>\n> two")
+        let fragment = try XCTUnwrap(layoutFragments(textView).first as? GlimmerLayoutFragment)
+        let bar = try XCTUnwrap(fragment.quoteBarRects().first)
+        XCTAssertEqual(bar.height, fragment.layoutFragmentFrame.height, accuracy: 0.5)
+        _ = window
+    }
+
+    func testEndingInnerQuoteShortensOnlyItsOwnBar() throws {
+        let (textView, window) = hostedTextView("> > inner\n>\n> outer")
+        let fragment = try XCTUnwrap(layoutFragments(textView).first as? GlimmerLayoutFragment)
+        let bars = fragment.quoteBarRects()
+        XCTAssertEqual(bars.count, 2)
+        XCTAssertEqual(bars[0].height, fragment.layoutFragmentFrame.height, accuracy: 0.5, "the outer quote continues")
+        XCTAssertEqual(bars[1].height, fragment.layoutFragmentFrame.height - theme.paragraphSpacing, accuracy: 0.5)
+        _ = window
+    }
+
     func testPlainParagraphHasNoDecorations() throws {
         let (textView, window) = hostedTextView("Nothing special")
         let fragment = try XCTUnwrap(layoutFragments(textView).first as? GlimmerLayoutFragment)

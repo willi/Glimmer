@@ -31,8 +31,10 @@ final class GlimmerLayoutFragment: NSTextLayoutFragment {
         super.draw(at: point, in: context)
     }
 
-    /// One full-height bar per quote level, at `level × quoteIndent` from the container's leading edge.
-    /// An indented paragraph's fragment frame starts at its indent, so these rects have negative x.
+    /// One bar per quote level, at `level × quoteIndent` from the container's leading edge. An indented
+    /// paragraph's fragment frame starts at its indent, so these rects have negative x. Bars run the full fragment
+    /// height (through the paragraph spacing) to join the next quoted paragraph, except the levels that close at
+    /// this paragraph (`.glimmerQuoteContinues`), which stop at the bottom of the text.
     func quoteBarRects() -> [CGRect] {
         guard let theme,
               let paragraph = textElement as? NSTextParagraph,
@@ -40,8 +42,14 @@ final class GlimmerLayoutFragment: NSTextLayoutFragment {
               let depth = paragraph.attributedString.attribute(.glimmerQuoteDepth, at: 0, effectiveRange: nil) as? Int,
               depth > 0 else { return [] }
         let height = layoutFragmentFrame.height
+        let continuing = paragraph.attributedString.attribute(.glimmerQuoteContinues, at: 0, effectiveRange: nil) as? Int
+        let textBottom = textLineFragments.last?.typographicBounds.maxY ?? height
         return (0..<depth).map { level in
-            CGRect(x: CGFloat(level) * theme.quoteIndent - layoutFragmentFrame.minX, y: 0, width: Self.quoteBarWidth, height: height)
+            let closesHere = continuing.map { level >= $0 } ?? false
+            return CGRect(
+                x: CGFloat(level) * theme.quoteIndent - layoutFragmentFrame.minX, y: 0,
+                width: Self.quoteBarWidth, height: closesHere ? min(textBottom, height) : height
+            )
         }
     }
 

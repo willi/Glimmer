@@ -97,6 +97,26 @@ final class GlimmerComposerTests: XCTestCase {
         XCTAssertEqual(style(of: "quoted", in: text)?.headIndent, theme.quoteIndent)
     }
 
+    func testQuoteEndIsMarkedAndSpacedLikeABlock() {
+        let text = compose("> one\n>\n> two\n\nafter")
+        XCTAssertNil(attributes(of: "one", in: text)[.glimmerQuoteContinues], "a middle paragraph keeps its bar running")
+        XCTAssertEqual(attributes(of: "two", in: text)[.glimmerQuoteContinues] as? Int, 0, "no quote level continues")
+        XCTAssertEqual(style(of: "two", in: text)?.paragraphSpacing, theme.blockSpacing)
+        XCTAssertEqual(style(of: "one", in: text)?.paragraphSpacing, theme.paragraphSpacing)
+    }
+
+    func testNestedQuoteEndKeepsOuterLevelRunning() {
+        let text = compose("> > inner\n>\n> outer")
+        XCTAssertEqual(attributes(of: "inner", in: text)[.glimmerQuoteContinues] as? Int, 1, "the outer quote continues past the inner one")
+        XCTAssertEqual(style(of: "inner", in: text)?.paragraphSpacing, theme.paragraphSpacing)
+        XCTAssertEqual(attributes(of: "outer", in: text)[.glimmerQuoteContinues] as? Int, 0)
+    }
+
+    func testQuotesEndingTogetherContinueNothing() {
+        let text = compose("> > both end here\n\nafter")
+        XCTAssertEqual(attributes(of: "both", in: text)[.glimmerQuoteContinues] as? Int, 0)
+    }
+
     func testCodeBlockBecomesAttachmentWithSource() throws {
         let text = compose("```swift\nlet x = 1\n```")
         XCTAssertEqual(text.string, "\u{FFFC}")

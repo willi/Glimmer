@@ -53,9 +53,11 @@ struct GlimmerComposer {
             var inner = context
             inner.indent += theme.quoteIndent
             inner.quoteDepth += 1
+            let start = output.length
             for (index, child) in blocks.enumerated() {
                 append(child, context: inner, marker: index == 0 ? marker : nil, to: output)
             }
+            if output.length > start { markQuoteEnd(continuingLevels: context.quoteDepth, in: output) }
         case .list(let list):
             if let marker { appendTextParagraph([], font: theme.bodyFont, context: context, marker: marker, to: output) }
             appendList(list, context: context, to: output)
@@ -139,9 +141,19 @@ struct GlimmerComposer {
         return style
     }
 
+    /// Marks the paragraph that closes a quote with how many enclosing quote levels continue past it, so the
+    /// ending levels' bars stop at the text. A quote that closes completely gets block spacing below it.
+    private func markQuoteEnd(continuingLevels: Int, in output: NSMutableAttributedString) {
+        guard output.length > 0 else { return }
+        let range = output.mutableString.paragraphRange(for: NSRange(location: output.length - 1, length: 0))
+        let existing = output.attribute(.glimmerQuoteContinues, at: range.location, effectiveRange: nil) as? Int
+        output.addAttribute(.glimmerQuoteContinues, value: min(existing ?? continuingLevels, continuingLevels), range: range)
+        if continuingLevels == 0 { setSpacingOfLastParagraph(theme.blockSpacing, in: output) }
+    }
+
     private func setSpacingOfLastParagraph(_ spacing: CGFloat, in output: NSMutableAttributedString) {
         guard output.length > 0 else { return }
-        let range = (output.string as NSString).paragraphRange(for: NSRange(location: output.length - 1, length: 0))
+        let range = output.mutableString.paragraphRange(for: NSRange(location: output.length - 1, length: 0))
         guard let current = output.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle,
               let style = current.mutableCopy() as? NSMutableParagraphStyle else { return }
         style.paragraphSpacing = spacing
