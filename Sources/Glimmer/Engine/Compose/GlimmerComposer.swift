@@ -92,8 +92,13 @@ struct GlimmerComposer {
         let markers = list.items.enumerated().map { offset, item in
             listMarker(kind: list.kind, index: offset, checkbox: item.checkbox, context: inner)
         }
-        // At least `listIndent`, and always a gap after the widest marker (wide numbers, large text sizes).
-        let widestMarker = markers.map { $0.attributedSubstring(from: NSRange(location: 0, length: $0.length - 1)).size().width }.max() ?? 0
+        // At least `listIndent`, and always a gap after the widest marker (wide numbers, large text sizes). Numbers get
+        // room for two digits up front, so items already shown do not shift right when item 10 streams in.
+        var widestMarker = markers.map { $0.attributedSubstring(from: NSRange(location: 0, length: $0.length - 1)).size().width }.max() ?? 0
+        if case .ordered(let start) = list.kind {
+            let digits = max(2, String(start + list.items.count - 1).count)
+            widestMarker = max(widestMarker, reservedNumberWidth(digits: digits))
+        }
         inner.listStep = max(theme.listIndent, ceil(widestMarker + theme.bodyFont.pointSize * 0.4))
         inner.indent += inner.listStep
         inner.paragraphSpacing = list.isTight ? theme.tightListSpacing : nil
@@ -176,6 +181,13 @@ struct GlimmerComposer {
               let style = current.mutableCopy() as? NSMutableParagraphStyle else { return }
         style.paragraphSpacing = spacing
         output.addAttribute(.paragraphStyle, value: style, range: range)
+    }
+
+    /// The width of the widest `digits`-digit number marker in the body font, such as "88.".
+    private func reservedNumberWidth(digits: Int) -> CGFloat {
+        let attributes: [NSAttributedString.Key: Any] = [.font: theme.bodyFont]
+        let widestDigit = (0...9).map { NSAttributedString(string: "\($0)", attributes: attributes).size().width }.max() ?? 0
+        return widestDigit * CGFloat(digits) + NSAttributedString(string: ".", attributes: attributes).size().width
     }
 
     private func listMarker(kind: GlimmerList.Kind, index: Int, checkbox: Bool?, context: Context) -> NSAttributedString {

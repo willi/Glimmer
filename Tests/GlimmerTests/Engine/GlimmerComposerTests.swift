@@ -194,7 +194,9 @@ final class GlimmerComposerTests: XCTestCase {
         let text = compose("> 1. step\n>    ```swift\n>    let x = 1\n>    ```")
         XCTAssertEqual(text.string, "1.\tstep\n\u{FFFC}")
         let embedStyle = text.attribute(.paragraphStyle, at: text.length - 1, effectiveRange: nil) as? NSParagraphStyle
-        XCTAssertEqual(embedStyle?.headIndent, theme.quoteIndent + theme.listIndent)
+        let itemStyle = text.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
+        XCTAssertEqual(embedStyle?.headIndent, itemStyle?.headIndent, "the code sits in the item's content column")
+        XCTAssertGreaterThanOrEqual(itemStyle?.headIndent ?? 0, theme.quoteIndent + theme.listIndent)
         XCTAssertEqual(text.attribute(.glimmerQuoteDepth, at: text.length - 1, effectiveRange: nil) as? Int, 1)
     }
 

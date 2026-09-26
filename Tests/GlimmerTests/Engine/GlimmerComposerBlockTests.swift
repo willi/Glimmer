@@ -38,4 +38,16 @@ final class GlimmerComposerBlockTests: XCTestCase {
         let style = text.attribute(.paragraphStyle, at: location, effectiveRange: nil) as? NSParagraphStyle
         XCTAssertEqual(style?.paragraphSpacingBefore, theme.blockSpacing)
     }
+
+    func testNumberedListKeepsItsIndentWhenItReachesTwoDigits() {
+        let composer = GlimmerComposer(theme: theme)
+        func headIndent(items: Int) -> CGFloat {
+            let markdown = (1...items).map { "\($0). item" }.joined(separator: "\n")
+            let style = composer.compose(GlimmerParser.parse(markdown)).attribute(.paragraphStyle, at: 0, effectiveRange: nil)
+            return (style as? NSParagraphStyle)?.headIndent ?? -1
+        }
+        // Items 1–9 already streamed must not shift right when item 10 arrives.
+        XCTAssertEqual(headIndent(items: 3), headIndent(items: 10))
+        XCTAssertEqual(headIndent(items: 10), headIndent(items: 99))
+    }
 }
