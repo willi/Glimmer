@@ -29,10 +29,7 @@ extension GlimmerComposer {
                 if let url = URL(string: destination) { linked[.link] = url }
                 appendInlines(children, attributes: linked, to: output)
             case .image(let source, _, let alt):
-                var faded = attributes
-                faded[.foregroundColor] = theme.secondaryTextColor
-                faded[.glimmerSource] = "![\(alt)](\(source))"
-                output.append(NSAttributedString(string: alt, attributes: faded))
+                appendInlineImage(source: source, alt: alt, attributes: attributes, to: output)
             case .softBreak:
                 output.append(NSAttributedString(string: " ", attributes: attributes))
             case .lineBreak:
@@ -50,6 +47,29 @@ extension GlimmerComposer {
                 output.append(NSAttributedString(string: "\(footnotes.number(for: label))", attributes: marker))
             }
         }
+    }
+
+    /// An image inside a paragraph: a line-height square, then its alt text for VoiceOver only. An unusable URL shows
+    /// the alt text, dimmed, as before.
+    func appendInlineImage(source: String, alt: String, attributes: [NSAttributedString.Key: Any], to output: NSMutableAttributedString) {
+        let markdown = "![\(alt)](\(source))"
+        guard let url = URL(string: source) else {
+            var faded = attributes
+            faded[.foregroundColor] = theme.secondaryTextColor
+            faded[.glimmerSource] = markdown
+            output.append(NSAttributedString(string: alt, attributes: faded))
+            return
+        }
+        var image = attributes
+        image[.attachment] = GlimmerInlineImageAttachment(source: url, alt: alt, theme: theme, loader: imageLoader)
+        image[.glimmerSource] = markdown
+        output.append(NSAttributedString(string: "\u{FFFC}", attributes: image))
+        guard !alt.isEmpty else { return }
+        var spoken = attributes
+        spoken[.font] = (attributes[.font] as? UIFont ?? theme.bodyFont).withSize(0.01)
+        spoken[.foregroundColor] = UIColor.clear
+        spoken[.glimmerSpokenOnly] = true
+        output.append(NSAttributedString(string: alt, attributes: spoken))
     }
 
     /// Appends plain text, turning extension tokens into inline chips.

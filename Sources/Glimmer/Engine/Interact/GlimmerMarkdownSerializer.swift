@@ -137,6 +137,19 @@ enum GlimmerMarkdownSerializer {
                 } else if let attachment = attributes[.attachment] as? GlimmerBlockAttachment {
                     flush()
                     body += asMarkdown ? attributes[.glimmerSource] as? String ?? "" : plainText(of: attachment.embed)
+                } else if let image = attributes[.attachment] as? GlimmerInlineImageAttachment {
+                    // Markdown writes the image (inside its link, if any); plain text its alt text. VoiceOver reads the
+                    // spoken-only alt text that follows it instead.
+                    flush()
+                    let source = attributes[.glimmerSource] as? String ?? ""
+                    if asMarkdown {
+                        body += (attributes[.link] as? URL).map { "[" + source + "](" + destination($0) + ")" } ?? source
+                    } else if !forAccessibility {
+                        body += image.alt
+                    }
+                } else if attributes[.glimmerSpokenOnly] as? Bool == true {
+                    // Text only VoiceOver reads: part of the accessibility label, never of a copy.
+                    if forAccessibility { segments.append(Segment(text: string.substring(with: run), style: Style(attributes))) }
                 } else if let chip = attributes[.attachment] as? GlimmerInlineAttachment {
                     flush()
                     body += asMarkdown ? chip.token.source

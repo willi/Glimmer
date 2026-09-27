@@ -59,6 +59,8 @@ final class GlimmerDocumentCache {
                 copy.addAttribute(.attachment, value: block.freshCopy(), range: range)
             } else if let inline = value as? GlimmerInlineAttachment {
                 copy.addAttribute(.attachment, value: inline.freshCopy(), range: range)
+            } else if let image = value as? GlimmerInlineImageAttachment {
+                copy.addAttribute(.attachment, value: image.freshCopy(), range: range)
             }
         }
         return copy

@@ -171,9 +171,10 @@ final class GlimmerComposerTests: XCTestCase {
         XCTAssertEqual(source, URL(string: "https://example.com/c.png"))
         XCTAssertEqual(alt, "Chart")
 
+        // An image inside a paragraph is an inline square (Plan 7), no longer its alt text.
         let inline = compose("See ![icon](https://example.com/i.png) here")
-        XCTAssertEqual(inline.string, "See icon here")
-        XCTAssertEqual(attributes(of: "icon", in: inline)[.foregroundColor] as? UIColor, theme.secondaryTextColor)
+        XCTAssertTrue(inline.string.hasPrefix("See \u{FFFC}"))
+        XCTAssertTrue(inline.attribute(.attachment, at: 4, effectiveRange: nil) is GlimmerInlineImageAttachment)
     }
 
     func testThematicBreakIsEmbed() throws {
@@ -254,7 +255,7 @@ final class GlimmerComposerTests: XCTestCase {
 
     func testInlineImageKeepsItsMarkdown() {
         let text = compose("see ![alt](https://example.com/a.png) here")
-        XCTAssertEqual(attributes(of: "alt", in: text)[.glimmerSource] as? String, "![alt](https://example.com/a.png)")
+        XCTAssertEqual(attributes(of: "\u{FFFC}", in: text)[.glimmerSource] as? String, "![alt](https://example.com/a.png)")
     }
 
     func testBulletsAndNumbersShareTheTextColor() {
