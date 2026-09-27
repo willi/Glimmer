@@ -1,10 +1,89 @@
-# Glimmer 2.0 — Plan 5 performance results
+# Glimmer 2.0 — device performance results
 
-Measured on 2026-09-26 on "WW 16", an iPhone 16 Pro Max on iOS 27.0 (24A435), in Release. That is the device and build
-the spec's §3 budgets are written for. Simulator numbers (iOS 27.0, iPhone 17 Pro Max, on an Apple silicon Mac under
-a load average of 5.7–8.4) are alongside for comparison.
+Measured on "WW 16", an iPhone 16 Pro Max on iOS 27.0 (24A435), in Release. Plan 6's results come first; Plan 5's
+follow unchanged.
 
-## Spec §3
+## Plan 6
+
+Measured on 2026-09-26, the same device and build configuration. "Before" is Plan 5's device run, or where marked, the
+same benchmark run in the same session on Plan 5's engine.
+
+| Metric | Goal | Before | After | Result |
+|---|---|---|---|---|
+| Hitch-time ratio, Plan 5's benchmark (eased scroll), same session | spec: 0 hitches | 1.81, 5.03, 2.32 ms/s | 1.41, 1.86, 1.87 ms/s | better, not met |
+| Hitch-time ratio, with the new flick | addendum: ≤ 1 ms/s | 6.15, 6.28, 6.09 ms/s | 6.12, 6.58, 7.25 ms/s (5.1–5.7 in other runs) | miss: unchanged |
+| Configuring a cached settled answer | spec: ≤ 4 ms | 27.0 ms | 21.3–21.7 ms | better, miss |
+| Main-thread work per reveal frame | spec: ~0 | 0.18–0.73 ms | 0.17 ms | better |
+| Starting a phrase (the harness's median) | addendum: ≤ 0.5 ms | about 1.1 ms (probe) | 0.22 ms | pass |
+| Applying one update, p95: 5,000-word answer | spec: ≤ 2 ms | 0.48 ms | 0.49–0.62 ms | pass |
+| … a 500-item list | ≤ 2 ms | 0.21 ms | 0.20–0.23 ms | pass |
+| … a 150-line code block | addendum: ≤ 2 ms | 1.97–2.20 ms | 1.01–1.02 ms | pass |
+| … a 40-row table | ≤ 2 ms | 0.43 ms | 0.52–0.56 ms | pass |
+
+The rest of the main thread per update (TextKit's layout and drawing), p95: code block 8.7 → 5.0–5.3 ms, list 2.4 →
+1.5–1.6 ms, revealing 5.5 → 5.2–5.3 ms, answer 2.5 → 2.5–2.6 ms, table 1.7 → 1.3–1.4 ms.
+
+The addendum's configure goal, a first frame a third of the probe's 57 ms end to end, wasn't measured again end to
+end. The harness's configure measures part of it: 27 → 21.5 ms.
+
+What each change moved:
+- **The text view is sized once.** It's 1,000,000 pt tall and doubles only past that, so streaming never resizes it.
+  Resizing cost up to 9.4 ms per update on the device. The accessibility frame still hugs the text.
+- **The band refreshes in quarter-screen steps, and a configure renders the screen first.** Each refresh lays out
+  less. A cached configure lays out only the screen, by swapping the text at a short height and then growing the view,
+  and renders the rest of the band a frame later. Configure went from 27 to 21.5 ms.
+- **A phrase start asks about one line.** The settled part of the line comes from the one line fragment holding the
+  first unsettled character. Before, it came from the segment rects of a 512-character window. The reveal store
+  hashes the answer's opening again only when the text changed. On the simulator, a phrase start went from 0.225 to
+  0.079 ms. On the device the reveal's work per frame is 0.17 ms.
+- **A streaming code block diffs by colour runs.** The first changed line is where the text or a colour run first
+  differs, instead of a comparison of attributed paragraphs. The long code block's apply halved, from about 2.1 to
+  1.0 ms.
+- **The benchmark flicks.** Before its eased round trip, it flicks back about 3,000 pt with an ease-out (about
+  5,000 pt/s at the start) and returns. The Plan 5 reviewer found the eased scroll gentler than a reader. The flick
+  makes the benchmark harsher, so its ratios aren't comparable with Plan 5's 2.3 ms/s. The table compares both engines
+  on both benchmarks.
+
+### What the flick's hitches are
+
+A throwaway probe on the device attributed the main thread's time in every hitching frame:
+
+- **Every TextKit viewport pass redraws every fragment in the band.** UIKit's
+  `-[_UITextLayoutCanvasView textViewportLayoutController:renderingSurfaceForTextLayoutFragment:]` calls
+  `setNeedsDisplay` on each fragment's view during each viewport pass, whether or not the fragment changed. That's
+  18,789 calls in one 30-second run: 8,617 redraws of fragments already drawn, against 506 first draws.
+  - In the flick's return, the answer's band grows as it scrolls back in. Each pass redraws about 44 fragments: 4–5 ms
+    of Glimmer's drawing, in a 16–18 ms slice of main-thread work.
+  - Each streamed edit is a pass too, which is most of the "rest of the main thread" per update above.
+  - Plan 6's changes made each pass cheaper to reach, not cheaper to draw. That's why the flick didn't move.
+- **A streamed code block's first appearance builds its view on the main thread.** It costs 4.3–9.4 ms inside one
+  apply: the view's own TextKit stack and its first measurement.
+- **Band refreshes while following the stream.** A refresh costs 1.2–4.7 ms, plus the redraws above.
+
+Avoiding the full-band redraw needs a decision beyond this plan. The options are rendering fragments outside UIKit's
+canvas, or suppressing redraws of unchanged fragments. Either works around UIKit rather than with it.
+
+### Gates
+
+The device gates moved to the new baselines:
+- cached configure ≤ 28 ms (21.5 ms measured);
+- reveal per frame ≤ 0.5 ms (0.17 ms measured; Plan 5 saw fourfold run-to-run variance);
+- streaming embed apply ≤ 2 ms (the spec);
+- phrase start ≤ 0.5 ms (the addendum's goal);
+- the benchmark's hitch-time ratio < 8 ms/s. This is a regression bound at the flick's baseline, not the addendum's
+  1 ms/s. The flick sits in Apple's "warning" band (5–10 ms/s).
+
+`GlimmerDevicePerf` passes 10/10 on the device. `BenchmarkHitchUITests` wasn't run on the device this time: the phone
+asked for Face ID to enable UI Automation. So `XCTHitchMetric` has no Plan 6 number. The frame monitor's hands-off runs
+above are the measurement.
+
+## Plan 5
+
+Measured on 2026-09-26, before Plan 6, on the device and build the spec's §3 budgets are written for. Simulator
+numbers (iOS 27.0, iPhone 17 Pro Max, on an Apple silicon Mac under a load average of 5.7–8.4) are alongside for
+comparison.
+
+### Spec §3
 
 | Metric | Budget | iPhone 16 Pro Max | Simulator | Result |
 |---|---|---|---|---|
@@ -34,7 +113,7 @@ What Plan 5 changed, on the simulator:
 - The streaming table's apply went from 3.3 ms to 0.56 ms. Rows that didn't change keep their labels and
   measurements.
 
-## Hitches
+### Hitches
 
 The benchmark streams about 1,000 words at a seeded Gemini cadence below a settled 5,000-word answer. While it
 streams, the screen scrolls itself up through the whole earlier answer and back down, as a reader would. A 120 Hz
@@ -60,7 +139,7 @@ The stall is also a finding for VoiceOver. It suggests UIKit's accessibility for
 more than the visible band. VoiceOver asks for elements lazily rather than snapshotting everything, so it may not hit
 the same cost, but VoiceOver on a long answer should be tried on a device.
 
-## The misses
+### The misses
 
 - **Configuring a cached settled answer: 27 ms against 4 ms.** The cache saves parsing, composing and measuring
   (uncached is 59 ms). What remains is TextKit's first layout and drawing of the screen, and building the first
@@ -75,7 +154,7 @@ the same cost, but VoiceOver on a long answer should be tried on a device.
 - **Hitches: a handful of one- or two-frame drops in 30 s (2.3 ms/s).** They coincide with the costs above: phrase
   starts, and embeds growing by a line or row.
 
-## How the harness gates
+### How the harness gates
 
 The spec's numbers are targets; the tests gate at what the device measures today, with headroom, so they turn red on a
 regression rather than on the known distance to the spec. On the simulator the gates are unchanged. On the device:
@@ -88,7 +167,7 @@ regression rather than on the known distance to the spec. On the simulator the g
 With those gates, `GlimmerDevicePerf` passes 9/9 on the device. The benchmark passes at `done frames=2146 hitches=5
 worst=18.0ms ratio=2.37ms/s`.
 
-## What the numbers mean
+### What the numbers mean
 
 - **Apply** is the main thread's work to apply one streamed update: the text edit, measuring, embed updates and the
   reveal's bookkeeping. Parse, compose and syntax highlighting run on the view's worker.
@@ -98,7 +177,7 @@ worst=18.0ms ratio=2.37ms/s`.
   by the 120 Hz frames in that time. It's measured after TextKit's one-time first layout.
 - **Configure** is showing a settled answer again, taking its text and height from the cache.
 
-## To run on the device
+### To run on the device
 
 Unlock the phone. The first UI-test run on a device asks for Face ID ("Enable UI Automation").
 

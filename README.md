@@ -156,16 +156,16 @@ view.linkMenuActions = { url in [UIAction(title: "Copy Link") { _ in UIPasteboar
 ## Performance
 
 Measured on an iPhone 16 Pro Max in a Release build, against the spec's budgets. The full tables, the misses and how to
-run the harness are in [the Plan 5 results](docs/superpowers/perf/2026-09-26-glimmer-2-plan-5-device-results.md).
+run the harness are in [the device results](docs/superpowers/perf/2026-09-26-glimmer-2-device-results.md).
 
 | Metric | Budget | iPhone 16 Pro Max |
 |---|---|---|
-| Applying one streamed update on the main thread, p95 (5,000-word answer) | ≤ 2 ms | 0.48 ms |
-| The same, streaming a 150-line code block | ≤ 2 ms | 1.97 ms |
-| The same, streaming a 40-row table | ≤ 2 ms | 0.43 ms |
-| Finding the last glyph of a 5,000-word answer (most of starting a phrase) | ≤ 0.2 ms | 0.010 ms |
-| Hitches while streaming and scrolling a 5,000-word answer (`XCTHitchMetric`) | 0 | 2.3 ms per s ("good" under Apple's 5); 5–9 short drops in 30 s |
-| Showing a cached settled answer again (~1,200 words) | ≤ 4 ms | 27 ms (59 ms uncached) |
+| Applying one streamed update on the main thread, p95 (5,000-word answer) | ≤ 2 ms | 0.49–0.62 ms |
+| The same, streaming a 150-line code block | ≤ 2 ms | 1.02 ms |
+| The same, streaming a 40-row table | ≤ 2 ms | 0.52–0.56 ms |
+| Starting a phrase during a reveal (median) | ≤ 0.5 ms | 0.22 ms |
+| Hitches while streaming and scrolling a 5,000-word answer (frame monitor) | 0 | 1.4–1.9 ms per s with an eased scroll; 5.1–7.3 ms per s with a flick |
+| Showing a cached settled answer again (~1,200 words) | ≤ 4 ms | 21.5 ms (62 ms uncached) |
 
 How it stays fast:
 

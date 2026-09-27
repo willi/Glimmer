@@ -13,7 +13,7 @@ open Examples/GlimmerDemo/GlimmerDemo.xcodeproj
 | Gallery | Every element, in light and dark, at the default and an accessibility text size. Select text and choose **Show Markdown** to see what copy writes. | `--engine-gallery`, plus `--gallery-dark`, `--gallery-large-text` or `--engine-gallery-bottom` |
 | Streaming Lab | A canned answer streamed at Gemini-like, bursty or slow cadences, with pause and resume, and light and dark. | `--streaming-lab` (starts streaming at once) |
 | Long Answer | About 5,000 words in one view, for scrolling by eye. | — |
-| Benchmark | About 1,000 words streamed at a seeded Gemini cadence below a settled 5,000-word answer, while a 120 Hz display link counts late frames. Tap **Start**. | `--benchmark` |
+| Benchmark | About 1,000 words streamed at a seeded Gemini cadence below a settled 5,000-word answer, while the screen flicks back, returns, and scrolls through the earlier answer and back. A 120 Hz display link counts late frames. Tap **Start**. | `--benchmark`, plus `--benchmark-autostart` and `--benchmark-exit` |
 
 ## The project
 
@@ -47,7 +47,7 @@ On a connected, unlocked iPhone, in Release:
 xcodebuild test -project Examples/GlimmerDemo/GlimmerDemo.xcodeproj -scheme GlimmerDevicePerf \
   -configuration Release -destination 'id=<device UDID>' -allowProvisioningUpdates ENABLE_TESTABILITY=YES
 
-# The benchmark under XCTHitchMetric. On a device it fails if the frame monitor saw a hitch.
+# The benchmark under XCTHitchMetric. On a device it fails at a hitch-time ratio of 8 ms/s or more.
 xcodebuild test -project Examples/GlimmerDemo/GlimmerDemo.xcodeproj -scheme GlimmerDemo \
   -configuration Release -destination 'id=<device UDID>' -allowProvisioningUpdates \
   -only-testing:GlimmerDemoUITests/BenchmarkHitchUITests

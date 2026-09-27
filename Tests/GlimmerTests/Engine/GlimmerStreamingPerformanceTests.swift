@@ -21,9 +21,9 @@ final class GlimmerStreamingPerformanceTests: XCTestCase {
     #if targetEnvironment(simulator)
     private let embedStreamingBudget: Duration = .microseconds(1_500)
     #else
-    /// An iPhone 16 Pro Max measures 1.97–2.2 ms p95 for the long code block (Plan 5): at the spec's 2 ms, not under
-    /// it. Gated at that baseline with headroom, so a regression turns it red; the results doc tracks the spec.
-    private let embedStreamingBudget: Duration = .milliseconds(3)
+    /// An iPhone 16 Pro Max measures 1.02 ms p95 for the long code block since Plan 6 (1.97–2.2 ms before): under
+    /// the spec's 2 ms, which is the gate.
+    private let embedStreamingBudget: Duration = .milliseconds(2)
     #endif
     #endif
     /// TextKit re-lays out the ~60 fragments of the rendered band after every change: 3–4 ms p95 here, 4–6 ms with a
@@ -33,16 +33,16 @@ final class GlimmerStreamingPerformanceTests: XCTestCase {
     /// revealing 18 ms, long list 20 ms; after: 13, 19 and 6 ms (Release: 8, 21 and 6 under load).
     private let mainThreadBudget: Duration = .milliseconds(18)
     /// A regression bound, not the spec's 4 ms: TextKit's first layout of the screen dominates a cached configure. On a
-    /// device the bound is the iPhone 16 Pro Max baseline (27 ms, Plan 5) with headroom, so the test turns red on a
-    /// regression rather than on the known distance to the spec.
+    /// device the bound is the iPhone 16 Pro Max baseline (21 ms since Plan 6; 27 ms in Plan 5) with headroom, so the
+    /// test turns red on a regression rather than on the known distance to the spec.
     #if targetEnvironment(simulator)
     private let configureBudget: Duration = .milliseconds(24)
     /// Main-thread CPU per 120 Hz frame while a reveal runs between updates; the spec's target is about zero.
     private let revealFrameBudget: Duration = .microseconds(500)
     #else
-    private let configureBudget: Duration = .milliseconds(36)
-    /// The device baseline is 0.73 ms (Plan 5), almost all of it phrase starts.
-    private let revealFrameBudget: Duration = .microseconds(1_000)
+    private let configureBudget: Duration = .milliseconds(28)
+    /// The device measures 0.17 ms since Plan 6 made phrase starts cheaper (0.18–0.73 ms in Plan 5, across runs).
+    private let revealFrameBudget: Duration = .microseconds(500)
     #endif
     private let revealingMainThreadBudget: Duration = .milliseconds(26)
 
@@ -206,12 +206,14 @@ final class GlimmerStreamingPerformanceTests: XCTestCase {
     /// Spec addendum A3: a phrase start costs ≤ 0.5 ms on an iPhone 16 Pro Max. Each clock step here starts or
     /// settles phrases, as a wake does.
     func testPhraseStartsStayCheap() async {
-        // Before Plan 6 Task 3: 0.287 ms (Debug) and 0.225 ms (Release) on the simulator; the device measured about
-        // 1.1 ms. The gates sit about 30% under the simulator's old medians.
+        // Before Plan 6 Task 3: 0.287 ms (Debug) and 0.225 ms (Release) on the simulator, and the simulator gates sit
+        // about 30% under those. After it: 0.087 and 0.079 ms. The device measures 0.23 ms and gates at the spec's 0.5.
         #if DEBUG
         let gate: Duration = .microseconds(200)
-        #else
+        #elseif targetEnvironment(simulator)
         let gate: Duration = .microseconds(150)
+        #else
+        let gate: Duration = .microseconds(500)
         #endif
         let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
         let clock = ManualRevealClock()
