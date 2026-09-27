@@ -72,4 +72,98 @@ final class GlimmerViewTests: XCTestCase {
         view.onLinkTap = { _ in }
         XCTAssertNotNil(view.linkAction(for: url))
     }
+
+    private let longStream = Array(repeating: StreamingFixtures.all.map(\.markdown).joined(separator: "\n\n"), count: 10)
+        .joined(separator: "\n\n")
+
+    func testStreamingNeverResizesTheTextView() async {
+        var configuration = GlimmerConfiguration(imageLoader: nil)
+        configuration.reveal = .none
+        let view = GlimmerView(configuration: configuration)
+        let window = hostInWindow(view, width: 390, height: 800)
+        view.update(markdown: String(longStream.prefix(200)), isStreaming: true)
+        await view.pendingDocument?.value
+        settle(view)
+        let frame = view.textView.frame
+        var end = 200
+        while end < longStream.count {
+            end = min(longStream.count, end + 1_500)
+            view.update(markdown: String(longStream.prefix(end)), isStreaming: true)
+            await view.pendingDocument?.value
+            settle(view)
+            XCTAssertEqual(view.textView.frame, frame, "resized at \(end) characters")
+        }
+        XCTAssertGreaterThan(view.sizeThatFits(CGSize(width: 390, height: CGFloat.greatestFiniteMagnitude)).height, 5_000)
+        _ = window
+    }
+
+    func testIntrinsicSizeIsTheContentNotTheTextView() {
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
+        let window = hostInWindow(view, width: 390, height: 800)
+        view.update(markdown: "A short answer.\n\nWith two paragraphs.")
+        view.layoutIfNeeded()
+        let content = view.textView.laidOutHeight()
+        // What Auto Layout hosts read: the intrinsic size and the fitted size at a width.
+        XCTAssertEqual(view.intrinsicContentSize.height, content, accuracy: 1)
+        let fitted = view.systemLayoutSizeFitting(
+            CGSize(width: 390, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
+        )
+        XCTAssertEqual(fitted.height, content, accuracy: 1)
+        XCTAssertGreaterThan(view.textView.frame.height, content, "the text view is tall; the view is not")
+        _ = window
+    }
+
+    func testAWidthChangeMidStreamReportsTheNewContentHeight() async {
+        var configuration = GlimmerConfiguration(imageLoader: nil)
+        configuration.reveal = .none
+        let view = GlimmerView(configuration: configuration)
+        let window = hostInWindow(view, width: 390, height: 800)
+        view.update(markdown: String(longStream.prefix(3_000)), isStreaming: true)
+        await view.pendingDocument?.value
+        settle(view)
+        let narrow = view.sizeThatFits(CGSize(width: 390, height: CGFloat.greatestFiniteMagnitude)).height
+        view.frame.size.width = 700
+        settle(view)
+        XCTAssertEqual(view.textView.frame.width, 700)
+        XCTAssertEqual(view.textView.frame.height, GlimmerView.textViewHeight)
+        let wide = view.sizeThatFits(CGSize(width: 700, height: CGFloat.greatestFiniteMagnitude)).height
+        XCTAssertLessThan(wide, narrow, "wider text wraps into fewer lines")
+        XCTAssertEqual(wide, view.textView.laidOutHeight(), accuracy: 1)
+        _ = window
+    }
+
+    func testTextTallerThanTheTextViewGrowsIt() async {
+        let saved = GlimmerView.textViewHeight
+        GlimmerView.textViewHeight = 2_000
+        defer { GlimmerView.textViewHeight = saved }
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
+        let window = hostInWindow(view, width: 390, height: 800)
+        view.update(markdown: String(longStream.prefix(20_000)))
+        settle(view)
+        let content = view.textView.laidOutHeight()
+        XCTAssertGreaterThan(content, 2_000)
+        XCTAssertGreaterThanOrEqual(view.textView.frame.height, content, "doubled until the text fits")
+        _ = window
+    }
+
+    func testATallTextViewCostsNoMemory() {
+        let before = physicalFootprint()
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
+        let window = hostInWindow(view, width: 390, height: 800)
+        view.update(markdown: longStream)
+        settle(view)
+        // A backing store for a 1,000,000 pt layer would be gigabytes; the text itself is a few tens of megabytes.
+        XCTAssertLessThan(physicalFootprint() - before, 150 * 1_024 * 1_024)
+        _ = window
+    }
+
+    private func physicalFootprint() -> Int {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count) }
+        }
+        return result == KERN_SUCCESS ? Int(info.phys_footprint) : 0
+    }
 }

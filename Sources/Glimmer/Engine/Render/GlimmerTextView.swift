@@ -12,6 +12,18 @@ final class GlimmerTextView: UITextView {
     private var fittedSize: (version: Int, width: CGFloat, height: CGFloat)?
     /// Strongly held: the text layout manager's delegate is weak.
     private let fragmentProvider = GlimmerLayoutFragmentProvider(theme: .default)
+    /// The laid-out text's height, set by `GlimmerView`; the frame is much taller (see `GlimmerView.textViewHeight`).
+    var contentHeight: CGFloat = 0
+
+    /// VoiceOver frames the text, not the tall frame it is laid out in.
+    override var accessibilityFrame: CGRect {
+        get {
+            let height = contentHeight > 0 ? min(contentHeight, bounds.height) : bounds.height
+            return UIAccessibility.convertToScreenCoordinates(CGRect(x: 0, y: 0, width: bounds.width, height: height), in: self)
+        }
+        set {}
+    }
+
     /// Where Copy writes. The general pasteboard unless a host (or a test) redirects it.
     var pasteboard: UIPasteboard = .general
     /// False for a code block's text, which copies as the code itself.
@@ -133,6 +145,16 @@ final class GlimmerTextView: UITextView {
     // MARK: - Streaming edits
 
     /// Applies a document edit in one TextKit 2 editing transaction, so only the changed paragraphs lay out again.
+    /// Replaces the whole text. After a whole-text change, UIKit's first viewport layout asks for the text
+    /// container's used rect, which lays out every paragraph inside the view's bounds; in a view as tall as
+    /// `GlimmerView.textViewHeight` that is the whole answer (13 ms more for 1,200 words on the simulator). So the swap
+    /// happens at `shortHeight`, about a screen; `GlimmerView` makes the view tall again right after, and TextKit then
+    /// renders only the band (31 of 168 paragraphs, against all of them).
+    func replaceText(with text: NSAttributedString, shortHeight: CGFloat) {
+        frame.size.height = max(shortHeight, 1)
+        attributedText = text
+    }
+
     func apply(_ edit: GlimmerDocumentEdit) {
         if let content = textLayoutManager?.textContentManager as? NSTextContentStorage {
             content.performEditingTransaction {

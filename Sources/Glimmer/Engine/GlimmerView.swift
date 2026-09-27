@@ -322,7 +322,7 @@ public final class GlimmerView: UIView {
             viewHoldsWorkerText = false
             cacheKey = key
             appliedUpdate = requestedUpdate
-            textView.attributedText = cached
+            textView.replaceText(with: cached, shortHeight: bounds.height)
             apply(GlimmerDocumentResult(edit: nil, embedUnits: [:], isStreaming: false), replacedText: true)
             return
         }
@@ -333,7 +333,7 @@ public final class GlimmerView: UIView {
         worker = GlimmerDocumentWorker(document: document, extensions: configuration.extensions)
         viewHoldsWorkerText = true
         appliedUpdate = requestedUpdate
-        textView.attributedText = document.text
+        textView.replaceText(with: document.text, shortHeight: bounds.height)
         apply(GlimmerDocumentResult(edit: nil, embedUnits: document.embedUnits, isStreaming: isStreaming), replacedText: true)
     }
 
@@ -351,7 +351,7 @@ public final class GlimmerView: UIView {
                 // The view shows a cached text the worker never composed: take its whole text instead of an edit.
                 let full = await worker.text().text
                 guard worker === self.worker else { continue }
-                textView.attributedText = full
+                textView.replaceText(with: full, shortHeight: bounds.height)
                 viewHoldsWorkerText = true
                 cacheKey = nil
                 apply(GlimmerDocumentResult(edit: nil, embedUnits: result.embedUnits, isStreaming: result.isStreaming),
@@ -403,7 +403,7 @@ public final class GlimmerView: UIView {
             guard engine.revealedLength > 0 || frontierEmbed else { return 0 }
             if textView.bounds.width != width {
                 let fullHeight = textView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
-                textView.frame = CGRect(x: 0, y: 0, width: width, height: fullHeight + slack(forContentHeight: fullHeight))
+                sizeTextView(width: width, contentHeight: fullHeight)
             }
             if let revealedHeight, revealedHeight.revealed == engine.revealedLength, revealedHeight.width == width {
                 return revealedHeight.height
@@ -423,10 +423,22 @@ public final class GlimmerView: UIView {
         return measured
     }
 
-    /// Keeps the text view at least as tall as the document, with a slack band below it. The text container is
-    /// unbounded, so `laidOutHeight()` is exact whatever the frame; the band exists only because resizing a tall text
-    /// view costs about as much as laying it out (8–10 ms at 5,000 words), so the frame should change rarely. The band
-    /// grows with the text.
+    /// The text view's height. Tall enough that an answer never outgrows it, so streaming never resizes the text view:
+    /// on an iPhone 16 Pro Max a resize cost up to 9 ms plus the commit after it, the main cause of dropped frames.
+    /// The view reports and clips to the content's height; the text container is unbounded and TextKit renders only
+    /// the band near the screen, so the extra height costs nothing. Text taller than this doubles it.
+    static var textViewHeight: CGFloat = 1_000_000
+
+    /// Sizes the text view for `width`, as tall as `textViewHeight` or twice the content if that is taller.
+    private func sizeTextView(width: CGFloat, contentHeight: CGFloat) {
+        var height = max(Self.textViewHeight, textView.bounds.height)
+        while height < contentHeight { height *= 2 }
+        let frame = CGRect(x: 0, y: 0, width: width, height: height)
+        if textView.frame != frame { textView.frame = frame }
+    }
+
+    /// Keeps the text view tall enough for the document and records the document's height. The frame changes only
+    /// for a new width, or for text taller than the text view (see `textViewHeight`).
     private func fitTextViewToContent() {
         guard bounds.width > 0 else { return }
         // The text view may already have this width (a size query during a reveal resized it) while the height on
@@ -436,34 +448,24 @@ public final class GlimmerView: UIView {
         // A settled answer shown before, whole (a new width, or a replaced text): its height is known.
         if widthChanged || layoutChangedFrom == 0,
            let cached = cacheKey.flatMap({ GlimmerDocumentCache.shared.height(for: $0, width: bounds.width) }) {
-            let slack = slack(forContentHeight: cached)
-            if widthChanged || textView.bounds.height < cached || textView.bounds.height > cached + 2 * slack {
-                textView.frame = CGRect(x: 0, y: 0, width: bounds.width, height: cached + slack)
-            }
-            if textView.bounds.height < bounds.height { textView.frame.size.height = bounds.height }
+            sizeTextView(width: bounds.width, contentHeight: cached)
             layoutChangedFrom = 0
             contentHeight = (textView.textVersion, bounds.width, cached)
+            textView.contentHeight = cached
             return
         }
         if widthChanged {
             // A new width re-wraps everything: measure it in full once.
             let fullHeight = textView.sizeThatFits(CGSize(width: bounds.width, height: .greatestFiniteMagnitude)).height
-            textView.frame = CGRect(x: 0, y: 0, width: bounds.width, height: fullHeight + slack(forContentHeight: fullHeight))
+            sizeTextView(width: bounds.width, contentHeight: fullHeight)
             layoutChangedFrom = 0
         }
         let height = textView.laidOutHeight(from: layoutChangedFrom)
         layoutChangedFrom = Int.max
-        let slack = slack(forContentHeight: height)
-        if textView.bounds.height < height || textView.bounds.height > height + 2 * slack {
-            textView.frame.size.height = height + slack
-        }
-        if textView.bounds.height < bounds.height { textView.frame.size.height = bounds.height }
+        sizeTextView(width: textView.bounds.width, contentHeight: height)
         contentHeight = (textView.textVersion, textView.bounds.width, height)
+        textView.contentHeight = height
         if let cacheKey, engine == nil { GlimmerDocumentCache.shared.storeHeight(height, for: cacheKey, width: textView.bounds.width) }
-    }
-
-    private func slack(forContentHeight height: CGFloat) -> CGFloat {
-        max(1_000, height / 4)
     }
 
     private func reportHeightIfChanged() {
