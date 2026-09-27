@@ -12,8 +12,13 @@ struct ContentView: View {
                     NavigationLink("Benchmark", destination: BenchmarkDemo())
                 }
 
-                Section("Core") {
-                    NavigationLink("Basic Features", destination: BasicFeaturesDemo())
+                ForEach(DemoExample.Section.allCases, id: \.self) { section in
+                    Section(section.rawValue) {
+                        ForEach(DemoExample.allCases.filter { $0.section == section }) { example in
+                            NavigationLink(example.title) { example.destination }
+                                .accessibilityIdentifier("example.\(example.id)")
+                        }
+                    }
                 }
             }
             .navigationTitle("Glimmer")

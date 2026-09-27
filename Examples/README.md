@@ -1,6 +1,6 @@
 # Glimmer demo
 
-`GlimmerDemo` shows the Glimmer 2.0 engine. Open it with:
+`GlimmerDemo` shows the Glimmer 2.0 engine, and every example screen of Glimmer 1.x rebuilt on 2.0. Open it with:
 
 ```bash
 open Examples/GlimmerDemo/GlimmerDemo.xcodeproj
@@ -14,6 +14,26 @@ open Examples/GlimmerDemo/GlimmerDemo.xcodeproj
 | Streaming Lab | A canned answer streamed at Gemini-like, bursty or slow cadences, with pause and resume, and light and dark. | `--streaming-lab` (starts streaming at once) |
 | Long Answer | About 5,000 words in one view, for scrolling by eye. | — |
 | Benchmark | About 1,000 words streamed at a seeded Gemini cadence below a settled 5,000-word answer, while the screen flicks back, returns, and scrolls through the earlier answer and back. A 120 Hz display link counts late frames. Tap **Start**. | `--benchmark`, plus `--benchmark-autostart` and `--benchmark-exit` |
+
+### Glimmer 1.x's examples, on 2.0
+
+Open one directly with `--example=<id>`. Screens with tabs or sections open on one with `--section=<n>`, counting from 0. `--dark` and `--large-text` apply to every screen.
+
+| Screen | id | What it shows |
+|---|---|---|
+| Basic Features | `basic-features` | Three tabs: the basics, links with `@mentions` and `#123` references (a tap shows what was tapped), and highlighted code. |
+| Advanced Features | `advanced` | Three tabs. **Config** changes the configuration live: extensions, underlined links, the code block header, image loading, a larger theme and the image height. **Streaming** streams a long document. **Export** shows what copy writes, as plain text or markdown, for the whole answer or a selection in the preview. |
+| GitHub Flavored Markdown | `gfm` | 1.x's GFM tour in ten sections. |
+| Edge Cases | `edge-cases` | 1.x's stress corpus in ten sections. |
+| Inline Images | `inline-images` | Images inside a paragraph. A bare name such as `dog` comes from the demo's image loader. |
+| Tappable Images | `tappable-images` | `onImageTap`: tap any image to see its URL. |
+| GitHub Emojis | `github-emojis` | `GlimmerEmojiShortcodes`, on and off. |
+| Live Preview | `live-preview` | Type markdown and see it render. |
+| Streaming Reveal | `streaming-reveal` | The reveal in a SwiftUI or a UIKit host, smooth or off, with three fade durations. `--reveal-autoplay` starts streaming; `--reveal-host=uikit` picks the UIKit host. |
+| Performance | `performance` | Parse, settled render and streamed render times for a document of the chosen size. |
+| README Example, GitHub Features | `readme`, `github-features` | 1.x's two quick examples. |
+
+1.x's Markdown Linter screen is gone, with the linter. HTML export, parallel parsing and the twelve reveal styles are gone too; their screens show 2.0's equivalents.
 
 ## The project
 

@@ -3,7 +3,7 @@ import SwiftUI
 
 /// 1.x's first screen: the basics, links and GitHub references, and highlighted code, one tab each.
 struct BasicFeaturesDemo: View {
-    @State private var selectedTab = 0
+    @State private var selectedTab = DemoExample.launchSection ?? 0
     @State private var lastTap: String?
 
     var body: some View {
