@@ -9,6 +9,12 @@ struct GlimmerComposer {
     var highlighter: any GlimmerHighlighter = GlimmerBasicHighlighter()
     var imageLoader: (any GlimmerImageLoader)? = nil
     var extensions: [any GlimmerExtension] = []
+    /// Footnote numbers by first reference. Shared by copies of this composer, so a streaming document's recomposed
+    /// blocks keep the numbers earlier blocks gave.
+    var footnotes = GlimmerFootnoteNumbers()
+    /// Whether footnote definitions render (after the last block). A streaming document turns this off until the
+    /// answer settles: body text keeps arriving after a definition.
+    var rendersFootnoteDefinitions = true
 
     struct Context {
         var indent: CGFloat = 0
@@ -110,13 +116,42 @@ struct GlimmerComposer {
         case .htmlBlock(let html):
             appendTextParagraph([.text(html.trimmingCharacters(in: .newlines))], font: theme.bodyFont, context: context,
                                 marker: marker, to: output)
+        case .footnoteDefinitions(let notes):
+            appendFootnotes(notes, context: context, to: output)
         }
     }
 
-    private func appendList(_ list: GlimmerList, context: Context, to output: NSMutableAttributedString) {
+    /// The notes after the answer's last block: a thin rule, then an ordered list in marker order, in the footnote
+    /// font and the secondary text colour, with no heading (remark-gfm's is visually hidden too).
+    private func appendFootnotes(_ notes: [GlimmerFootnote], context: Context, to output: NSMutableAttributedString) {
+        guard rendersFootnoteDefinitions, !notes.isEmpty else { return }
+        appendEmbed(.thematicBreak, source: "", context: context, marker: nil, to: output)
+        var noteComposer = self
+        noteComposer.theme.bodyFont = theme.footnoteFont
+        noteComposer.theme.textColor = theme.secondaryTextColor
+        let numbered = notes.map { (note: $0, number: footnotes.number(for: $0.label)) }.sorted { $0.number < $1.number }
+        // Tight unless a note has several blocks: its paragraphs need blank lines between them, on screen and in copy.
+        let list = GlimmerList(kind: .ordered(start: 1), isTight: notes.allSatisfy { $0.blocks.count <= 1 },
+                               items: numbered.map { GlimmerListItem(blocks: $0.note.blocks) })
         var inner = context
         inner.listDepth += 1
-        let markers = list.items.enumerated().map { offset, item in
+        let markers = numbered.map { noteComposer.footnoteMarker(number: $0.number, label: $0.note.label, context: inner) }
+        noteComposer.appendList(list, context: context, markers: markers, to: output)
+    }
+
+    private func footnoteMarker(number: Int, label: String, context: Context) -> NSAttributedString {
+        let marker = NSMutableAttributedString(string: "\(number).", attributes: [.font: theme.bodyFont, .foregroundColor: theme.textColor])
+        marker.append(NSAttributedString(string: "\t", attributes: [.font: theme.bodyFont]))
+        marker.addAttribute(.glimmerListMarker, value: "[^\(label)]: ", range: NSRange(location: 0, length: marker.length))
+        return marker
+    }
+
+    private func appendList(
+        _ list: GlimmerList, context: Context, markers given: [NSAttributedString]? = nil, to output: NSMutableAttributedString
+    ) {
+        var inner = context
+        inner.listDepth += 1
+        let markers = given ?? list.items.enumerated().map { offset, item in
             listMarker(kind: list.kind, index: offset, checkbox: item.checkbox, context: inner)
         }
         // At least `listIndent`, and always a gap after the widest marker (wide numbers, large text sizes). Numbers get

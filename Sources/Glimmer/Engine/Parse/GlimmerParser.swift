@@ -2,7 +2,7 @@ import Foundation
 import cmark_gfm
 import cmark_gfm_extensions
 
-/// Parses CommonMark plus GFM tables, strikethrough, autolinks and task lists into Glimmer's block tree.
+/// Parses CommonMark plus GFM tables, strikethrough, autolinks, task lists and footnotes into Glimmer's block tree.
 public enum GlimmerParser {
     private typealias Node = UnsafeMutablePointer<cmark_node>
 
@@ -17,7 +17,7 @@ public enum GlimmerParser {
     /// block's line to re-parse only the open tail.
     static func parseWithLines(_ markdown: String) -> [(block: GlimmerBlock, startLine: Int)] {
         _ = registration
-        guard let parser = cmark_parser_new(CMARK_OPT_DEFAULT) else { return [] }
+        guard let parser = cmark_parser_new(CMARK_OPT_DEFAULT | CMARK_OPT_FOOTNOTES) else { return [] }
         defer { cmark_parser_free(parser) }
         for name in extensionNames {
             if let syntaxExtension = cmark_find_syntax_extension(name) {
@@ -33,9 +33,17 @@ public enum GlimmerParser {
         }
         guard let document = cmark_parser_finish(parser) else { return [] }
         defer { cmark_node_free(document) }
-        return children(of: document).compactMap { node in
-            block(node).map { (block: $0, startLine: Int(cmark_node_get_start_line(node))) }
+        var result: [(block: GlimmerBlock, startLine: Int)] = []
+        for node in children(of: document) {
+            guard let block = block(node) else { continue }
+            // cmark moves every referenced definition after the last block, in reference order: one block holds them.
+            if case .footnoteDefinitions(let notes) = block, case .footnoteDefinitions(let earlier)? = result.last?.block {
+                result[result.count - 1].block = .footnoteDefinitions(earlier + notes)
+            } else {
+                result.append((block, Int(cmark_node_get_start_line(node))))
+            }
         }
+        return result
     }
 
     // MARK: - Blocks
@@ -60,6 +68,8 @@ public enum GlimmerParser {
             return .htmlBlock(string(cmark_node_get_literal(node)))
         case CMARK_NODE_THEMATIC_BREAK:
             return .thematicBreak
+        case CMARK_NODE_FOOTNOTE_DEFINITION:
+            return .footnoteDefinitions([GlimmerFootnote(label: string(cmark_node_get_literal(node)), blocks: blocks(in: node))])
         default:
             return typeString(node) == "table" ? .table(table(node)) : nil
         }
@@ -127,7 +137,21 @@ public enum GlimmerParser {
                 result.append(inline)
             }
         }
-        return result
+        return result.flatMap(splittingFootnoteReferences)
+    }
+
+    /// cmark leaves a reference whose definition hasn't arrived (or never does) as the text `[^label]`: a marker too.
+    private static func splittingFootnoteReferences(_ inline: GlimmerInline) -> [GlimmerInline] {
+        guard case .text(let text) = inline, text.contains("[^") else { return [inline] }
+        var pieces: [GlimmerInline] = []
+        var cursor = text.startIndex
+        for match in text.matches(of: #/\[\^([^\]\s]+)\]/#) {
+            if cursor < match.range.lowerBound { pieces.append(.text(String(text[cursor..<match.range.lowerBound]))) }
+            pieces.append(.footnoteReference(label: String(match.output.1)))
+            cursor = match.range.upperBound
+        }
+        if cursor < text.endIndex { pieces.append(.text(String(text[cursor...]))) }
+        return pieces
     }
 
     private static func inline(_ node: Node) -> GlimmerInline? {
@@ -146,6 +170,10 @@ public enum GlimmerParser {
             return .lineBreak
         case CMARK_NODE_HTML_INLINE:
             return .html(string(cmark_node_get_literal(node)))
+        case CMARK_NODE_FOOTNOTE_REFERENCE:
+            // cmark replaced the reference's literal with its own number; the label is its definition's literal.
+            guard let definition = cmark_node_parent_footnote_def(node) else { return nil }
+            return .footnoteReference(label: string(cmark_node_get_literal(definition)))
         case CMARK_NODE_LINK:
             return .link(
                 destination: string(cmark_node_get_url(node)),

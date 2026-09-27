@@ -10,6 +10,18 @@ public enum GlimmerBlock: Equatable, Sendable {
     case table(GlimmerTable)
     case thematicBreak
     case htmlBlock(String)
+    /// The answer's footnote definitions, which cmark gathers after its last block.
+    case footnoteDefinitions([GlimmerFootnote])
+}
+
+public struct GlimmerFootnote: Equatable, Sendable {
+    public var label: String
+    public var blocks: [GlimmerBlock]
+
+    public init(label: String, blocks: [GlimmerBlock]) {
+        self.label = label
+        self.blocks = blocks
+    }
 }
 
 public struct GlimmerList: Equatable, Sendable {
@@ -68,6 +80,8 @@ public indirect enum GlimmerInline: Equatable, Sendable {
     case softBreak
     case lineBreak
     case html(String)
+    /// `[^label]`, with or without a definition.
+    case footnoteReference(label: String)
 }
 
 extension GlimmerInline {
@@ -83,6 +97,8 @@ extension GlimmerInline {
                 alt
             case .softBreak, .lineBreak:
                 " "
+            case .footnoteReference:
+                ""
             }
         }.joined()
     }

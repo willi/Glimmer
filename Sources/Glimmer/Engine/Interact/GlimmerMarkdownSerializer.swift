@@ -65,6 +65,11 @@ enum GlimmerMarkdownSerializer {
             let whole = string.paragraphRange(for: NSRange(location: location, length: 0))
             location = NSMaxRange(whole)
             let paragraph = Paragraph(text, range: whole)
+            // An embed with no source (the rule above footnotes) is decoration: it writes nothing, not even a gap.
+            if paragraph.content.length > 0, text.attribute(.attachment, at: paragraph.content.location, effectiveRange: nil) is GlimmerBlockAttachment,
+               text.attribute(.glimmerSource, at: paragraph.content.location, effectiveRange: nil) as? String == "" {
+                continue
+            }
             let includesStart = wanted.location <= paragraph.content.location
             let selected = NSIntersectionRange(paragraph.content, wanted)
             // A selection that starts on a paragraph's newline, or on a marker-only line's tab, takes nothing from it.
@@ -176,6 +181,8 @@ enum GlimmerMarkdownSerializer {
     /// What a list item's later lines start with: spaces to its content column, where a task checkbox counts as
     /// content (`- [x] ` → two spaces, as GFM reads it), and any quote the item opens (`- > ` → `  > `).
     static func continuation(ofMarker marker: String) -> String {
+        // A footnote's later lines are indented four spaces, as its definition's are.
+        if marker.hasPrefix("[^") { return "    " }
         guard let space = marker.firstIndex(of: " ") else { return String(repeating: " ", count: marker.count) }
         var rest = String(marker[marker.index(after: space)...])
         if rest.hasPrefix("[ ] ") || rest.hasPrefix("[x] ") || rest.hasPrefix("[X] ") { rest.removeFirst(4) }

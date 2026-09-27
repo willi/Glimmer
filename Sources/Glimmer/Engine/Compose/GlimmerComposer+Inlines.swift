@@ -39,6 +39,15 @@ extension GlimmerComposer {
                 output.append(NSAttributedString(string: "\u{2028}", attributes: attributes))
             case .html(let html):
                 output.append(NSAttributedString(string: html, attributes: attributes))
+            case .footnoteReference(let label):
+                // A superscript number in the link colour; copy writes the original `[^label]`.
+                var marker = attributes
+                let font = attributes[.font] as? UIFont ?? theme.bodyFont
+                marker[.font] = theme.footnoteFont
+                marker[.baselineOffset] = max(1, font.capHeight - theme.footnoteFont.capHeight)
+                marker[.foregroundColor] = theme.linkColor
+                marker[.glimmerSource] = "[^\(label)]"
+                output.append(NSAttributedString(string: "\(footnotes.number(for: label))", attributes: marker))
             }
         }
     }

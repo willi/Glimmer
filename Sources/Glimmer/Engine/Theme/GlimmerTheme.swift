@@ -14,10 +14,14 @@ public struct GlimmerTheme: Sendable {
     public var tableHeaderFont: UIFont
     /// Small UI text such as a code block's language label.
     public var captionFont: UIFont
+    /// Footnote markers and notes. Defaults to the caption font.
+    public var footnoteFont: UIFont
 
     public var textColor: UIColor
     public var secondaryTextColor: UIColor
     public var linkColor: UIColor
+    /// `@username` mentions (`GlimmerMentions`). Defaults to the link colour.
+    public var mentionColor: UIColor
     public var inlineCodeBackground: UIColor
     public var codeBlockBackground: UIColor
     public var quoteBarColor: UIColor
@@ -77,6 +81,7 @@ public struct GlimmerTheme: Sendable {
         copy.tableFont = scale(tableFont, .subheadline)
         copy.tableHeaderFont = scale(tableHeaderFont, .subheadline)
         copy.captionFont = scale(captionFont, .footnote)
+        copy.footnoteFont = scale(footnoteFont, .footnote)
         return copy
     }
 }
@@ -98,9 +103,11 @@ extension GlimmerTheme {
             tableFont: .systemFont(ofSize: 15),
             tableHeaderFont: .systemFont(ofSize: 15, weight: .semibold),
             captionFont: .systemFont(ofSize: 13, weight: .medium),
+            footnoteFont: .systemFont(ofSize: 13, weight: .medium),
             textColor: .label,
             secondaryTextColor: .secondaryLabel,
             linkColor: .link,
+            mentionColor: .link,
             inlineCodeBackground: .tertiarySystemFill,
             codeBlockBackground: .secondarySystemBackground,
             quoteBarColor: .separator,

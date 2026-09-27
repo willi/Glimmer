@@ -22,6 +22,7 @@ final class GlimmerConformanceTests: XCTestCase {
         let expected: Set<String> = [
             "paragraph", "heading", "blockQuote", "list", "task", "codeBlock", "table", "thematicBreak", "htmlBlock",
             "text", "code", "emphasis", "strong", "strikethrough", "link", "image", "softBreak", "lineBreak", "html",
+            "footnoteDefinitions", "footnoteReference",
         ]
         XCTAssertEqual(expected.subtracting(kinds), [], "node kinds never produced")
     }
@@ -63,6 +64,9 @@ final class GlimmerConformanceTests: XCTestCase {
             kinds.insert("thematicBreak")
         case .htmlBlock:
             kinds.insert("htmlBlock")
+        case .footnoteDefinitions(let notes):
+            kinds.insert("footnoteDefinitions")
+            notes.forEach { $0.blocks.forEach { collectKinds($0, into: &kinds) } }
         }
     }
 
@@ -78,6 +82,7 @@ final class GlimmerConformanceTests: XCTestCase {
         case .softBreak: kinds.insert("softBreak")
         case .lineBreak: kinds.insert("lineBreak")
         case .html: kinds.insert("html")
+        case .footnoteReference: kinds.insert("footnoteReference")
         }
     }
 }
