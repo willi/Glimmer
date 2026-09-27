@@ -323,6 +323,7 @@ final class GlimmerTextView: UITextView {
 
     @objc(textViewportLayoutController:cacheRenderingSurface:forKey:)
     func cacheDrawnSurface(_ controller: NSTextViewportLayoutController, surface: AnyObject, key: AnyObject) {
+        if canvasView == nil { canvasView = (surface as? UIView)?.superview }
         if reusesDrawnText, let fragment = key as? NSTextLayoutFragment, let view = surface as? UIView {
             drawnSurfaces.setObject(view, forKey: fragment)
             drawnStates[ObjectIdentifier(fragment)] = drawnState(of: fragment)
@@ -342,6 +343,28 @@ final class GlimmerTextView: UITextView {
         let fragments = drawnSurfaces.keyEnumerator()
         while let fragment = fragments.nextObject() as? NSTextLayoutFragment { live.insert(ObjectIdentifier(fragment)) }
         drawnStates = drawnStates.filter { live.contains($0.key) }
+    }
+
+    /// The view UIKit renders fragments into: the superview of the surfaces it hands over. Marking it for layout runs
+    /// exactly one viewport pass, in the commit; calling `layoutViewport()` runs one now and UIKit another then.
+    private weak var canvasView: UIView?
+
+    /// Re-renders the band: one pass in the next commit through the canvas, or now before the canvas is known.
+    private func relayoutViewport() {
+        if let canvasView {
+            canvasView.setNeedsLayout()
+        } else {
+            textLayoutManager?.textViewportLayoutController.layoutViewport()
+        }
+    }
+
+    /// Viewport passes run so far: diagnostics for tests and the benchmark.
+    private(set) var viewportPasses = 0
+
+    @available(iOS 27.0, *)
+    override func textViewportLayoutControllerWillLayout(_ controller: NSTextViewportLayoutController) {
+        viewportPasses += 1
+        super.textViewportLayoutControllerWillLayout(controller)
     }
 
     // MARK: - Visible band
@@ -374,7 +397,7 @@ final class GlimmerTextView: UITextView {
         bandWidening = nil
         guard rendersScreenOnly else { return }
         rendersScreenOnly = false
-        textLayoutManager?.textViewportLayoutController.layoutViewport()
+        relayoutViewport()
     }
 
     private var overscan: CGFloat { rendersScreenOnly ? 0 : Self.bandOverscan }
@@ -398,7 +421,7 @@ final class GlimmerTextView: UITextView {
         guard !screen.isNull else { return }
         let margin = max(0, overscan - Self.bandRefreshStep)
         let needed = screen.insetBy(dx: 0, dy: -window.bounds.height * margin).intersection(bounds)
-        if !rendered.contains(needed) { textLayoutManager?.textViewportLayoutController.layoutViewport() }
+        if !rendered.contains(needed) { relayoutViewport() }
     }
 
     /// TextKit renders whatever this returns. Public from iOS 27, where it is the band around the screen: without it,

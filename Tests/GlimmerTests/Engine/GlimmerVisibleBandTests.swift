@@ -131,11 +131,28 @@ final class GlimmerVisibleBandTests: XCTestCase {
         _ = window
     }
 
+    func testABandMoveRunsOnePass() throws {
+        let (view, scrollView, window) = scrolled()
+        CATransaction.flush()
+        let before = view.textView.viewportPasses
+        let band = try XCTUnwrap(view.textView.renderedBand)
+        scrollView.contentOffset = CGPoint(x: 0, y: 800 * 0.3)
+        view.textView.refreshVisibleBandIfNeeded()
+        view.layoutIfNeeded()
+        view.textView.layoutIfNeeded()
+        CATransaction.flush()
+        XCTAssertEqual(view.textView.viewportPasses - before, 1, "one viewport pass per band move")
+        XCTAssertNotEqual(view.textView.renderedBand, band)
+        _ = window
+    }
+
     func testTheBandRefreshesAfterAQuarterScreen() throws {
         let (view, scrollView, window) = scrolled()
         let before = try XCTUnwrap(view.textView.renderedBand)
         scrollView.contentOffset = CGPoint(x: 0, y: 800 * 0.3)
         view.textView.refreshVisibleBandIfNeeded()
+        // The pass runs in the next layout: the frame's commit.
+        view.textView.layoutIfNeeded()
         let after = try XCTUnwrap(view.textView.renderedBand)
         XCTAssertNotEqual(after, before, "0.3 screens of travel re-renders")
         _ = window
@@ -206,6 +223,7 @@ final class GlimmerVisibleBandTests: XCTestCase {
         // The reader flings before the band has widened.
         scrollView.contentOffset = CGPoint(x: 0, y: 600)
         view.textView.refreshVisibleBandIfNeeded()
+        view.textView.layoutIfNeeded()
         let band = try XCTUnwrap(view.textView.renderedBand)
         XCTAssertTrue(band.contains(CGRect(x: 0, y: 600, width: 390, height: 800).intersection(view.textView.bounds)))
         _ = window
