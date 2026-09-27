@@ -41,6 +41,87 @@ final class ExamplesUITests: XCTestCase {
         }
     }
 
+    @MainActor
+    private func launch(_ id: String, _ arguments: [String] = []) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["--example=\(id)"] + arguments
+        app.launch()
+        return app
+    }
+
+    /// Basic Features: every tab opens, and a mention and an issue on the Interactive tab report their taps.
+    @MainActor
+    func testBasicFeaturesTabsAndTokenTaps() {
+        let app = launch("basic-features")
+        XCTAssertTrue(app.navigationBars["Basic Features"].waitForExistence(timeout: 15))
+        app.buttons["Code"].tap()
+        XCTAssertTrue(app.textViews.firstMatch.waitForExistence(timeout: 5))
+        app.buttons["Interactive"].tap()
+        let banner = app.staticTexts["demo.lastTap"]
+        app.links["@tim"].firstMatch.tap()
+        XCTAssertTrue(banner.waitForExistence(timeout: 5), "tapping a mention reports it")
+        XCTAssertEqual(banner.label, "Mention @tim")
+        app.links["#1234"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Issue #1234"].waitForExistence(timeout: 5), "tapping an issue reports it")
+        app.buttons["Basic"].tap()
+    }
+
+    /// Tappable Images: a standalone image and an inline one report their URLs.
+    @MainActor
+    func testTappingAnImageShowsItsURL() {
+        let app = launch("tappable-images")
+        XCTAssertTrue(app.navigationBars["Tappable Images"].waitForExistence(timeout: 15))
+        let logo = app.buttons["SwiftUI Logo"]
+        XCTAssertTrue(logo.waitForExistence(timeout: 5))
+        logo.tap()
+        let alert = app.alerts["Image Tapped"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        XCTAssertTrue(alert.staticTexts["URL: https://developer.apple.com/assets/elements/icons/swiftui/swiftui-96x96_2x.png"].exists)
+        alert.buttons["OK"].tap()
+    }
+
+    /// Streaming Reveal: a simulated stream and a one-shot play reach the end of the sample, in both hosts.
+    @MainActor
+    func testStreamingRevealPlaysInBothHosts() {
+        let app = launch("streaming-reveal")
+        XCTAssertTrue(app.navigationBars["Streaming Reveal"].waitForExistence(timeout: 15))
+        let end = NSPredicate(format: "label CONTAINS 'nothing to mismatch'")
+        app.buttons["reveal.stream"].tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(end).firstMatch.waitForExistence(timeout: 30), "the stream never finished")
+        app.buttons["UIKit"].tap()
+        app.buttons["reveal.playFull"].tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(end).firstMatch.waitForExistence(timeout: 30), "the UIKit host never finished")
+    }
+
+    /// Advanced Features: the stream runs, and export writes the answer as plain text and as markdown.
+    @MainActor
+    func testAdvancedStreamingAndExport() {
+        let app = launch("advanced", ["--section=1"])
+        XCTAssertTrue(app.navigationBars["Advanced Features"].waitForExistence(timeout: 15))
+        app.buttons["streaming.start"].tap()
+        XCTAssertTrue(app.buttons["Stop"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Start"].waitForExistence(timeout: 60), "the stream never finished")
+        app.buttons["Export"].tap()
+        app.buttons["export.button"].tap()
+        let output = app.staticTexts["export.output"]
+        XCTAssertTrue(output.waitForExistence(timeout: 5))
+        XCTAssertTrue(output.label.hasPrefix("Export Demo\nConvert markdown to different formats!"), output.label)
+        app.buttons["Markdown"].tap()
+        app.buttons["export.button"].tap()
+        XCTAssertTrue(app.staticTexts["export.output"].label.hasPrefix("# Export Demo"), app.staticTexts["export.output"].label)
+    }
+
+    /// Performance: a run reports parse, settled and streamed times.
+    @MainActor
+    func testPerformanceRunReportsTimes() {
+        let app = launch("performance")
+        XCTAssertTrue(app.navigationBars["Performance"].waitForExistence(timeout: 15))
+        app.buttons["performance.run"].tap()
+        let streamed = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Streamed render'")).firstMatch
+        XCTAssertTrue(streamed.waitForExistence(timeout: 90), "the benchmark never finished")
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Parse'")).firstMatch.exists)
+    }
+
     /// Screenshots of every example, section by section, top to bottom, for review. Opt-in: run with
     /// `TEST_RUNNER_EXAMPLES_TOUR=light` (every page in light mode) or `=all` (plus the first pages in dark mode and at
     /// an accessibility text size). The screenshots are attachments of the result bundle.
