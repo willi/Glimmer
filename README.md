@@ -155,8 +155,8 @@ view.linkMenuActions = { url in [UIAction(title: "Copy Link") { _ in UIPasteboar
 ## Performance
 
 These are the spec's budgets. The numbers are Release builds on the iOS 27 simulator, measured on an Apple silicon
-Mac under load. The device run on an iPhone 16 Pro Max is recorded in
-[the Plan 5 results](docs/superpowers/perf/2026-09-26-glimmer-2-plan-5-device-results.md).
+Mac under load. [The Plan 5 results](docs/superpowers/perf/2026-09-26-glimmer-2-plan-5-device-results.md) have the
+full tables and the commands for the iPhone 16 Pro Max harness.
 
 | Metric | Budget | Measured |
 |---|---|---|
