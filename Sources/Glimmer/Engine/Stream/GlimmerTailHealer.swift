@@ -35,6 +35,7 @@ enum GlimmerTailHealer {
         tail = holdBackSetextUnderline(tail)
         tail = holdBackFootnoteStarts(tail)
         tail = holdBackPartialBreakTag(tail)
+        tail = holdBackTrailingBackslash(tail)
         tail = healLinks(tail)
         tail = closeInlineDelimiters(tail)
         return String(markdown[..<tailStart]) + tail
@@ -204,6 +205,13 @@ enum GlimmerTailHealer {
     private static func holdBackPartialBreakTag(_ tail: String) -> String {
         guard tail.last != ">", let match = tail.firstMatch(of: #/<(?:[bB](?:[rR]\s*/?)?)?$/#) else { return tail }
         return String(tail[..<match.range.lowerBound])
+    }
+
+    /// A lone backslash at the end may escape what comes next (`\\@`), and would vanish when that arrives. An even run
+    /// (`\\\\`) is an escaped backslash and stays.
+    private static func holdBackTrailingBackslash(_ tail: String) -> String {
+        let run = tail.reversed().prefix { $0 == "\\" }.count
+        return run % 2 == 1 ? String(tail.dropLast()) : tail
     }
 
     private static func healLinks(_ tail: String) -> String {

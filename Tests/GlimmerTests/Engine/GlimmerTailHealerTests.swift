@@ -74,6 +74,13 @@ final class GlimmerTailHealerTests: XCTestCase {
         XCTAssertFalse(text.contains("`"))
     }
 
+    /// A trailing backslash may escape the next character: shown now, it would vanish when that arrives.
+    func testATrailingBackslashIsHeldBack() {
+        XCTAssertEqual(GlimmerTailHealer.heal("Not \\"), "Not ")
+        XCTAssertEqual(GlimmerTailHealer.heal("Not \\@ada"), "Not \\@ada")
+        XCTAssertEqual(GlimmerTailHealer.heal("A path C:\\\\"), "A path C:\\\\", "an escaped backslash stays")
+    }
+
     /// A break tag still arriving would show as text, then turn into a line break.
     func testAPartialBreakTagIsHeldBack() {
         for partial in ["One<", "One<b", "One<br", "One<BR", "One<br ", "One<br /"] {
