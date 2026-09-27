@@ -31,12 +31,12 @@ Glimmer is a **powerful** and *flexible* Swift package for rendering **GitHub Fl
 
 ## Key Features
 
-✅ Full GFM support with tables, task lists, and more
-✅ Syntax highlighting for 18+ languages  
-✅ Interactive elements (tappable links, mentions, issues)
-✅ Streaming for real-time updates
-✅ Parsing off the main thread
-✅ Copy as markdown or plain text
+✅ Full GFM support with tables, task lists, and more\\
+✅ Syntax highlighting for 18+ languages\\
+✅ Interactive elements (tappable links, mentions, issues)\\
+✅ Streaming for real-time updates\\
+✅ Parsing off the main thread\\
+✅ Copy as markdown or plain text\\
 ✅ Streaming support for real-time content
 
 ## Installation
@@ -77,9 +77,9 @@ Hey @octocat, check out this cool feature! Thanks to @defunkt and @mojombo for G
 - Working on feature request #999
 
 ## Emoji Support 
-:rocket: Launch ready!
-:tada: Celebration time!
-:bug: Fixed that bug!
+:rocket: Launch ready!\\
+:tada: Celebration time!\\
+:bug: Fixed that bug!\\
 :sparkles: New features added!
 
 ## Task Lists
@@ -90,7 +90,7 @@ Hey @octocat, check out this cool feature! Thanks to @defunkt and @mojombo for G
 - [ ] Add more themes
 
 ## Auto-linking
-Visit https://github.com for more info
+Visit https://github.com for more info\\
 Contact us at support@github.com
 
 ## Combined Example

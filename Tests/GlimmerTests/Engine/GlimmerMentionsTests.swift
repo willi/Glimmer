@@ -108,6 +108,14 @@ final class GlimmerMentionsTests: XCTestCase {
         XCTAssertEqual(mentions(in: text), ["@ada"])
     }
 
+    /// An escaped `@` copies escaped, so pasting it back doesn't make it a mention.
+    func testAnEscapedAtSignCopiesEscaped() {
+        let text = composed("Not \\@octocat, but @ada. Mail ada@example.com at 10:30, #7 and \\:rocket: too.",
+                            extensions: [GlimmerMentions(), GlimmerEmojiShortcodes()])
+        XCTAssertEqual(GlimmerMarkdownSerializer.markdown(from: text, range: NSRange(location: 0, length: text.length)),
+                       "Not \\@octocat, but @ada. Mail [ada@example.com](mailto:ada@example.com) at 10:30, \\#7 and \\:rocket: too.")
+    }
+
     func testMentionsSkipLinksAndCode() {
         XCTAssertEqual(mentions(in: composed("See [@ada](https://example.com) and `@grace`.")), [])
     }

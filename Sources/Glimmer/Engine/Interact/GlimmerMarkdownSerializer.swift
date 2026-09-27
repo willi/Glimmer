@@ -255,7 +255,8 @@ enum GlimmerMarkdownSerializer {
         // a verbatim source joins its neighbours unescaped; code stays raw until its span is written.
         var merged: [Segment] = []
         for segment in segments {
-            let text = segment.style.isCode || segment.isVerbatim ? segment.text : escaped(segment.text)
+            let inLink = segment.style.marks.contains { if case .link = $0 { true } else { false } }
+            let text = segment.style.isCode || segment.isVerbatim ? segment.text : escaped(segment.text, inLink: inLink)
             if let last = merged.last, last.style == segment.style {
                 merged[merged.count - 1].text += text
             } else {
@@ -317,7 +318,7 @@ enum GlimmerMarkdownSerializer {
 
     /// Backslash-escapes characters that could start inline syntax. An underscore between two letters or digits
     /// never opens emphasis in CommonMark, and `&` only matters before something that could be an entity.
-    private static func escaped(_ text: String) -> String {
+    private static func escaped(_ text: String, inLink: Bool) -> String {
         let characters = Array(text)
         var result = ""
         for (index, character) in characters.enumerated() {
@@ -331,12 +332,30 @@ enum GlimmerMarkdownSerializer {
                 if !(isWordCharacter(before) && isWordCharacter(after)) { result.append("\\") }
             case "&":
                 if let after, after.isLetter || after == "#" { result.append("\\") }
+            case "@", ":", "#":
+                // Would start an extension's token (a mention, a shortcode, a reference) on the way back in: the text
+                // was one only if it is not a token here. A word before it (an email, a time) never starts one. Link
+                // text keeps `@` and `#`: mention-like extensions skip links.
+                let startsWord = before.map { !($0.isLetter || $0.isNumber) } ?? true
+                if startsWord, !(inLink && character != ":"), let after, character == ":" ? closesShortcode(characters, from: index) : after.isLetter || after.isNumber,
+                   character != "#" || after.isNumber {
+                    result.append("\\")
+                }
             default:
                 break
             }
             result.append(character)
         }
         return result
+    }
+
+    /// Whether `:` at `index` opens a `:shortcode:`: a run of letters, digits, `_`, `+` or `-`, then `:`.
+    private static func closesShortcode(_ characters: [Character], from index: Int) -> Bool {
+        var cursor = index + 1
+        while cursor < characters.count, characters[cursor].isLetter || characters[cursor].isNumber || "_+-".contains(characters[cursor]) {
+            cursor += 1
+        }
+        return cursor > index + 1 && cursor < characters.count && characters[cursor] == ":"
     }
 
     /// Escapes a paragraph start that would read as block syntax: a heading, a quote, a bullet or a numbered item.
