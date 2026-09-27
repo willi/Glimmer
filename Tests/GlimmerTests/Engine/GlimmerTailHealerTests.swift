@@ -79,6 +79,7 @@ final class GlimmerTailHealerTests: XCTestCase {
         XCTAssertEqual(GlimmerTailHealer.heal("Not \\"), "Not ")
         XCTAssertEqual(GlimmerTailHealer.heal("Not \\@ada"), "Not \\@ada")
         XCTAssertEqual(GlimmerTailHealer.heal("A path C:\\\\"), "A path C:\\\\", "an escaped backslash stays")
+        XCTAssertEqual(GlimmerTailHealer.heal("Run `C:\\"), "Run `C:\\`", "inside code a backslash is text")
     }
 
     /// A break tag still arriving would show as text, then turn into a line break.
@@ -89,6 +90,7 @@ final class GlimmerTailHealerTests: XCTestCase {
         XCTAssertEqual(GlimmerTailHealer.heal("One<br>"), "One<br>")
         XCTAssertEqual(GlimmerTailHealer.heal("a < b"), "a < b", "a comparison")
         XCTAssertEqual(GlimmerTailHealer.heal("One<bold"), "One<bold", "not a break tag")
+        XCTAssertEqual(GlimmerTailHealer.heal("Use `a <b"), "Use `a <b`", "inside code a tag is text")
     }
 }
 

@@ -203,7 +203,8 @@ enum GlimmerTailHealer {
 
     /// A `<br>` still arriving (`<`, `<b`, `<br /`) waits: shown as text, it would turn into a line break.
     private static func holdBackPartialBreakTag(_ tail: String) -> String {
-        guard tail.last != ">", let match = tail.firstMatch(of: #/<(?:[bB](?:[rR]\s*/?)?)?$/#) else { return tail }
+        guard tail.last != ">", let match = tail.firstMatch(of: #/<(?:[bB](?:[rR]\s*/?)?)?$/#),
+              !isInOpenCodeSpan(tail[..<match.range.lowerBound]) else { return tail }
         return String(tail[..<match.range.lowerBound])
     }
 
@@ -211,7 +212,12 @@ enum GlimmerTailHealer {
     /// (`\\`) is an escaped backslash and stays.
     private static func holdBackTrailingBackslash(_ tail: String) -> String {
         let run = tail.reversed().prefix { $0 == "\\" }.count
-        return run % 2 == 1 ? String(tail.dropLast()) : tail
+        return run % 2 == 1 && !isInOpenCodeSpan(tail.dropLast()) ? String(tail.dropLast()) : tail
+    }
+
+    /// Whether text after `prefix` is inside a code span still open: there, `<` and `\\` are just text.
+    private static func isInOpenCodeSpan(_ prefix: Substring) -> Bool {
+        prefix.reduce(0) { $1 == "`" ? $0 + 1 : $0 } % 2 == 1
     }
 
     private static func healLinks(_ tail: String) -> String {
