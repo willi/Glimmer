@@ -367,6 +367,86 @@ final class GlimmerTextView: UITextView {
         super.textViewportLayoutControllerWillLayout(controller)
     }
 
+    @available(iOS 27.0, *)
+    override func textViewportLayoutControllerDidLayout(_ controller: NSTextViewportLayoutController) {
+        super.textViewportLayoutControllerDidLayout(controller)
+        schedulePreload()
+    }
+
+    // MARK: - Preload
+
+    /// How far past the band, in screen heights, idle frames lay text out: ahead in the scroll direction, and behind.
+    /// A band move then renders text that is already laid out (Texture's preload range does the same).
+    static let preloadAhead: CGFloat = 1.5
+    static let preloadBehind: CGFloat = 0.5
+    /// Main-thread time one idle frame spends laying text out ahead.
+    static let preloadBudget: Duration = .milliseconds(2)
+
+    /// What TextKit has laid out around the band, in this view's coordinates, or nil before any preload.
+    private(set) var preloadedRange: ClosedRange<CGFloat>?
+    private var preloading: CADisplayLink?
+    /// +1 while the text moves up the screen (reading down), -1 the other way.
+    private var scrollDirection: CGFloat = 1
+    private var lastScreenMidY: CGFloat?
+
+    /// Starts laying text out ahead in idle frames, if the band's surroundings aren't laid out yet.
+    private func schedulePreload() {
+        guard preloading == nil, window != nil, !rendersScreenOnly, renderedBand != nil else { return }
+        let link = CADisplayLink(target: GlimmerWeakTarget(self), selector: #selector(GlimmerWeakTarget.tick(_:)))
+        link.add(to: .main, forMode: .common)
+        preloading = link
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil { stopPreloading() }
+    }
+
+    private func stopPreloading() {
+        preloading?.invalidate()
+        preloading = nil
+    }
+
+    /// Lays out fragments beyond the band for up to `preloadBudget`; stops the display link once the preload range
+    /// covers `preloadAhead` screens ahead and `preloadBehind` behind.
+    func preloadStep() {
+        guard let manager = textLayoutManager, let band = renderedBand, let window, !rendersScreenOnly, band.height > 0 else {
+            stopPreloading()
+            return
+        }
+        let screen = window.bounds.height
+        let below = band.maxY + screen * (scrollDirection > 0 ? Self.preloadAhead : Self.preloadBehind)
+        let above = band.minY - screen * (scrollDirection > 0 ? Self.preloadBehind : Self.preloadAhead)
+        let clock = ContinuousClock()
+        let deadline = clock.now + Self.preloadBudget
+        var lowest = band.maxY
+        var highest = band.minY
+        var done = true
+        // Ahead first, then behind: each walks from the band's edge; laid-out fragments are passed over cheaply.
+        for reverse in scrollDirection > 0 ? [false, true] : [true, false] {
+            let edge = CGPoint(x: 0, y: reverse ? max(band.minY, 0) : max(band.maxY - 1, 0))
+            guard let start = manager.textLayoutFragment(for: edge)?.rangeInElement.location else { continue }
+            var options: NSTextLayoutFragment.EnumerationOptions = [.ensuresLayout]
+            if reverse { options.insert(.reverse) }
+            var finished = false
+            manager.enumerateTextLayoutFragments(from: start, options: options) { fragment in
+                let frame = fragment.layoutFragmentFrame
+                if reverse { highest = min(highest, frame.minY) } else { lowest = max(lowest, frame.maxY) }
+                if reverse ? frame.minY <= above : frame.maxY >= below {
+                    finished = true
+                    return false
+                }
+                return clock.now < deadline
+            }
+            // Reaching the text's start or end also finishes a direction.
+            if !finished, clock.now < deadline { finished = true }
+            if !finished { done = false }
+            if clock.now >= deadline { done = false; break }
+        }
+        preloadedRange = min(highest, band.minY)...max(lowest, band.maxY)
+        if done { stopPreloading() }
+    }
+
     // MARK: - Visible band
 
     /// How far past the screen, in screen heights, TextKit still renders. Enough that a fling lands on rendered text
@@ -419,6 +499,8 @@ final class GlimmerTextView: UITextView {
         guard let window, let rendered = renderedBand else { return }
         let screen = convert(window.bounds, from: window).intersection(bounds)
         guard !screen.isNull else { return }
+        if let lastScreenMidY, screen.midY != lastScreenMidY { scrollDirection = screen.midY > lastScreenMidY ? 1 : -1 }
+        lastScreenMidY = screen.midY
         let margin = max(0, overscan - Self.bandRefreshStep)
         let needed = screen.insetBy(dx: 0, dy: -window.bounds.height * margin).intersection(bounds)
         if !rendered.contains(needed) { relayoutViewport() }

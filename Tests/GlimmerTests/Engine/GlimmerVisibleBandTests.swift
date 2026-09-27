@@ -146,6 +146,36 @@ final class GlimmerVisibleBandTests: XCTestCase {
         _ = window
     }
 
+    func testIdleFramesPreloadAheadOfTheBand() throws {
+        let (view, _, window) = scrolled()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        let band = try XCTUnwrap(view.textView.renderedBand)
+        let preloaded = try XCTUnwrap(view.textView.preloadedRange, "idle frames laid out ahead")
+        XCTAssertGreaterThanOrEqual(preloaded.upperBound, min(band.maxY + 800 * 1.5, view.textView.contentHeight) - 1)
+        XCTAssertLessThanOrEqual(preloaded.lowerBound, band.minY)
+        _ = window
+    }
+
+    func testAPreloadStepStaysWithinItsBudget() {
+        let (view, _, window) = scrolled()
+        view.textView.layoutIfNeeded()
+        let start = threadCPUTime()
+        view.textView.preloadStep()
+        XCTAssertLessThan(threadCPUTime() - start, .milliseconds(4), "one idle frame's preload")
+        _ = window
+    }
+
+    func testAFlingPastThePreloadStillRendersTheScreen() throws {
+        let (view, scrollView, window) = scrolled()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        scrollView.contentOffset = CGPoint(x: 0, y: 800 * 6)
+        view.textView.refreshVisibleBandIfNeeded()
+        view.textView.layoutIfNeeded()
+        let band = try XCTUnwrap(view.textView.renderedBand)
+        XCTAssertTrue(band.contains(CGRect(x: 0, y: 800 * 6, width: 390, height: 800).intersection(view.textView.bounds)))
+        _ = window
+    }
+
     func testTheBandRefreshesAfterAQuarterScreen() throws {
         let (view, scrollView, window) = scrolled()
         let before = try XCTUnwrap(view.textView.renderedBand)
