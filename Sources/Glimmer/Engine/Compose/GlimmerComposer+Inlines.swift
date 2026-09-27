@@ -1,11 +1,15 @@
 import UIKit
 
 extension GlimmerComposer {
-    func appendInlines(_ inlines: [GlimmerInline], attributes: [NSAttributedString.Key: Any], to output: NSMutableAttributedString) {
+    /// `reuse` offers back a re-composed block's inline images, so a streaming paragraph keeps its image.
+    func appendInlines(
+        _ inlines: [GlimmerInline], attributes: [NSAttributedString.Key: Any], reuse: GlimmerAttachmentReuse? = nil,
+        to output: NSMutableAttributedString
+    ) {
         for inline in inlines {
             switch inline {
             case .text(let text):
-                appendText(text, attributes: attributes, to: output)
+                appendText(text, attributes: attributes, reuse: reuse, to: output)
             case .code(let code):
                 var codeAttributes = attributes
                 let size = (attributes[.font] as? UIFont ?? theme.bodyFont).pointSize
@@ -15,21 +19,21 @@ extension GlimmerComposer {
             case .emphasis(let children):
                 var emphasized = adding(.traitItalic, to: attributes)
                 emphasized[.glimmerEmphasis] = true
-                appendInlines(children, attributes: emphasized, to: output)
+                appendInlines(children, attributes: emphasized, reuse: reuse, to: output)
             case .strong(let children):
                 var strong = adding(.traitBold, to: attributes)
                 strong[.glimmerStrong] = true
-                appendInlines(children, attributes: strong, to: output)
+                appendInlines(children, attributes: strong, reuse: reuse, to: output)
             case .strikethrough(let children):
                 var struck = attributes
                 struck[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
-                appendInlines(children, attributes: struck, to: output)
+                appendInlines(children, attributes: struck, reuse: reuse, to: output)
             case .link(let destination, _, let children):
                 var linked = attributes
                 if let url = URL(string: destination) { linked[.link] = url }
-                appendInlines(children, attributes: linked, to: output)
+                appendInlines(children, attributes: linked, reuse: reuse, to: output)
             case .image(let source, _, let alt):
-                appendInlineImage(source: source, alt: alt, markdown: "![\(alt)](\(source))", attributes: attributes, to: output)
+                appendInlineImage(source: source, alt: alt, markdown: "![\(alt)](\(source))", attributes: attributes, reuse: reuse, to: output)
             case .softBreak:
                 output.append(NSAttributedString(string: " ", attributes: attributes))
             case .lineBreak:
@@ -53,7 +57,7 @@ extension GlimmerComposer {
     /// the alt text, dimmed, as before.
     func appendInlineImage(
         source: String, alt: String, markdown: String, spoken: String? = nil, attributes: [NSAttributedString.Key: Any],
-        to output: NSMutableAttributedString
+        reuse: GlimmerAttachmentReuse? = nil, to output: NSMutableAttributedString
     ) {
         guard let url = URL(string: source) else {
             var faded = attributes
@@ -63,7 +67,10 @@ extension GlimmerComposer {
             return
         }
         var image = attributes
-        image[.attachment] = GlimmerInlineImageAttachment(source: url, alt: alt, theme: theme, loader: imageLoader)
+        let attachment = reuse?.inlineImage(source: url, alt: alt)
+            ?? GlimmerInlineImageAttachment(source: url, alt: alt, theme: theme, loader: imageLoader)
+        reuse?.record(inlineImage: attachment)
+        image[.attachment] = attachment
         image[.glimmerSource] = markdown
         output.append(NSAttributedString(string: "\u{FFFC}", attributes: image))
         let label = spoken ?? alt
@@ -76,7 +83,10 @@ extension GlimmerComposer {
     }
 
     /// Appends plain text, turning extension tokens into chips, text or inline images.
-    func appendText(_ text: String, attributes: [NSAttributedString.Key: Any], to output: NSMutableAttributedString) {
+    func appendText(
+        _ text: String, attributes: [NSAttributedString.Key: Any], reuse: GlimmerAttachmentReuse? = nil,
+        to output: NSMutableAttributedString
+    ) {
         let inLink = attributes[.link] != nil
         let tokens = extensions.filter { !inLink || $0.appliesInsideLinks }.flatMap { glimmerExtension in
             glimmerExtension.scan(text)
@@ -89,7 +99,7 @@ extension GlimmerComposer {
             if cursor < match.token.range.lowerBound {
                 output.append(NSAttributedString(string: String(text[cursor..<match.token.range.lowerBound]), attributes: attributes))
             }
-            appendToken(match.token, glimmerExtension: match.glimmerExtension, attributes: attributes, to: output)
+            appendToken(match.token, glimmerExtension: match.glimmerExtension, attributes: attributes, reuse: reuse, to: output)
             cursor = match.token.range.upperBound
         }
         if cursor < text.endIndex {
@@ -99,7 +109,7 @@ extension GlimmerComposer {
 
     private func appendToken(
         _ token: GlimmerInlineToken, glimmerExtension: any GlimmerExtension, attributes: [NSAttributedString.Key: Any],
-        to output: NSMutableAttributedString
+        reuse: GlimmerAttachmentReuse?, to output: NSMutableAttributedString
     ) {
         switch token.presentation {
         case .chip:
@@ -121,7 +131,7 @@ extension GlimmerComposer {
             var run = attributes
             run[.glimmerToken] = GlimmerTokenBox(token)
             appendInlineImage(source: url.absoluteString, alt: token.displayText, markdown: token.source,
-                              spoken: token.accessibilityLabel, attributes: run, to: output)
+                              spoken: token.accessibilityLabel, attributes: run, reuse: reuse, to: output)
         }
     }
 

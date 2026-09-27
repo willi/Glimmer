@@ -85,4 +85,11 @@ final class GlimmerMentionsTests: XCTestCase {
             every: 1
         )
     }
+
+    func testAStyledMentionCopiesInsideItsStyle() {
+        for markdown in ["**Thanks @ada!**", "*cc @ada*", "Hi [@grace-hopper](https://example.com) and @ada"] {
+            let text = composed(markdown)
+            XCTAssertEqual(GlimmerMarkdownSerializer.markdown(from: text, range: NSRange(location: 0, length: text.length)), markdown)
+        }
+    }
 }

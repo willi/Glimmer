@@ -2,6 +2,17 @@ import UIKit
 import XCTest
 @testable import Glimmer
 
+/// Counts loads, so a test can tell a kept image from one loaded again.
+private final class CountingInlineLoader: GlimmerImageLoader, @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var calls: Int { lock.withLock { count } }
+    func loadImage(from url: URL) async throws -> UIImage {
+        lock.withLock { count += 1 }
+        return UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { _ in }
+    }
+}
+
 private struct InlineStubLoader: GlimmerImageLoader {
     let result: Result<UIImage, URLError>
     func loadImage(from url: URL) async throws -> UIImage { try result.get() }
@@ -85,5 +96,28 @@ final class GlimmerInlineImageTests: XCTestCase {
 
     func testInlineImagesStreamWithoutMovingShownText() {
         assertStreamingKeepsShownTextInPlace("Status ![build](https://example.com/b.png) and ![cov](https://example.com/c.png) badges, then more text.")
+    }
+
+    func testAStreamingParagraphKeepsItsImage() throws {
+        let loader = CountingInlineLoader()
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: loader, reveal: .none))
+        let window = hostInWindow(view, width: 390, height: 800)
+        let markdown = "Badge ![ci](https://example.com/keep.png) then words keep arriving, slowly, here."
+        var seen = Set<ObjectIdentifier>()
+        var end = markdown.startIndex
+        while end < markdown.endIndex {
+            end = markdown.index(end, offsetBy: 3, limitedBy: markdown.endIndex) ?? markdown.endIndex
+            view.update(markdown: String(markdown[..<end]), isStreaming: true, revealID: "keep")
+            let deadline = Date().addingTimeInterval(5)
+            while view.pendingDocument != nil, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.002)) }
+            view.layoutIfNeeded()
+            let text = view.textView.textStorage
+            text.enumerateAttribute(.attachment, in: NSRange(location: 0, length: text.length)) { value, _, _ in
+                if let image = value as? GlimmerInlineImageAttachment { seen.insert(ObjectIdentifier(image)) }
+            }
+        }
+        XCTAssertEqual(seen.count, 1, "one attachment for the image while its paragraph streams")
+        XCTAssertEqual(loader.calls, 1, "loaded once")
+        _ = window
     }
 }

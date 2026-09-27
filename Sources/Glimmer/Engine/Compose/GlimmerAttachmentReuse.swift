@@ -15,15 +15,31 @@ struct GlimmerEmbedUpdate {
 }
 
 /// The attachments of a block being re-composed, offered back to the composer in order, so a growing code block or
-/// table keeps its attachment and with it its view. Also records every attachment the composer emits, which becomes
-/// the next re-compose's candidates.
+/// table keeps its attachment and with it its view, and an image inside a growing paragraph keeps its image instead
+/// of loading it again. Also records every attachment the composer emits, which becomes the next re-compose's
+/// candidates.
 final class GlimmerAttachmentReuse {
     private var candidates: [GlimmerEmbeddedAttachment]
+    private var inlineImageCandidates: [GlimmerInlineImageAttachment]
     private(set) var updates: [GlimmerEmbedUpdate] = []
     private(set) var emitted: [GlimmerEmbeddedAttachment] = []
+    private(set) var emittedInlineImages: [GlimmerInlineImageAttachment] = []
 
-    init(_ candidates: [GlimmerEmbeddedAttachment] = []) {
+    init(_ candidates: [GlimmerEmbeddedAttachment] = [], inlineImages: [GlimmerInlineImageAttachment] = []) {
         self.candidates = candidates
+        inlineImageCandidates = inlineImages
+    }
+
+    /// The block's earlier attachment for the same image, in order, or nil.
+    func inlineImage(source: URL, alt: String) -> GlimmerInlineImageAttachment? {
+        guard let index = inlineImageCandidates.firstIndex(where: { $0.source == source && $0.alt == alt }) else { return nil }
+        let attachment = inlineImageCandidates[index]
+        inlineImageCandidates.removeSubrange(...index)
+        return attachment
+    }
+
+    func record(inlineImage attachment: GlimmerInlineImageAttachment) {
+        emittedInlineImages.append(attachment)
     }
 
     /// The next candidate if `embed` continues it; nil if a new attachment is needed.

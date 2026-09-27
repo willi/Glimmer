@@ -27,6 +27,8 @@ final class GlimmerStreamingDocument: @unchecked Sendable {
     private var fragments: [NSAttributedString] = []
     /// Each block's attachments, with the embeds they were composed with and their offsets in the block's fragment.
     private var blockAttachments: [[GlimmerEmbeddedAttachment]] = []
+    /// Each block's inline images, offered back when it re-composes so an image keeps its view and its load.
+    private var blockInlineImages: [[GlimmerInlineImageAttachment]] = []
 
     /// Embeds that reveal in units: document offset → each unit's text length.
     var embedUnits: [Int: [Int]] {
@@ -64,6 +66,8 @@ final class GlimmerStreamingDocument: @unchecked Sendable {
     /// `text` into the new one, or nil when nothing changed.
     func update(markdown: String, isStreaming: Bool) -> GlimmerDocumentEdit? {
         let isAppend = Self.utf8(of: markdown, startsWith: rawMarkdown, count: rawMarkdown.utf8.count)
+        // A new answer (not an append) numbers its footnotes from one.
+        if !isAppend { composer.footnotes = GlimmerFootnoteNumbers() }
         noteReferenceDefinitions(in: markdown, isAppend: isAppend)
         if !isAppend || !isStreaming { fenceScan = GlimmerTailHealer.FenceScan() }
         rawMarkdown = markdown
@@ -90,15 +94,18 @@ final class GlimmerStreamingDocument: @unchecked Sendable {
         var newFragments = Array(fragments[..<firstChanged])
         var newOffsets = Array(blockOffsets[..<firstChanged])
         var newAttachments = Array(blockAttachments[..<min(firstChanged, blockAttachments.count)])
+        var newInlineImages = Array(blockInlineImages[..<min(firstChanged, blockInlineImages.count)])
         var embedUpdates: [GlimmerEmbedUpdate] = []
         var running = prefixLength
         for index in firstChanged..<parsed.blocks.count {
             // Only this block's own previous attachments are offered back, so an unchanged block never loses one.
-            let reuse = GlimmerAttachmentReuse(index < blockAttachments.count ? blockAttachments[index] : [])
+            let reuse = GlimmerAttachmentReuse(index < blockAttachments.count ? blockAttachments[index] : [],
+                                               inlineImages: index < blockInlineImages.count ? blockInlineImages[index] : [])
             let fragment = composer.composeBlock(parsed.blocks[index], isFirst: index == 0, reusing: reuse)
             newFragments.append(fragment)
             newOffsets.append(running)
             newAttachments.append(reuse.emitted)
+            newInlineImages.append(reuse.emittedInlineImages)
             embedUpdates += reuse.updates
             running += fragment.length
         }
@@ -129,6 +136,7 @@ final class GlimmerStreamingDocument: @unchecked Sendable {
         fragments = newFragments
         blockOffsets = newOffsets
         blockAttachments = newAttachments
+        blockInlineImages = newInlineImages
         return edit
     }
 

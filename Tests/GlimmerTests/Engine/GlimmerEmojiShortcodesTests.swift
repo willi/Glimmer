@@ -66,4 +66,11 @@ final class GlimmerEmojiShortcodesTests: XCTestCase {
             every: 1
         )
     }
+
+    func testStyledAndRepeatedShortcodesCopyAsWritten() {
+        for markdown in ["**:rocket: Launch**", "[:rocket: docs](https://x.y)", ":tada::tada:", "a :+1::+1: b", "*:octocat: here*"] {
+            let text = composed(markdown)
+            XCTAssertEqual(GlimmerMarkdownSerializer.markdown(from: text, range: NSRange(location: 0, length: text.length)), markdown)
+        }
+    }
 }

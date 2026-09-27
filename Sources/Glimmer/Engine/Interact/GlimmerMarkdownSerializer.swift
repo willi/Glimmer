@@ -133,41 +133,38 @@ enum GlimmerMarkdownSerializer {
         if selected.length > 0 {
             text.enumerateAttributes(in: selected, options: []) { attributes, run, _ in
                 if let source = attributes[.glimmerListMarker] as? String {
-                    if includesStart { marker = source }
+                    // VoiceOver reads a footnote's number, not its markdown.
+                    if includesStart, forAccessibility, source.hasPrefix("[^") {
+                        // The marker spans runs (its number, then its tab): read the whole of it.
+                        var whole = NSRange()
+                        _ = text.attribute(.glimmerListMarker, at: run.location, longestEffectiveRange: &whole, in: paragraph.content)
+                        marker = string.substring(with: whole).replacingOccurrences(of: "\t", with: "") + " "
+                    } else if includesStart {
+                        marker = source
+                    }
                 } else if let attachment = attributes[.attachment] as? GlimmerBlockAttachment {
                     flush()
                     body += asMarkdown ? attributes[.glimmerSource] as? String ?? "" : plainText(of: attachment.embed)
                 } else if let image = attributes[.attachment] as? GlimmerInlineImageAttachment {
-                    // Markdown writes the image (inside its link, if any); plain text its alt text. VoiceOver reads the
-                    // spoken-only alt text that follows it instead.
-                    flush()
+                    // Markdown writes the image inside its styles and link; plain text its alt text. VoiceOver reads
+                    // the spoken-only alt text that follows it instead.
                     let source = attributes[.glimmerSource] as? String ?? ""
-                    if asMarkdown {
-                        body += (attributes[.link] as? URL).map { "[" + source + "](" + destination($0) + ")" } ?? source
-                    } else if !forAccessibility {
-                        body += image.alt
-                    }
+                    segments.append(Segment(text: asMarkdown ? source : forAccessibility ? "" : image.alt,
+                                            style: Style(attributes), isVerbatim: true))
                 } else if attributes[.glimmerSpokenOnly] as? Bool == true {
                     // Text only VoiceOver reads: part of the accessibility label, never of a copy.
                     if forAccessibility { segments.append(Segment(text: string.substring(with: run), style: Style(attributes))) }
                 } else if let chip = attributes[.attachment] as? GlimmerInlineAttachment {
-                    flush()
-                    body += asMarkdown ? chip.token.source
-                        : forAccessibility ? chip.token.accessibilityLabel ?? chip.token.displayText : chip.token.displayText
+                    let token = chip.token
+                    segments.append(Segment(
+                        text: asMarkdown ? token.source : forAccessibility ? token.accessibilityLabel ?? token.displayText : token.displayText,
+                        style: Style(attributes), isVerbatim: true
+                    ))
                 } else if let source = attributes[.glimmerSource] as? String {
-                    // An inline image's alt text: written once, however its runs split, inside its link if it has one.
-                    var whole = NSRange()
-                    _ = text.attribute(.glimmerSource, at: run.location, longestEffectiveRange: &whole, in: selected)
-                    flush()
-                    if whole.location == run.location {
-                        if !asMarkdown {
-                            body += string.substring(with: whole)
-                        } else if let url = attributes[.link] as? URL {
-                            body += "[" + source + "](" + destination(url) + ")"
-                        } else {
-                            body += source
-                        }
-                    }
+                    // A token shown as text, a footnote marker, an image's fallback alt text: its source, verbatim,
+                    // inside the run's styles and link (`**Thanks @ada!**`), once per run (`:tada::tada:`).
+                    segments.append(Segment(text: asMarkdown ? source : string.substring(with: run),
+                                            style: Style(attributes), isVerbatim: true))
                 } else {
                     segments.append(Segment(text: string.substring(with: run), style: Style(attributes)))
                 }
@@ -207,6 +204,8 @@ enum GlimmerMarkdownSerializer {
     private struct Segment {
         var text: String
         let style: Style
+        /// Markdown written as is (a token's source), not escaped as text.
+        var isVerbatim = false
     }
 
     private struct Style: Equatable {
@@ -251,13 +250,15 @@ enum GlimmerMarkdownSerializer {
     /// (`**a *b* c**`). A delimiter never has whitespace on its inner side (`** bold**` would not parse): edge
     /// whitespace moves outside it.
     private static func inlineMarkdown(_ segments: [Segment]) -> String {
-        // One piece per style: two code spans side by side would read as one span.
+        // One piece per style: two code spans side by side would read as one span. Text is escaped before merging, so
+        // a verbatim source joins its neighbours unescaped; code stays raw until its span is written.
         var merged: [Segment] = []
         for segment in segments {
+            let text = segment.style.isCode || segment.isVerbatim ? segment.text : escaped(segment.text)
             if let last = merged.last, last.style == segment.style {
-                merged[merged.count - 1].text += segment.text
+                merged[merged.count - 1].text += text
             } else {
-                merged.append(segment)
+                merged.append(Segment(text: text, style: segment.style))
             }
         }
         var output = ""
@@ -271,7 +272,7 @@ enum GlimmerMarkdownSerializer {
         }
         for segment in merged {
             if let stale = open.firstIndex(where: { !segment.style.marks.contains($0) }) { close(from: stale) }
-            var piece = segment.style.isCode ? codeSpan(segment.text) : escaped(segment.text)
+            var piece = segment.style.isCode ? codeSpan(segment.text) : segment.text
             let opening = segment.style.marks.filter { !open.contains($0) }
             if !opening.isEmpty {
                 let leading = String(piece.prefix(while: \.isWhitespace))

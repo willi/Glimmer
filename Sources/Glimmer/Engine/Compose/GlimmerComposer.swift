@@ -191,7 +191,7 @@ struct GlimmerComposer {
         let start = output.length
         let attributes = baseAttributes(font: font, context: context)
         if let marker { output.append(marker) }
-        appendInlines(inlines, attributes: attributes, to: output)
+        appendInlines(inlines, attributes: attributes, reuse: context.reuse, to: output)
         output.append(NSAttributedString(string: "\n", attributes: attributes))
         let range = NSRange(location: start, length: output.length - start)
         let style = paragraphStyle(context: context, marker: marker)

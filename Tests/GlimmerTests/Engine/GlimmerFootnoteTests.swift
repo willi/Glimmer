@@ -128,4 +128,21 @@ final class GlimmerFootnoteTests: XCTestCase {
         [^late]: This note arrived last.
         """)
     }
+
+    func testTheNextAnswerInTheSameViewNumbersFromOne() {
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil, reveal: .none))
+        let window = hostInWindow(view, width: 390, height: 800)
+        view.update(markdown: "A[^x] b[^y].", isStreaming: true, revealID: "first")
+        waitForDocument(view)
+        view.update(markdown: "New answer[^1] here.", isStreaming: true, revealID: "second")
+        waitForDocument(view)
+        XCTAssertEqual(markers(in: view.textView.textStorage).map(\.number), ["1"])
+        _ = window
+    }
+
+    func testVoiceOverReadsANotesNumber() {
+        let text = composed("See[^1].\n\n[^1]: Yes.")
+        let spoken = GlimmerMarkdownSerializer.plainText(from: text, range: NSRange(location: 0, length: text.length), forAccessibility: true)
+        XCTAssertEqual(spoken, "See1.\n1. Yes.")
+    }
 }
