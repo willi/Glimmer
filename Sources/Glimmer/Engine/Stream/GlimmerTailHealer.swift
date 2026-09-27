@@ -207,8 +207,8 @@ enum GlimmerTailHealer {
         return String(tail[..<match.range.lowerBound])
     }
 
-    /// A lone backslash at the end may escape what comes next (`\\@`), and would vanish when that arrives. An even run
-    /// (`\\\\`) is an escaped backslash and stays.
+    /// A lone backslash at the end may escape what comes next (`\@`), and would vanish when that arrives. An even run
+    /// (`\\`) is an escaped backslash and stays.
     private static func holdBackTrailingBackslash(_ tail: String) -> String {
         let run = tail.reversed().prefix { $0 == "\\" }.count
         return run % 2 == 1 ? String(tail.dropLast()) : tail

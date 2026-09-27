@@ -281,6 +281,12 @@ final class GlimmerComposerTests: XCTestCase {
         XCTAssertEqual(GlimmerMarkdownSerializer.plainText(from: text, range: all), "one\ntwo\nthree\nfour <kbd>x</kbd>")
     }
 
+    /// As in a browser, the spaces around a break tag don't start or end a line.
+    func testSpacesAroundABreakTagCollapse() {
+        XCTAssertEqual(compose("Use HTML <br> tag\n<br>to create <br/> lines").string,
+                       "Use HTML\u{2028}tag\u{2028}to create\u{2028}lines")
+    }
+
     func testABreakTagBreaksATableCell() throws {
         let text = compose("| Items |\n|---|\n| • one<br>• two |")
         let attachment = try XCTUnwrap(text.attribute(.attachment, at: 0, effectiveRange: nil) as? GlimmerBlockAttachment)

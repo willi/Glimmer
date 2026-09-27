@@ -6,10 +6,17 @@ extension GlimmerComposer {
         _ inlines: [GlimmerInline], attributes: [NSAttributedString.Key: Any], reuse: GlimmerAttachmentReuse? = nil,
         to output: NSMutableAttributedString
     ) {
+        // As in a browser, spaces around a `<br>` don't start or end a line.
+        var afterBreakTag = false
         for inline in inlines {
+            let isBreakTag = if case .html(let html) = inline { Self.isBreakTag(html) } else { false }
+            defer { afterBreakTag = isBreakTag || (afterBreakTag && inline == .softBreak) }
             switch inline {
             case .text(let text):
-                appendText(text, attributes: attributes, reuse: reuse, to: output)
+                let shown = afterBreakTag ? String(text.drop { $0 == " " || $0 == "\t" }) : text
+                if !shown.isEmpty { appendText(shown, attributes: attributes, reuse: reuse, to: output) }
+            case .softBreak where afterBreakTag:
+                break
             case .code(let code):
                 var codeAttributes = attributes
                 let size = (attributes[.font] as? UIFont ?? theme.bodyFont).pointSize
@@ -43,8 +50,11 @@ extension GlimmerComposer {
                 output.append(NSAttributedString(string: " ", attributes: attributes))
             case .lineBreak:
                 output.append(NSAttributedString(string: "\u{2028}", attributes: attributes))
-            case .html(let html) where html.wholeMatch(of: #/<br\s*/?>/#.ignoresCase()) != nil:
+            case .html(let html) where isBreakTag:
                 // The one tag with a plain meaning, and a common way to break a line in a table cell. Copies as itself.
+                while output.length > 0, (output.string as NSString).character(at: output.length - 1) == 0x20 {
+                    output.deleteCharacters(in: NSRange(location: output.length - 1, length: 1))
+                }
                 var lineBreak = attributes
                 lineBreak[.glimmerSource] = html
                 output.append(NSAttributedString(string: "\u{2028}", attributes: lineBreak))
@@ -90,6 +100,10 @@ extension GlimmerComposer {
         spokenAttributes[.foregroundColor] = UIColor.clear
         spokenAttributes[.glimmerSpokenOnly] = true
         output.append(NSAttributedString(string: label, attributes: spokenAttributes))
+    }
+
+    static func isBreakTag(_ html: String) -> Bool {
+        html.wholeMatch(of: #/<br\s*/?>/#.ignoresCase()) != nil
     }
 
     /// Appends plain text, turning extension tokens into chips, text or inline images.
