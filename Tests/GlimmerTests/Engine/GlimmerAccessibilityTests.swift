@@ -14,6 +14,33 @@ final class GlimmerAccessibilityTests: XCTestCase {
         return (view, clock, hostInWindow(view, width: 320, height: 800))
     }
 
+    /// UIKit's accessibility reads a text view's `attributedText` on a background queue (building paragraph elements
+    /// for a long text). The getter must not be a main-actor override, or Swift's isolation check traps.
+    func testTheTextCanBeReadOffTheMainThread() {
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil, reveal: .none))
+        let window = hostInWindow(view, width: 320, height: 800)
+        view.update(markdown: "A [link](https://example.com) in a paragraph.")
+        nonisolated(unsafe) let textView: NSObject = view.textView
+        nonisolated(unsafe) var text: NSAttributedString?
+        let read = expectation(description: "read off the main thread")
+        // `async`, not `sync`: a sync block runs on the calling (main) thread.
+        DispatchQueue.global().async {
+            text = textView.value(forKey: "attributedText") as? NSAttributedString
+            read.fulfill()
+        }
+        wait(for: [read], timeout: 5)
+        XCTAssertEqual(text?.string, "A link in a paragraph.")
+        _ = window
+    }
+
+    func testReplacingTheTextStillForgetsWhatWasMeasured() {
+        let textView = GlimmerTextView()
+        textView.frame = CGRect(x: 0, y: 0, width: 320, height: 800)
+        let version = textView.textVersion
+        textView.replaceText(with: NSAttributedString(string: "New text"))
+        XCTAssertNotEqual(textView.textVersion, version)
+    }
+
     func testRevealingViewIsOneElementWithTheRevealedText() async {
         let (view, clock, window) = revealingView()
         view.update(markdown: answer, isStreaming: true)

@@ -101,11 +101,12 @@ final class GlimmerTextView: UITextView {
         gestureRecognizer === panGestureRecognizer ? false : super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
 
-    override var attributedText: NSAttributedString! {
-        didSet {
-            textVersion &+= 1
-            forgetDrawnSurfaces()
-        }
+    /// Sets the whole text. Not an `attributedText` override: UIKit's accessibility reads that getter on a background
+    /// queue, and a main-actor override traps there.
+    func setText(_ text: NSAttributedString) {
+        attributedText = text
+        textVersion &+= 1
+        forgetDrawnSurfaces()
     }
 
     func apply(theme: GlimmerTheme) {
@@ -170,7 +171,7 @@ final class GlimmerTextView: UITextView {
     /// still as tall as its previous answer.
     func replaceText(with text: NSAttributedString) {
         frame.size.height = 1
-        attributedText = text
+        setText(text)
     }
 
     func apply(_ edit: GlimmerDocumentEdit) {

@@ -60,7 +60,7 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
         let padding = theme.embedPadding
         textView.backgroundColor = .clear
         textView.textContainerInset = UIEdgeInsets(top: padding, left: padding, bottom: padding, right: padding)
-        textView.attributedText = self.highlighted
+        textView.setText(self.highlighted)
         textView.copiesMarkdown = false
         let container = NSTextContainer(size: CGSize(width: CGFloat.greatestFiniteMagnitude, height: 0))
         container.lineFragmentPadding = 0
