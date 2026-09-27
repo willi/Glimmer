@@ -262,6 +262,7 @@ private struct ExportDemo: View {
     @State private var exportFormat = 0
     /// Holds the answer the export reads; `GlimmerText` keeps its own view private.
     @State private var exporter: GlimmerView?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         VStack(spacing: 0) {
@@ -272,7 +273,9 @@ private struct ExportDemo: View {
             .pickerStyle(.segmented)
             .padding()
 
-            HStack(spacing: 0) {
+            // Side by side as in 1.x; stacked at accessibility text sizes, where two columns crush their words.
+            let columns = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 0)) : AnyLayout(HStackLayout(spacing: 0))
+            columns {
                 VStack(alignment: .leading) {
                     Text("Input")
                         .font(.headline)

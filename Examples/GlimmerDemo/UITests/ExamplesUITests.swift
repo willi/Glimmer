@@ -123,14 +123,15 @@ final class ExamplesUITests: XCTestCase {
     }
 
     /// Screenshots of every example, section by section, top to bottom, for review. Opt-in: run with
-    /// `TEST_RUNNER_EXAMPLES_TOUR=light` (every page in light mode) or `=all` (plus the first pages in dark mode and at
-    /// an accessibility text size). The screenshots are attachments of the result bundle.
+    /// `TEST_RUNNER_EXAMPLES_TOUR=light` (every page in light mode), `=appearances` (the first pages in dark mode and at
+    /// an accessibility text size) or `=all` (both). The screenshots are attachments of the result bundle.
     @MainActor
     func testScreenshotTour() throws {
         let tour = ProcessInfo.processInfo.environment["EXAMPLES_TOUR"]
-        try XCTSkipIf(tour == nil, "set TEST_RUNNER_EXAMPLES_TOUR to light or all")
-        var appearances: [(name: String, arguments: [String], pages: Int)] = [("light", [], 15)]
-        if tour == "all" { appearances += [("dark", ["--dark"], 2), ("large", ["--large-text"], 2)] }
+        try XCTSkipIf(tour == nil, "set TEST_RUNNER_EXAMPLES_TOUR to light, appearances or all")
+        var appearances: [(name: String, arguments: [String], pages: Int)] = []
+        if tour != "appearances" { appearances.append(("light", [], 15)) }
+        if tour != "light" { appearances += [("dark", ["--dark"], 2), ("large", ["--large-text"], 2)] }
         // `TEST_RUNNER_EXAMPLES_TOUR_ONLY=gfm,edge-cases` limits the tour to those examples.
         let only = ProcessInfo.processInfo.environment["EXAMPLES_TOUR_ONLY"]?.split(separator: ",").map(String.init)
         for appearance in appearances {

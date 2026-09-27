@@ -101,7 +101,8 @@ let view = GlimmerView(configuration: configuration)
   `GlimmerBasicHighlighter`, covers keywords, strings, comments and numbers in common languages.
 - **`imageLoader`** (`GlimmerImageLoader`): loads images. A standalone image gets a reserved box, and an image inside
   a paragraph gets a square as tall as the line. `nil` shows a standalone image's alt text in its box. A load never
-  shifts the text, because the space is reserved before the image arrives.
+  shifts the text, because the space is reserved before the image arrives. Set `onImageTap` (on `GlimmerView` and
+  `GlimmerText`) to make images tappable: it is called with the image's URL and alt text.
 - **`reveal`**: `.smooth(GlimmerRevealOptions())`, with fade duration, pacing and phrase-length options, or `.none`.
   When Reduce Motion is on, text always appears at once.
 - **`dataDetectors`**: phone numbers, addresses and so on. Off by default.
@@ -131,9 +132,9 @@ GlimmerView(configuration: configuration).update(markdown: "As shown [1].")
 ```
 
 A token can also show as text or as an image: set its `presentation` to `.text(tappable:)` or `.image(url)`. Tappable
-text uses the theme's `mentionColor`, and `onTokenTap` (on `GlimmerView` and `GlimmerText`) reports the token. An
-extension can skip link text (`appliesInsideLinks`). It can also hold back a token still being typed at the end of a
-stream (`streamingHoldBack(in:)`), so `:rock` never turns into 🚀 after it was shown.
+text uses the theme's `mentionColor`, and `onTokenTap` (on `GlimmerView` and `GlimmerText`) reports the token;
+VoiceOver reaches it as a link. An extension can skip link text (`appliesInsideLinks`). It can also hold back a token
+still being typed at the end of a stream (`streamingHoldBack(in:)`), so `:rock` never turns into 🚀 after it was shown.
 
 Two extensions are built in, and both are opt-in:
 
@@ -154,7 +155,7 @@ keeps its own selection inside. While an answer reveals, the selection stops at 
 
 Copy writes plain text and markdown (`net.daringfireball.markdown`), so a paste into a markdown-aware app keeps
 lists, code, emphasis and links. `markdownSource(for:)` gives the markdown for any range, or, with no range, the whole
-answer as given. Hosts can add their own edit-menu and link-menu items:
+answer as given; `plainText(for:)` gives the plain text copy writes. Hosts can add their own edit-menu and link-menu items:
 
 ```swift
 view.editMenuActions = { selection in
