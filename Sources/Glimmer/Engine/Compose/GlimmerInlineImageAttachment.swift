@@ -11,9 +11,13 @@ final class GlimmerInlineImageAttachment: NSTextAttachment {
     /// Built once and reused when TextKit asks for a fresh provider.
     private var cachedView: GlimmerInlineImageView?
 
-    init(source: URL, alt: String, theme: GlimmerTheme, loader: (any GlimmerImageLoader)?) {
+    /// Inside a link: the link takes the tap.
+    let isLinked: Bool
+
+    init(source: URL, alt: String, isLinked: Bool = false, theme: GlimmerTheme, loader: (any GlimmerImageLoader)?) {
         self.source = source
         self.alt = alt
+        self.isLinked = isLinked
         self.theme = theme
         self.loader = loader
         super.init(data: nil, ofType: nil)
@@ -23,7 +27,7 @@ final class GlimmerInlineImageAttachment: NSTextAttachment {
 
     /// A new attachment for the same image, without a view: for a cached text shown by another view.
     func freshCopy() -> GlimmerInlineImageAttachment {
-        GlimmerInlineImageAttachment(source: source, alt: alt, theme: theme, loader: loader)
+        GlimmerInlineImageAttachment(source: source, alt: alt, isLinked: isLinked, theme: theme, loader: loader)
     }
 
     @MainActor
@@ -32,7 +36,7 @@ final class GlimmerInlineImageAttachment: NSTextAttachment {
     @MainActor
     func imageView() -> UIImageView {
         if let cachedView { return cachedView }
-        let view = GlimmerInlineImageView(source: source, alt: alt, theme: theme, loader: loader)
+        let view = GlimmerInlineImageView(source: source, alt: alt, isLinked: isLinked, theme: theme, loader: loader)
         cachedView = view
         return view
     }

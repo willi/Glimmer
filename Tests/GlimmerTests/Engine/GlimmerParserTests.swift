@@ -145,6 +145,11 @@ final class GlimmerParserTests: XCTestCase {
         XCTAssertEqual(checkboxes("> - [x] Done\n> - [ ] Open\n>   > - [x] Nested"), [true, false, true])
     }
 
+    /// GitHub reads `[X]` as done too.
+    func testAnUppercaseXIsADoneTask() {
+        XCTAssertEqual(checkboxes("- [X] Done\n> - [X] Quoted"), [true, true])
+    }
+
     /// Only the item's own brackets say whether it is done.
     func testATaskIsCheckedByItsOwnBrackets() {
         XCTAssertEqual(checkboxes("- [ ] Compare with [x] later\n- [x] Done"), [false, true])

@@ -31,8 +31,10 @@ final class GlimmerAttachmentReuse {
     }
 
     /// The block's earlier attachment for the same image, in order, or nil.
-    func inlineImage(source: URL, alt: String) -> GlimmerInlineImageAttachment? {
-        guard let index = inlineImageCandidates.firstIndex(where: { $0.source == source && $0.alt == alt }) else { return nil }
+    func inlineImage(source: URL, alt: String, isLinked: Bool) -> GlimmerInlineImageAttachment? {
+        guard let index = inlineImageCandidates.firstIndex(where: {
+            $0.source == source && $0.alt == alt && $0.isLinked == isLinked
+        }) else { return nil }
         let attachment = inlineImageCandidates[index]
         inlineImageCandidates.removeSubrange(...index)
         return attachment

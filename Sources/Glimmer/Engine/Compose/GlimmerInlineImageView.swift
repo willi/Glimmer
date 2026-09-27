@@ -5,12 +5,14 @@ import UIKit
 final class GlimmerInlineImageView: UIImageView {
     private let source: URL
     private let alt: String
+    private let isLinked: Bool
     private var loadTask: Task<Void, Never>?
     private lazy var tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(handleTap))
 
-    init(source: URL, alt: String, theme: GlimmerTheme, loader: (any GlimmerImageLoader)?) {
+    init(source: URL, alt: String, isLinked: Bool = false, theme: GlimmerTheme, loader: (any GlimmerImageLoader)?) {
         self.source = source
         self.alt = alt
+        self.isLinked = isLinked
         super.init(frame: .zero)
         contentMode = .scaleAspectFit
         clipsToBounds = true
@@ -31,8 +33,9 @@ final class GlimmerInlineImageView: UIImageView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// Whether a tap reaches the host: only while it sets `onImageTap`. Otherwise the tap falls through to the text.
-    var acceptsTaps: Bool { glimmerImageTapHandler != nil }
+    /// Whether a tap reaches the host: only while it sets `onImageTap`, and not inside a link, which takes the tap as
+    /// on GitHub. Otherwise the tap falls through to the text.
+    var acceptsTaps: Bool { !isLinked && glimmerImageTapHandler != nil }
 
     @objc func handleTap() {
         glimmerImageTapHandler?(source, alt)

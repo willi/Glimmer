@@ -69,6 +69,15 @@ final class GlimmerImageTapTests: XCTestCase {
         _ = window
     }
 
+    /// An image inside a link follows the link, as on GitHub: it takes no tap of its own.
+    func testALinkedImageLeavesTheTapToItsLink() throws {
+        let (view, window) = shown("See [![octocat](https://example.com/o.png)](https://example.com/page) here.") { _, _ in }
+        let image = try XCTUnwrap(findSubview(GlimmerInlineImageView.self, in: view))
+        XCTAssertFalse(image.acceptsTaps, "the link takes the tap")
+        XCTAssertFalse(image.isAccessibilityElement, "VoiceOver reaches the link, not a second button")
+        _ = window
+    }
+
     /// A token link is no web link: no menu, no preview of its internal URL.
     func testAMentionHasNoLinkMenu() {
         let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
