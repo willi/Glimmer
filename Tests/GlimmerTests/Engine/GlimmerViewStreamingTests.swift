@@ -186,4 +186,22 @@ final class GlimmerViewStreamingTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(200))
         XCTAssertFalse(fired)
     }
+
+    func testRestylingMidRevealKeepsRevealing() async throws {
+        let (view, clock, window) = streamingView()
+        view.update(markdown: answer, isStreaming: true)
+        await view.pendingDocument?.value
+        clock.advance(to: 0.5)
+        let revealed = try XCTUnwrap(view.engine).revealedLength
+        XCTAssertGreaterThan(revealed, 0)
+        // A configuration change (like a Dynamic Type change) composes the whole answer again.
+        var configuration = view.configuration
+        configuration.theme.paragraphSpacing += 2
+        view.configuration = configuration
+        let engine = try XCTUnwrap(view.engine, "still revealing")
+        XCTAssertGreaterThanOrEqual(engine.revealedLength, revealed, "no replay from the start")
+        XCTAssertEqual(view.textView.textStorage.string, GlimmerComposer(theme: configuration.theme)
+            .compose(GlimmerParser.parse(answer)).string)
+        _ = window
+    }
 }

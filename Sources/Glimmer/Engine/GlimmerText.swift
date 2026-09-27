@@ -9,19 +9,27 @@ public struct GlimmerText: UIViewRepresentable {
     public var revealID: String?
     public var configuration: GlimmerConfiguration
     public var onLinkTap: ((URL) -> Void)?
+    /// Items appended to the edit menu for a selection. See `GlimmerView.editMenuActions`.
+    public var editMenuActions: ((GlimmerSelection) -> [UIMenuElement])?
+    /// Items appended to a link's menu. See `GlimmerView.linkMenuActions`.
+    public var linkMenuActions: ((URL) -> [UIMenuElement])?
 
     public init(
         _ markdown: String,
         isStreaming: Bool = false,
         revealID: String? = nil,
         configuration: GlimmerConfiguration = .default,
-        onLinkTap: ((URL) -> Void)? = nil
+        onLinkTap: ((URL) -> Void)? = nil,
+        editMenuActions: ((GlimmerSelection) -> [UIMenuElement])? = nil,
+        linkMenuActions: ((URL) -> [UIMenuElement])? = nil
     ) {
         self.markdown = markdown
         self.isStreaming = isStreaming
         self.revealID = revealID
         self.configuration = configuration
         self.onLinkTap = onLinkTap
+        self.editMenuActions = editMenuActions
+        self.linkMenuActions = linkMenuActions
     }
 
     public func makeUIView(context: Context) -> GlimmerView {
@@ -32,6 +40,8 @@ public struct GlimmerText: UIViewRepresentable {
 
     public func updateUIView(_ view: GlimmerView, context: Context) {
         view.onLinkTap = onLinkTap
+        view.editMenuActions = editMenuActions
+        view.linkMenuActions = linkMenuActions
         view.update(markdown: markdown, isStreaming: isStreaming, revealID: revealID)
     }
 

@@ -15,6 +15,9 @@ struct StreamingLabDemo: View {
     @State private var isStreaming = false
     @State private var runID = UUID()
     @State private var task: Task<Void, Never>?
+    /// While paused no chunk arrives; the answer stays streaming, so the reveal catches up and waits.
+    @State private var isPaused = false
+    @State private var isDark = false
 
     var body: some View {
         ScrollView {
@@ -23,18 +26,30 @@ struct StreamingLabDemo: View {
         }
         .navigationTitle("Streaming Lab")
         .safeAreaInset(edge: .bottom) {
-            HStack {
+            VStack(spacing: 12) {
                 Picker("Cadence", selection: $cadence) {
                     ForEach(Cadence.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
-                Button(isStreaming ? "Stop" : "Stream") { isStreaming ? stop() : start() }
-                    .buttonStyle(.borderedProminent)
-                    .accessibilityIdentifier("streamingLab.toggle")
+                HStack {
+                    Button(isPaused ? "Resume" : "Pause") { isPaused.toggle() }
+                        .buttonStyle(.bordered)
+                        .disabled(!isStreaming)
+                        .accessibilityIdentifier("streamingLab.pause")
+                    Spacer()
+                    Button(isStreaming ? "Stop" : "Stream") { isStreaming ? stop() : start() }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("streamingLab.toggle")
+                }
             }
             .padding()
             .background(.bar)
         }
+        .toolbar {
+            Toggle("Dark", isOn: $isDark)
+                .accessibilityIdentifier("streamingLab.dark")
+        }
+        .preferredColorScheme(isDark ? .dark : nil)
         .onAppear {
             if ProcessInfo.processInfo.arguments.contains("--streaming-lab") { start() }
         }
@@ -44,11 +59,13 @@ struct StreamingLabDemo: View {
         task?.cancel()
         runID = UUID()
         shown = ""
+        isPaused = false
         isStreaming = true
         let chunks = Self.chunks(of: Self.answer, cadence: cadence)
         task = Task { @MainActor in
             for (text, delay) in chunks {
                 try? await Task.sleep(for: delay)
+                while isPaused, !Task.isCancelled { try? await Task.sleep(for: .milliseconds(50)) }
                 guard !Task.isCancelled else { return }
                 shown += text
             }
@@ -58,6 +75,7 @@ struct StreamingLabDemo: View {
 
     private func stop() {
         task?.cancel()
+        isPaused = false
         isStreaming = false
     }
 
