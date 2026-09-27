@@ -15,10 +15,13 @@ extension NSAttributedString.Key {
     /// The markdown before a paragraph's content on its first line, before any list marker: quote markers and list
     /// indentation (`String`, on a whole paragraph). Used by copy.
     static let glimmerMarkdownPrefix = NSAttributedString.Key("glimmer.markdownPrefix")
-    /// `true` on a whole paragraph inside a tight list's item: copy joins such paragraphs without a blank line.
-    static let glimmerTightList = NSAttributedString.Key("glimmer.tightList")
     /// `true` on text inside `**…**`. The font is bold too, but so are headings; copy reads this mark.
     static let glimmerStrong = NSAttributedString.Key("glimmer.strong")
     /// `true` on text inside `*…*`.
     static let glimmerEmphasis = NSAttributedString.Key("glimmer.emphasis")
+    /// Each enclosing list's tightness, outermost first (`[Bool]`, on a whole paragraph inside a list). Copy decides
+    /// the gap between two paragraphs by the list that holds both.
+    static let glimmerListTightness = NSAttributedString.Key("glimmer.listTightness")
+    /// `true` on the marker paragraph of a list's first item.
+    static let glimmerListOpens = NSAttributedString.Key("glimmer.listOpens")
 }

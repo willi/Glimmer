@@ -19,7 +19,12 @@ enum GlimmerMarkdownSerializer {
         /// The paragraph without its terminating newline.
         let content: NSRange
         let prefix: String
-        let isTight: Bool
+        /// Each enclosing list's tightness, outermost first.
+        let tightness: [Bool]
+        /// Starts with a list marker.
+        let hasMarker: Bool
+        /// The marker paragraph of a list's first item.
+        let opensList: Bool
         /// Quote levels that continue past this paragraph, when it closes a quote.
         let quoteContinues: Int?
         let headingLevel: Int?
@@ -34,7 +39,9 @@ enum GlimmerMarkdownSerializer {
             self.content = content
             let attributes = text.attributes(at: whole.location, effectiveRange: nil)
             prefix = attributes[.glimmerMarkdownPrefix] as? String ?? ""
-            isTight = attributes[.glimmerTightList] as? Bool ?? false
+            tightness = attributes[.glimmerListTightness] as? [Bool] ?? []
+            hasMarker = content.length > 0 && text.attribute(.glimmerListMarker, at: content.location, effectiveRange: nil) != nil
+            opensList = attributes[.glimmerListOpens] as? Bool ?? false
             quoteContinues = attributes[.glimmerQuoteContinues] as? Int
             headingLevel = (attributes[.accessibilityTextHeadingLevel] as? Int).flatMap { $0 > 0 ? $0 : nil }
             var marker = NSRange()
@@ -57,20 +64,23 @@ enum GlimmerMarkdownSerializer {
             let paragraph = Paragraph(text, range: whole)
             let includesStart = wanted.location <= paragraph.content.location
             let selected = NSIntersectionRange(paragraph.content, wanted)
-            // A selection that starts on a paragraph's newline takes nothing from that paragraph.
+            // A selection that starts on a paragraph's newline, or on a marker-only line's tab, takes nothing from it.
             guard selected.length > 0 || includesStart else { continue }
+            let written = write(paragraph, selected: selected, includesStart: includesStart, in: text, asMarkdown: asMarkdown)
+            guard includesStart || !written.isEmpty else { continue }
             if let previous { output += separator(after: previous, before: paragraph, asMarkdown: asMarkdown) }
-            output += write(paragraph, selected: selected, includesStart: includesStart, in: text, asMarkdown: asMarkdown)
+            output += written
             previous = paragraph
         }
         return output
     }
 
-    /// One newline inside a tight list or after a marker-only line, else a blank line carrying the containers both
-    /// paragraphs share.
+    /// One newline after a marker-only line or where the list holding both paragraphs is tight, else a blank line
+    /// carrying the containers both paragraphs share.
     private static func separator(after first: Paragraph, before second: Paragraph, asMarkdown: Bool) -> String {
         guard asMarkdown else { return "\n" }
-        if first.isMarkerOnly || (first.isTight && second.isTight) { return "\n" }
+        if first.isMarkerOnly { return "\n" }
+        if let level = gapLevel(before: second), second.tightness[level] { return "\n" }
         var shared = String(zip(first.prefix, second.prefix).prefix { $0 == $1 }.map(\.0))
         if let continuing = first.quoteContinues {
             // The first paragraph closes quote levels: only the ones that continue carry across the blank line.
@@ -87,6 +97,16 @@ enum GlimmerMarkdownSerializer {
         }
         while shared.last == " " { shared.removeLast() }
         return "\n" + shared + "\n"
+    }
+
+    /// The list whose looseness decides the gap before `second`: its own list when it starts a later item of it, the
+    /// enclosing item's list when it opens a nested list, and its innermost list when it continues an item. Nil
+    /// outside lists and before a top-level list's first item.
+    private static func gapLevel(before second: Paragraph) -> Int? {
+        let depth = second.tightness.count - 1
+        guard depth >= 0 else { return nil }
+        guard second.hasMarker, second.opensList else { return depth }
+        return depth > 0 ? depth - 1 : nil
     }
 
     private static func write(
@@ -111,11 +131,19 @@ enum GlimmerMarkdownSerializer {
                     flush()
                     body += asMarkdown ? chip.token.source : chip.token.displayText
                 } else if let source = attributes[.glimmerSource] as? String {
-                    // An inline image's alt text: written once, however its runs split.
+                    // An inline image's alt text: written once, however its runs split, inside its link if it has one.
                     var whole = NSRange()
                     _ = text.attribute(.glimmerSource, at: run.location, longestEffectiveRange: &whole, in: selected)
                     flush()
-                    if whole.location == run.location { body += asMarkdown ? source : string.substring(with: whole) }
+                    if whole.location == run.location {
+                        if !asMarkdown {
+                            body += string.substring(with: whole)
+                        } else if let url = attributes[.link] as? URL {
+                            body += "[" + source + "](" + destination(url) + ")"
+                        } else {
+                            body += source
+                        }
+                    }
                 } else {
                     segments.append(Segment(text: string.substring(with: run), style: Style(attributes)))
                 }
@@ -125,8 +153,15 @@ enum GlimmerMarkdownSerializer {
         guard asMarkdown else { return marker + body.replacingOccurrences(of: "\u{2028}", with: "\n") }
         // Later lines of the paragraph (an embed's source, a hard break) continue inside its containers.
         let continuation = includesStart ? paragraph.prefix + continuation(ofMarker: marker) : ""
-        body = body.replacingOccurrences(of: "\u{2028}", with: "\\\n")
-            .replacingOccurrences(of: "\n", with: "\n" + continuation)
+        if body.contains("\u{2028}") {
+            // Each line after a hard break starts a line of the pasted markdown, so it escapes block syntax too.
+            let lines = body.components(separatedBy: "\u{2028}")
+            body = ([lines[0]] + lines.dropFirst().map(escapingBlockStart)).joined(separator: "\\\n" + continuation)
+        } else {
+            body = body.replacingOccurrences(of: "\n", with: "\n" + continuation)
+        }
+        // A marker alone on its line (the item opens with a list or an embed) needs no trailing space.
+        if paragraph.isMarkerOnly { while marker.last == " " { marker.removeLast() } }
         guard includesStart else { return body }
         let heading = paragraph.headingLevel.map { String(repeating: "#", count: $0) + " " } ?? ""
         return paragraph.prefix + marker + heading + escapingBlockStart(body)
@@ -252,11 +287,25 @@ enum GlimmerMarkdownSerializer {
         return string.contains { $0 == " " || $0 == "(" || $0 == ")" } ? "<\(string)>" : string
     }
 
-    /// Backslash-escapes characters that could start inline syntax.
+    /// Backslash-escapes characters that could start inline syntax. An underscore between two letters or digits
+    /// never opens emphasis in CommonMark, and `&` only matters before something that could be an entity.
     private static func escaped(_ text: String) -> String {
+        let characters = Array(text)
         var result = ""
-        for character in text {
-            if "\\`*_[]<~".contains(character) { result.append("\\") }
+        for (index, character) in characters.enumerated() {
+            let before = index > 0 ? characters[index - 1] : nil
+            let after = index + 1 < characters.count ? characters[index + 1] : nil
+            switch character {
+            case "\\", "`", "*", "[", "]", "<", "~":
+                result.append("\\")
+            case "_":
+                let isWordCharacter = { (neighbor: Character?) in neighbor?.isLetter == true || neighbor?.isNumber == true }
+                if !(isWordCharacter(before) && isWordCharacter(after)) { result.append("\\") }
+            case "&":
+                if let after, after.isLetter || after == "#" { result.append("\\") }
+            default:
+                break
+            }
             result.append(character)
         }
         return result

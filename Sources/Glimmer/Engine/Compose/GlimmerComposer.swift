@@ -28,8 +28,10 @@ struct GlimmerComposer {
         var markdownPrefix = ""
         /// Markdown written before the marker on an item's first line (the enclosing container's prefix).
         var markerLinePrefix = ""
-        /// Inside a tight list's item.
-        var isTight = false
+        /// Each enclosing list's tightness, outermost first.
+        var listTightness: [Bool] = []
+        /// In a list's first item: its marker paragraph opens the list.
+        var opensList = false
     }
 
     func compose(_ blocks: [GlimmerBlock]) -> NSAttributedString {
@@ -135,7 +137,8 @@ struct GlimmerComposer {
             var itemContext = inner
             itemContext.markerLinePrefix = context.markdownPrefix
             itemContext.markdownPrefix = context.markdownPrefix + GlimmerMarkdownSerializer.continuation(ofMarker: markerSource)
-            itemContext.isTight = list.isTight
+            itemContext.listTightness = context.listTightness + [list.isTight]
+            itemContext.opensList = offset == 0
             if item.blocks.isEmpty {
                 appendTextParagraph([], font: theme.bodyFont, context: itemContext, marker: marker, to: output)
             }
@@ -187,7 +190,8 @@ struct GlimmerComposer {
     /// Records what copy needs to write this paragraph back as markdown.
     private func stampMarkdown(context: Context, hasMarker: Bool, range: NSRange, in output: NSMutableAttributedString) {
         output.addAttribute(.glimmerMarkdownPrefix, value: hasMarker ? context.markerLinePrefix : context.markdownPrefix, range: range)
-        if context.isTight { output.addAttribute(.glimmerTightList, value: true, range: range) }
+        if !context.listTightness.isEmpty { output.addAttribute(.glimmerListTightness, value: context.listTightness, range: range) }
+        if hasMarker, context.opensList { output.addAttribute(.glimmerListOpens, value: true, range: range) }
     }
 
     // MARK: - Styles

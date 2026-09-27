@@ -236,10 +236,13 @@ final class GlimmerComposerTests: XCTestCase {
         XCTAssertEqual(attributes(of: "•", in: text)[.glimmerListMarker] as? String, "- > ")
     }
 
-    func testTightListParagraphsAreMarked() {
-        XCTAssertEqual(attributes(of: "b", in: compose("- a\n- b"))[.glimmerTightList] as? Bool, true)
-        XCTAssertNil(attributes(of: "b", in: compose("- a\n\n- b"))[.glimmerTightList])
-        XCTAssertNil(attributes(of: "p", in: compose("p"))[.glimmerTightList])
+    func testListParagraphsRecordEachListsTightness() {
+        let text = compose("- a\n  - x\n\n  - y\n- b")
+        XCTAssertEqual(attributes(of: "b", in: text)[.glimmerListTightness] as? [Bool], [true])
+        XCTAssertEqual(attributes(of: "y", in: text)[.glimmerListTightness] as? [Bool], [true, false])
+        XCTAssertEqual(attributes(of: "x", in: text)[.glimmerListOpens] as? Bool, true)
+        XCTAssertNil(attributes(of: "y", in: text)[.glimmerListOpens])
+        XCTAssertNil(attributes(of: "p", in: compose("p"))[.glimmerListTightness])
     }
 
     func testStrongAndEmphasisAreMarkedButHeadingsAreNot() {

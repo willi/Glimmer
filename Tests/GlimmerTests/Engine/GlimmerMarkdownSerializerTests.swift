@@ -131,4 +131,41 @@ final class GlimmerMarkdownSerializerTests: XCTestCase {
         XCTAssertEqual(view.markdownSource(for: range), "*there*")
         _ = window
     }
+
+    func testLinesAfterAHardBreakEscapeBlockSyntax() {
+        for source in ["line\\\n\\# not a heading", "line\\\n\\- not a list", "line\\\n\\> not a quote"] {
+            let original = compose(source)
+            assertEquivalent(compose(markdown(original)), original, "\(source); copied: \(markdown(original))")
+        }
+    }
+
+    func testListLoosenessComesBackPerList() {
+        for source in [
+            "- a\n  - x\n\n  - y\n- b",      // tight list, loose sublist
+            "- a\n\n  - x\n  - y\n\n- b",    // loose list, tight sublist
+            "1. a\n   - x\n2. b",            // tight throughout
+        ] {
+            let original = compose(source)
+            assertEquivalent(compose(markdown(original)), original, "\(source.debugDescription); copied: \(markdown(original).debugDescription)")
+        }
+    }
+
+    func testMarkerOnlyLinesCopyCleanly() {
+        let text = compose("- ```\n  x\n  ```")
+        XCTAssertEqual(markdown(text), "-\n  ```\n  x\n  ```")
+        let tab = (text.string as NSString).range(of: "\t").location
+        XCTAssertFalse(markdown(text, NSRange(location: tab, length: text.length - tab)).hasPrefix("\n"))
+    }
+
+    func testAnImageInsideALinkKeepsItsLink() {
+        let original = compose("see [![logo](https://x.io/a.png)](https://x.io) here")
+        XCTAssertEqual(markdown(original), "see [![logo](https://x.io/a.png)](https://x.io) here")
+    }
+
+    func testEntitiesAndIntrawordUnderscoresStayLiteral() {
+        let original = compose("AT&amp;T and &amp;copy; in snake_case")
+        let copied = markdown(original)
+        XCTAssertTrue(copied.contains("snake_case"), copied)
+        assertEquivalent(compose(copied), original, "copied: \(copied)")
+    }
 }
