@@ -7,18 +7,35 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		013E158476FBAE79144EE485 /* GlimmerStreamingPerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 588105DC18E033B95F2E4D3C /* GlimmerStreamingPerformanceTests.swift */; };
 		0E1DB991F2A98D3BBF6AF87C /* EngineGalleryDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = E50E91A30E563D2FCCE6CA97 /* EngineGalleryDemo.swift */; };
+		0E25DC7706173227D8CBF36D /* FrameHitchCounter.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAD456982567248B8876F66F /* FrameHitchCounter.swift */; };
+		27180E6B9A610DC5266C165E /* BenchmarkHitchUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68062EB58F18623AF2303F31 /* BenchmarkHitchUITests.swift */; };
 		4BECC75CB77F034AC75BE235 /* GlimmerDemoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F12BB6C5A55B911E4DB2C80 /* GlimmerDemoApp.swift */; };
+		4DCCF3CA49497CA8D7D59BEE /* BenchmarkDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 970DBEFA3A0094A6E2658F1E /* BenchmarkDemo.swift */; };
+		50602925926B8E03CD139EB4 /* Glimmer in Frameworks */ = {isa = PBXBuildFile; productRef = E907B8681C2BA7E6B422FBA5 /* Glimmer */; };
+		5C1DE498860226393D3EA05E /* FrameMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1765D8E84E6345E867D3A5D /* FrameMonitor.swift */; };
 		6ED6D4BEB5A15945E7FAFBE4 /* LongAnswerDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B9B40EC2975003B9637215B /* LongAnswerDemo.swift */; };
 		7A56FF9B8B90B7C34D2FC8C3 /* StreamingLabDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA5FF3BF174213A13B4C8CFD /* StreamingLabDemo.swift */; };
+		96CB440277870E2832CEDD4D /* FrameHitchCounter.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAD456982567248B8876F66F /* FrameHitchCounter.swift */; };
+		97D8F0115573FCF14095126E /* StreamingFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = C49B42D684C6E4ABF4F3C07F /* StreamingFixtures.swift */; };
 		A1E6DD787110260AC1120DD1 /* LaunchUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0578449C421E838AF61F64DF /* LaunchUITests.swift */; };
+		C0C609A36C576B28EB10ACAB /* EngineTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EFD0C7A92EC02EFDCBD12B9 /* EngineTestSupport.swift */; };
 		C863E66E61D945D7B588FD99 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92DFF4849AAF6AA9A185D6DC /* ContentView.swift */; };
 		D2B0EE829415508B68382772 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 14554348F28E714337B4C829 /* Assets.xcassets */; };
 		E10727F54C1BB99FAC320D64 /* Glimmer in Frameworks */ = {isa = PBXBuildFile; productRef = E79B6DB4B39CDFE91D53C993 /* Glimmer */; };
+		FA432DB646417E11ABFB470B /* FrameHitchCounterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5179C2E58CB9D40B6DAF22E5 /* FrameHitchCounterTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
 		7A3E4CE92A63A67696B46905 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CC742868463D8AA32DD3573E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5917D2C8F893EB65BF6576B7;
+			remoteInfo = GlimmerDemo;
+		};
+		DB1A4A5F40D4C26CDB8692F9 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = CC742868463D8AA32DD3573E /* Project object */;
 			proxyType = 1;
@@ -34,10 +51,19 @@
 		0FBB655DA050C57E885133A8 /* GlimmerDemo.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = GlimmerDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		14554348F28E714337B4C829 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		1E717C756E0F8045A24F5226 /* GlimmerDemoUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = GlimmerDemoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		2EFD0C7A92EC02EFDCBD12B9 /* EngineTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineTestSupport.swift; sourceTree = "<group>"; };
+		5179C2E58CB9D40B6DAF22E5 /* FrameHitchCounterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameHitchCounterTests.swift; sourceTree = "<group>"; };
+		588105DC18E033B95F2E4D3C /* GlimmerStreamingPerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlimmerStreamingPerformanceTests.swift; sourceTree = "<group>"; };
+		68062EB58F18623AF2303F31 /* BenchmarkHitchUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BenchmarkHitchUITests.swift; sourceTree = "<group>"; };
 		7FA442DB15CFDE9B4A295388 /* Glimmer */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Glimmer; path = ../..; sourceTree = SOURCE_ROOT; };
+		91E7D35CD70D5A72797D560C /* GlimmerDevicePerfTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = GlimmerDevicePerfTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		92DFF4849AAF6AA9A185D6DC /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		970DBEFA3A0094A6E2658F1E /* BenchmarkDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BenchmarkDemo.swift; sourceTree = "<group>"; };
 		9F12BB6C5A55B911E4DB2C80 /* GlimmerDemoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlimmerDemoApp.swift; sourceTree = "<group>"; };
+		B1765D8E84E6345E867D3A5D /* FrameMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameMonitor.swift; sourceTree = "<group>"; };
+		C49B42D684C6E4ABF4F3C07F /* StreamingFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingFixtures.swift; sourceTree = "<group>"; };
 		CA5FF3BF174213A13B4C8CFD /* StreamingLabDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingLabDemo.swift; sourceTree = "<group>"; };
+		DAD456982567248B8876F66F /* FrameHitchCounter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameHitchCounter.swift; sourceTree = "<group>"; };
 		E50E91A30E563D2FCCE6CA97 /* EngineGalleryDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineGalleryDemo.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -50,13 +76,32 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C8166AE423DC0F12AA581B07 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				50602925926B8E03CD139EB4 /* Glimmer in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		0ED2E1B12BA3C1339D3B01EE /* Engine */ = {
+			isa = PBXGroup;
+			children = (
+				2EFD0C7A92EC02EFDCBD12B9 /* EngineTestSupport.swift */,
+				588105DC18E033B95F2E4D3C /* GlimmerStreamingPerformanceTests.swift */,
+				C49B42D684C6E4ABF4F3C07F /* StreamingFixtures.swift */,
+			);
+			path = Engine;
+			sourceTree = "<group>";
+		};
 		1203321DB9A203BC3DACE973 = {
 			isa = PBXGroup;
 			children = (
 				DB4F9EFAD1DF2070D279D0BB /* App */,
+				2C235FFF22A12AF43D75583F /* Glimmer */,
 				ECD275F7B54B841F58861D5D /* Packages */,
 				B05B6EC378B04201B5C96D07 /* Shared */,
 				3E6F2316413D3FBF544A2054 /* UITests */,
@@ -64,9 +109,20 @@
 			);
 			sourceTree = "<group>";
 		};
+		2C235FFF22A12AF43D75583F /* Glimmer */ = {
+			isa = PBXGroup;
+			children = (
+				CE003C90574EEE4B41C201CB /* Tests */,
+			);
+			name = Glimmer;
+			path = ../..;
+			sourceTree = "<group>";
+		};
 		3E6F2316413D3FBF544A2054 /* UITests */ = {
 			isa = PBXGroup;
 			children = (
+				68062EB58F18623AF2303F31 /* BenchmarkHitchUITests.swift */,
+				5179C2E58CB9D40B6DAF22E5 /* FrameHitchCounterTests.swift */,
 				0578449C421E838AF61F64DF /* LaunchUITests.swift */,
 			);
 			path = UITests;
@@ -75,16 +131,35 @@
 		B05B6EC378B04201B5C96D07 /* Shared */ = {
 			isa = PBXGroup;
 			children = (
+				DAD456982567248B8876F66F /* FrameHitchCounter.swift */,
 			);
 			path = Shared;
+			sourceTree = "<group>";
+		};
+		C013CCC05AF2C659070D15EA /* GlimmerTests */ = {
+			isa = PBXGroup;
+			children = (
+				0ED2E1B12BA3C1339D3B01EE /* Engine */,
+			);
+			path = GlimmerTests;
+			sourceTree = "<group>";
+		};
+		CE003C90574EEE4B41C201CB /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				C013CCC05AF2C659070D15EA /* GlimmerTests */,
+			);
+			path = Tests;
 			sourceTree = "<group>";
 		};
 		DB4F9EFAD1DF2070D279D0BB /* App */ = {
 			isa = PBXGroup;
 			children = (
 				14554348F28E714337B4C829 /* Assets.xcassets */,
+				970DBEFA3A0094A6E2658F1E /* BenchmarkDemo.swift */,
 				92DFF4849AAF6AA9A185D6DC /* ContentView.swift */,
 				E50E91A30E563D2FCCE6CA97 /* EngineGalleryDemo.swift */,
+				B1765D8E84E6345E867D3A5D /* FrameMonitor.swift */,
 				9F12BB6C5A55B911E4DB2C80 /* GlimmerDemoApp.swift */,
 				0381790AE0E54E97B350FB9C /* Info.plist */,
 				0B9B40EC2975003B9637215B /* LongAnswerDemo.swift */,
@@ -106,6 +181,7 @@
 			children = (
 				0FBB655DA050C57E885133A8 /* GlimmerDemo.app */,
 				1E717C756E0F8045A24F5226 /* GlimmerDemoUITests.xctest */,
+				91E7D35CD70D5A72797D560C /* GlimmerDevicePerfTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -113,6 +189,26 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		5842193C21590C131EC363F0 /* GlimmerDevicePerfTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 24595B556C3B882FBDD6B961 /* Build configuration list for PBXNativeTarget "GlimmerDevicePerfTests" */;
+			buildPhases = (
+				83D8DD3346253DA9E0A1F23C /* Sources */,
+				C8166AE423DC0F12AA581B07 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				E5F204951677C5EA81CFA9B0 /* PBXTargetDependency */,
+			);
+			name = GlimmerDevicePerfTests;
+			packageProductDependencies = (
+				E907B8681C2BA7E6B422FBA5 /* Glimmer */,
+			);
+			productName = GlimmerDevicePerfTests;
+			productReference = 91E7D35CD70D5A72797D560C /* GlimmerDevicePerfTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		5917D2C8F893EB65BF6576B7 /* GlimmerDemo */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 180AECF450C4EAD7B6229125 /* Build configuration list for PBXNativeTarget "GlimmerDemo" */;
@@ -160,6 +256,10 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					5842193C21590C131EC363F0 = {
+						DevelopmentTeam = RUV7V2TGVX;
+						ProvisioningStyle = Automatic;
+					};
 					5917D2C8F893EB65BF6576B7 = {
 						DevelopmentTeam = RUV7V2TGVX;
 						ProvisioningStyle = Automatic;
@@ -190,6 +290,7 @@
 			targets = (
 				5917D2C8F893EB65BF6576B7 /* GlimmerDemo */,
 				E831E6F72A91DB9946376714 /* GlimmerDemoUITests */,
+				5842193C21590C131EC363F0 /* GlimmerDevicePerfTests */,
 			);
 		};
 /* End PBXProject section */
@@ -210,11 +311,24 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4DCCF3CA49497CA8D7D59BEE /* BenchmarkDemo.swift in Sources */,
 				C863E66E61D945D7B588FD99 /* ContentView.swift in Sources */,
 				0E1DB991F2A98D3BBF6AF87C /* EngineGalleryDemo.swift in Sources */,
+				0E25DC7706173227D8CBF36D /* FrameHitchCounter.swift in Sources */,
+				5C1DE498860226393D3EA05E /* FrameMonitor.swift in Sources */,
 				4BECC75CB77F034AC75BE235 /* GlimmerDemoApp.swift in Sources */,
 				6ED6D4BEB5A15945E7FAFBE4 /* LongAnswerDemo.swift in Sources */,
 				7A56FF9B8B90B7C34D2FC8C3 /* StreamingLabDemo.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		83D8DD3346253DA9E0A1F23C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C0C609A36C576B28EB10ACAB /* EngineTestSupport.swift in Sources */,
+				013E158476FBAE79144EE485 /* GlimmerStreamingPerformanceTests.swift in Sources */,
+				97D8F0115573FCF14095126E /* StreamingFixtures.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -222,6 +336,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				27180E6B9A610DC5266C165E /* BenchmarkHitchUITests.swift in Sources */,
+				96CB440277870E2832CEDD4D /* FrameHitchCounter.swift in Sources */,
+				FA432DB646417E11ABFB470B /* FrameHitchCounterTests.swift in Sources */,
 				A1E6DD787110260AC1120DD1 /* LaunchUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -234,9 +351,31 @@
 			target = 5917D2C8F893EB65BF6576B7 /* GlimmerDemo */;
 			targetProxy = 7A3E4CE92A63A67696B46905 /* PBXContainerItemProxy */;
 		};
+		E5F204951677C5EA81CFA9B0 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5917D2C8F893EB65BF6576B7 /* GlimmerDemo */;
+			targetProxy = DB1A4A5F40D4C26CDB8692F9 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		06472F2C1D6DBB7196865E02 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dk.wu.GlimmerDevicePerfTests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/GlimmerDemo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/GlimmerDemo";
+			};
+			name = Debug;
+		};
 		233ACF186CA6899FA9B6C218 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -335,6 +474,23 @@
 				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
+		};
+		A09E7EBF17C160A42C2A65BD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dk.wu.GlimmerDevicePerfTests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/GlimmerDemo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/GlimmerDemo";
+			};
+			name = Release;
 		};
 		BB66E68AA31AE2E6B0BCBA4D /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -440,6 +596,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
+		24595B556C3B882FBDD6B961 /* Build configuration list for PBXNativeTarget "GlimmerDevicePerfTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				06472F2C1D6DBB7196865E02 /* Debug */,
+				A09E7EBF17C160A42C2A65BD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		330AF5276713979385003036 /* Build configuration list for PBXProject "GlimmerDemo" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -469,6 +634,10 @@
 
 /* Begin XCSwiftPackageProductDependency section */
 		E79B6DB4B39CDFE91D53C993 /* Glimmer */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Glimmer;
+		};
+		E907B8681C2BA7E6B422FBA5 /* Glimmer */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = Glimmer;
 		};

@@ -29,16 +29,16 @@
             buildForAnalyzing = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "E831E6F72A91DB9946376714"
-               BuildableName = "GlimmerDemoUITests.xctest"
-               BlueprintName = "GlimmerDemoUITests"
+               BlueprintIdentifier = "5842193C21590C131EC363F0"
+               BuildableName = "GlimmerDevicePerfTests.xctest"
+               BlueprintName = "GlimmerDevicePerfTests"
                ReferencedContainer = "container:GlimmerDemo.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
-      buildConfiguration = "Debug"
+      buildConfiguration = "Release"
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES"
@@ -58,9 +58,9 @@
             parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "E831E6F72A91DB9946376714"
-               BuildableName = "GlimmerDemoUITests.xctest"
-               BlueprintName = "GlimmerDemoUITests"
+               BlueprintIdentifier = "5842193C21590C131EC363F0"
+               BuildableName = "GlimmerDevicePerfTests.xctest"
+               BlueprintName = "GlimmerDevicePerfTests"
                ReferencedContainer = "container:GlimmerDemo.xcodeproj">
             </BuildableReference>
          </TestableReference>
@@ -88,8 +88,6 @@
             ReferencedContainer = "container:GlimmerDemo.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
-      <CommandLineArguments>
-      </CommandLineArguments>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"
@@ -107,6 +105,8 @@
             ReferencedContainer = "container:GlimmerDemo.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <CommandLineArguments>
+      </CommandLineArguments>
    </ProfileAction>
    <AnalyzeAction
       buildConfiguration = "Debug">

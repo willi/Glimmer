@@ -19,7 +19,6 @@ targets:
     sources:
       - path: App
       - path: Shared
-        excludes: [".gitkeep"]
     dependencies:
       - package: Glimmer
     info:
@@ -47,7 +46,6 @@ targets:
     sources:
       - path: UITests
       - path: Shared
-        excludes: [".gitkeep"]
     dependencies:
       - target: GlimmerDemo
     settings:
@@ -55,6 +53,24 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dk.wu.GlimmerDemoUITests
         GENERATE_INFOPLIST_FILE: YES
         TEST_TARGET_NAME: GlimmerDemo
+  # The package's performance tests, hosted by the demo app so they can run on a device (a package test bundle
+  # can't: device destinations need a host application). Release runs pass ENABLE_TESTABILITY=YES.
+  GlimmerDevicePerfTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ../../Tests/GlimmerTests/Engine/GlimmerStreamingPerformanceTests.swift
+      - path: ../../Tests/GlimmerTests/Engine/EngineTestSupport.swift
+      - path: ../../Tests/GlimmerTests/Engine/StreamingFixtures.swift
+    dependencies:
+      - target: GlimmerDemo
+      - package: Glimmer
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dk.wu.GlimmerDevicePerfTests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/GlimmerDemo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/GlimmerDemo"
+        BUNDLE_LOADER: "$(TEST_HOST)"
 schemes:
   GlimmerDemo:
     build:
@@ -67,6 +83,15 @@ schemes:
       config: Debug
       targets:
         - GlimmerDemoUITests
+  GlimmerDevicePerf:
+    build:
+      targets:
+        GlimmerDemo: all
+        GlimmerDevicePerfTests: [test]
+    test:
+      config: Release
+      targets:
+        - GlimmerDevicePerfTests
     profile:
       config: Release
     archive:

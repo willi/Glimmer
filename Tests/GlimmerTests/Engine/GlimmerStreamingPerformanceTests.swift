@@ -168,6 +168,25 @@ final class GlimmerStreamingPerformanceTests: XCTestCase {
         XCTAssertLessThan(cachedMedian, configureBudget)
     }
 
+    /// Spec §3: between network updates a reveal costs the main thread about nothing per frame. Core Animation runs
+    /// the fades; the main thread only starts phrases (a layer each) when the clock wakes it.
+    func testARevealBetweenUpdatesCostsAlmostNothingPerFrame() async {
+        var configuration = GlimmerConfiguration(imageLoader: nil)
+        configuration.reveal = .smooth(GlimmerRevealOptions())
+        let view = GlimmerView(configuration: configuration)
+        let window = hostInWindow(view, width: 390, height: 800)
+        view.update(markdown: String(longMixedAnswer.prefix(2_000)), isStreaming: true)
+        await view.pendingDocument?.value
+        // TextKit lays out and draws the text once, at the next commit: a one-time cost, not the reveal's.
+        try? await Task.sleep(for: .milliseconds(500))
+        let start = threadCPUTime()
+        try? await Task.sleep(for: .seconds(2))  // the main actor is free: the reveal runs as it would in an app
+        let perFrame = (threadCPUTime() - start) / 240
+        print("PERF reveal main-thread CPU per 120 Hz frame: \(perFrame)")
+        XCTAssertLessThan(perFrame, .microseconds(500))
+        _ = window
+    }
+
     /// Load on a shared machine (another simulator, a compile) can push one run's p95 over a gate; a real regression
     /// fails both runs. So each gated measurement gets one retry.
     private func measured(

@@ -82,6 +82,11 @@ struct StreamingLabDemo: View {
     /// The answer split the way a server would send it for `cadence`: each chunk with the delay before it.
     static func chunks(of text: String, cadence: Cadence) -> [(String, Duration)] {
         var generator = SystemRandomNumberGenerator()
+        return chunks(of: text, cadence: cadence, using: &generator)
+    }
+
+    /// The same, drawing sizes and delays from `generator`: a seeded one gives the same chunks every run.
+    static func chunks<G: RandomNumberGenerator>(of text: String, cadence: Cadence, using generator: inout G) -> [(String, Duration)] {
         let words = text.split(separator: " ", omittingEmptySubsequences: false).map { String($0) + " " }
         var result: [(String, Duration)] = []
         var index = 0
