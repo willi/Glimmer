@@ -53,6 +53,13 @@ final class GlimmerMentionsTests: XCTestCase {
         XCTAssertEqual(mentions(in: composed("Ask @ada.")), ["@ada"], "a sentence-ending period is not a domain")
     }
 
+    /// GitHub: a backslash before the `@` keeps it text.
+    func testAnEscapedAtSignIsNotAMention() {
+        let text = composed("Not a mention: \\@octocat, but @ada is.")
+        XCTAssertEqual(text.string, "Not a mention: @octocat, but @ada is.")
+        XCTAssertEqual(mentions(in: text), ["@ada"])
+    }
+
     func testMentionsSkipLinksAndCode() {
         XCTAssertEqual(mentions(in: composed("See [@ada](https://example.com) and `@grace`.")), [])
     }

@@ -32,6 +32,10 @@ final class GlimmerEmojiShortcodesTests: XCTestCase {
         }
     }
 
+    func testAnEscapedColonIsNotAShortcode() {
+        XCTAssertEqual(composed("Type \\:rocket: for :rocket:").string, "Type :rocket: for 🚀")
+    }
+
     func testShortcodesSkipCode() {
         XCTAssertEqual(composed("Type `:rocket:` for 🚀").string, "Type :rocket: for 🚀")
         XCTAssertTrue(composed("```\n:rocket:\n```").string.contains("\u{FFFC}"), "a code block stays a code block")

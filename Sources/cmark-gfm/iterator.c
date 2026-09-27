@@ -6,6 +6,7 @@
 #include "node.h"
 #include "cmark-gfm.h"
 #include "iterator.h"
+#include "cmark_ctype.h"
 
 cmark_iter *cmark_iter_new(cmark_node *root) {
   if (root == NULL) {
@@ -93,6 +94,13 @@ cmark_event_type cmark_iter_get_event_type(cmark_iter *iter) {
 
 cmark_node *cmark_iter_get_root(cmark_iter *iter) { return iter->root; }
 
+// Glimmer: a backslash escape (one punctuation character spanning two source columns) stays its own text node, so a
+// renderer can tell `\@ada` from `@ada`.
+static bool S_is_escape(cmark_node *node) {
+  return node->type == CMARK_NODE_TEXT && node->as.literal.len == 1 &&
+         cmark_ispunct(node->as.literal.data[0]) && node->end_column - node->start_column == 1;
+}
+
 void cmark_consolidate_text_nodes(cmark_node *root) {
   if (root == NULL) {
     return;
@@ -104,12 +112,12 @@ void cmark_consolidate_text_nodes(cmark_node *root) {
 
   while ((ev_type = cmark_iter_next(iter)) != CMARK_EVENT_DONE) {
     cur = cmark_iter_get_node(iter);
-    if (ev_type == CMARK_EVENT_ENTER && cur->type == CMARK_NODE_TEXT &&
-        cur->next && cur->next->type == CMARK_NODE_TEXT) {
+    if (ev_type == CMARK_EVENT_ENTER && cur->type == CMARK_NODE_TEXT && !S_is_escape(cur) &&
+        cur->next && cur->next->type == CMARK_NODE_TEXT && !S_is_escape(cur->next)) {
       cmark_strbuf_clear(&buf);
       cmark_strbuf_put(&buf, cur->as.literal.data, cur->as.literal.len);
       tmp = cur->next;
-      while (tmp && tmp->type == CMARK_NODE_TEXT) {
+      while (tmp && tmp->type == CMARK_NODE_TEXT && !S_is_escape(tmp)) {
         cmark_iter_next(iter); // advance pointer
         cmark_strbuf_put(&buf, tmp->as.literal.data, tmp->as.literal.len);
         cur->end_column = tmp->end_column;

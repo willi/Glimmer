@@ -129,15 +129,27 @@ public enum GlimmerParser {
 
     private static func inlines(in node: Node) -> [GlimmerInline] {
         var result: [GlimmerInline] = []
+        // A backslash-escaped character stays its own text run, so no extension reads it as syntax: `\@ada` is not a
+        // mention and `\:rocket:` not a shortcode, as on GitHub.
+        var previousWasEscaped = false
         for child in children(of: node) {
             guard let inline = inline(child) else { continue }
-            if case .text(let next) = inline, case .text(let previous)? = result.last {
+            let isEscaped = isEscapedCharacter(child)
+            if case .text(let next) = inline, case .text(let previous)? = result.last, !isEscaped, !previousWasEscaped {
                 result[result.count - 1] = .text(previous + next)
             } else {
                 result.append(inline)
             }
+            previousWasEscaped = isEscaped
         }
         return result.flatMap(splittingFootnoteReferences)
+    }
+
+    /// cmark gives a backslash escape its own text node: one punctuation character spanning two source columns.
+    private static func isEscapedCharacter(_ node: Node) -> Bool {
+        guard cmark_node_get_type(node) == CMARK_NODE_TEXT, let literal = cmark_node_get_literal(node),
+              strlen(literal) == 1, ispunct(Int32(literal.pointee)) != 0 else { return false }
+        return cmark_node_get_end_column(node) - cmark_node_get_start_column(node) == 1
     }
 
     /// cmark leaves a reference whose definition hasn't arrived (or never does) as the text `[^label]`: a marker too.
