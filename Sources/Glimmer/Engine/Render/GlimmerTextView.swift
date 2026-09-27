@@ -244,27 +244,55 @@ final class GlimmerTextView: UITextView {
     /// How far past the screen, in screen heights, TextKit still renders. Enough that a fling lands on rendered text
     /// before the next band update.
     static let bandOverscan: CGFloat = 1
+    /// How far, in screen heights, the screen may travel from where the band was centred before it re-renders.
+    /// Smaller steps bring in less new text each time: on an iPhone 16 Pro Max a half-screen step cost up to 6.7 ms.
+    static let bandRefreshStep: CGFloat = 0.25
 
     /// The rect TextKit rendered last, in this view's coordinates, or nil while it renders its own viewport.
     private(set) var renderedBand: CGRect?
+    /// After a configure, TextKit renders only the screen until the first frame is on screen, then the whole band:
+    /// the first frame's layout and drawing are a third of a full band's.
+    private(set) var rendersScreenOnly = false
+    private var bandWidening: CADisplayLink?
 
-    /// This view's part within `bandOverscan` screens of its window's bounds, full width. It is zero-height off screen
+    /// Renders only the screen until the next frame has been presented, then the whole band.
+    func renderScreenFirst() {
+        rendersScreenOnly = true
+        guard bandWidening == nil else { return }
+        let link = CADisplayLink(target: self, selector: #selector(widenBand))
+        link.add(to: .main, forMode: .common)
+        bandWidening = link
+    }
+
+    @objc private func widenBand() {
+        bandWidening?.invalidate()
+        bandWidening = nil
+        guard rendersScreenOnly else { return }
+        rendersScreenOnly = false
+        textLayoutManager?.textViewportLayoutController.layoutViewport()
+    }
+
+    private var overscan: CGFloat { rendersScreenOnly ? 0 : Self.bandOverscan }
+
+    /// This view's part within `overscan` screens of its window's bounds, full width. It is zero-height off screen
     /// or outside a window (a cell sized before it is shown renders nothing), and nil before the view has a width.
     func visibleBand() -> CGRect? {
         guard bounds.width > 0 else { return nil }
         guard let window else { return CGRect(x: 0, y: 0, width: bounds.width, height: 0) }
         let screen = convert(window.bounds, from: window)
-        let band = screen.insetBy(dx: 0, dy: -window.bounds.height * Self.bandOverscan).intersection(bounds)
+        let band = screen.insetBy(dx: 0, dy: -window.bounds.height * overscan).intersection(bounds)
         guard !band.isNull else { return CGRect(x: 0, y: 0, width: bounds.width, height: 0) }
         return CGRect(x: 0, y: band.minY, width: bounds.width, height: band.height)
     }
 
-    /// Re-renders when the screen has moved within half an overscan of the rendered band's edge.
+    /// Re-renders once the screen has travelled `bandRefreshStep` screens from where the band was centred, or, while
+    /// only the screen is rendered, as soon as any of the screen is not.
     func refreshVisibleBandIfNeeded() {
         guard let window, let rendered = renderedBand else { return }
         let screen = convert(window.bounds, from: window).intersection(bounds)
         guard !screen.isNull else { return }
-        let needed = screen.insetBy(dx: 0, dy: -window.bounds.height * Self.bandOverscan / 2).intersection(bounds)
+        let margin = max(0, overscan - Self.bandRefreshStep)
+        let needed = screen.insetBy(dx: 0, dy: -window.bounds.height * margin).intersection(bounds)
         if !rendered.contains(needed) { textLayoutManager?.textViewportLayoutController.layoutViewport() }
     }
 

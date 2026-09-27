@@ -322,6 +322,7 @@ public final class GlimmerView: UIView {
             viewHoldsWorkerText = false
             cacheKey = key
             appliedUpdate = requestedUpdate
+            textView.renderScreenFirst()
             textView.replaceText(with: cached, shortHeight: bounds.height)
             apply(GlimmerDocumentResult(edit: nil, embedUnits: [:], isStreaming: false), replacedText: true)
             return
@@ -333,6 +334,7 @@ public final class GlimmerView: UIView {
         worker = GlimmerDocumentWorker(document: document, extensions: configuration.extensions)
         viewHoldsWorkerText = true
         appliedUpdate = requestedUpdate
+        textView.renderScreenFirst()
         textView.replaceText(with: document.text, shortHeight: bounds.height)
         apply(GlimmerDocumentResult(edit: nil, embedUnits: document.embedUnits, isStreaming: isStreaming), replacedText: true)
     }

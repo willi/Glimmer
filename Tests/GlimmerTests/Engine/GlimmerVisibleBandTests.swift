@@ -130,4 +130,50 @@ final class GlimmerVisibleBandTests: XCTestCase {
         XCTAssertFalse(view.textView.subviews.contains(where: animated), "fragment views appear in place")
         _ = window
     }
+
+    func testTheBandRefreshesAfterAQuarterScreen() throws {
+        let (view, scrollView, window) = scrolled()
+        let before = try XCTUnwrap(view.textView.renderedBand)
+        scrollView.contentOffset = CGPoint(x: 0, y: 800 * 0.3)
+        view.textView.refreshVisibleBandIfNeeded()
+        let after = try XCTUnwrap(view.textView.renderedBand)
+        XCTAssertNotEqual(after, before, "0.3 screens of travel re-renders")
+        _ = window
+    }
+
+    func testAConfigureRendersTheScreenFirstAndTheBandNextFrame() throws {
+        let scrollView = UIScrollView()
+        let window = hostInWindow(scrollView, width: 390, height: 800)
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
+        view.frame = CGRect(x: 0, y: 0, width: 390, height: 100_000)
+        scrollView.addSubview(view)
+        scrollView.contentSize = view.frame.size
+        view.update(markdown: long)
+        view.layoutIfNeeded()
+        view.textView.layoutIfNeeded()
+        let first = try XCTUnwrap(view.textView.renderedBand)
+        XCTAssertLessThanOrEqual(first.height, 801, "the first frame renders the screen")
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        let full = try XCTUnwrap(view.textView.renderedBand)
+        XCTAssertGreaterThan(full.height, 1_500, "the band follows")
+        _ = window
+    }
+
+    func testScrollingBeforeTheBandWidensStillRendersTheScreen() throws {
+        let scrollView = UIScrollView()
+        let window = hostInWindow(scrollView, width: 390, height: 800)
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
+        view.frame = CGRect(x: 0, y: 0, width: 390, height: 100_000)
+        scrollView.addSubview(view)
+        scrollView.contentSize = view.frame.size
+        view.update(markdown: long)
+        view.layoutIfNeeded()
+        view.textView.layoutIfNeeded()
+        // The reader flings before the band has widened.
+        scrollView.contentOffset = CGPoint(x: 0, y: 600)
+        view.textView.refreshVisibleBandIfNeeded()
+        let band = try XCTUnwrap(view.textView.renderedBand)
+        XCTAssertTrue(band.contains(CGRect(x: 0, y: 600, width: 390, height: 800).intersection(view.textView.bounds)))
+        _ = window
+    }
 }
