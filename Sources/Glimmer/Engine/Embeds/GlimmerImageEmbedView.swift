@@ -8,17 +8,21 @@ final class GlimmerImageEmbedView: UIView, GlimmerEmbedView {
     let altLabel = UILabel()
 
     private let theme: GlimmerTheme
+    private let source: URL
+    private let alt: String
     private var loadTask: Task<Void, Never>?
+    private lazy var tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(handleTap))
 
     init(source: URL, alt: String, theme: GlimmerTheme, loader: (any GlimmerImageLoader)?) {
         self.theme = theme
+        self.source = source
+        self.alt = alt
         super.init(frame: .zero)
         backgroundColor = theme.codeBlockBackground
         layer.cornerRadius = theme.embedCornerRadius
         layer.cornerCurve = .continuous
         clipsToBounds = true
         isAccessibilityElement = true
-        accessibilityTraits = .image
         accessibilityLabel = alt
 
         imageView.contentMode = .scaleAspectFit
@@ -30,6 +34,7 @@ final class GlimmerImageEmbedView: UIView, GlimmerEmbedView {
         altLabel.numberOfLines = 0
         altLabel.isHidden = true
         addSubview(altLabel)
+        addGestureRecognizer(tapRecognizer)
 
         guard let loader else {
             altLabel.isHidden = false
@@ -46,6 +51,22 @@ final class GlimmerImageEmbedView: UIView, GlimmerEmbedView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Whether a tap reaches the host: only while it sets `onImageTap`.
+    var acceptsTaps: Bool { glimmerImageTapHandler != nil }
+
+    @objc func handleTap() {
+        glimmerImageTapHandler?(source, alt)
+    }
+
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        gestureRecognizer === tapRecognizer ? acceptsTaps : super.gestureRecognizerShouldBegin(gestureRecognizer)
+    }
+
+    override var accessibilityTraits: UIAccessibilityTraits {
+        get { acceptsTaps ? [.image, .button] : .image }
+        set { super.accessibilityTraits = newValue }
+    }
 
     /// An image embed continues only an identical one (`GlimmerEmbed.continues`), so there is nothing to update.
     func update(to embed: GlimmerEmbed) {}

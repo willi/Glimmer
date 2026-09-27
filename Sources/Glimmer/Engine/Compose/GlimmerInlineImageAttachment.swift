@@ -32,7 +32,7 @@ final class GlimmerInlineImageAttachment: NSTextAttachment {
     @MainActor
     func imageView() -> UIImageView {
         if let cachedView { return cachedView }
-        let view = GlimmerInlineImageView(source: source, theme: theme, loader: loader)
+        let view = GlimmerInlineImageView(source: source, alt: alt, theme: theme, loader: loader)
         cachedView = view
         return view
     }

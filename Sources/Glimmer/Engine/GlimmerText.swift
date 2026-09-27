@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// SwiftUI wrapper for `GlimmerView`. Markdown, `onLinkTap` and `onTokenTap` update in place; the configuration is read once, when
+/// SwiftUI wrapper for `GlimmerView`. Markdown, `onLinkTap`, `onTokenTap` and `onImageTap` update in place; the configuration is read once, when
 /// the view is created. To apply a different configuration (theme, extensions, image loader), give the view a new
 /// identity, for example `.id(themeVersion)`.
 public struct GlimmerText: UIViewRepresentable {
@@ -11,6 +11,8 @@ public struct GlimmerText: UIViewRepresentable {
     public var onLinkTap: ((URL) -> Void)?
     /// Called with a tapped extension token, such as a mention. See `GlimmerView.onTokenTap`.
     public var onTokenTap: ((GlimmerInlineToken) -> Void)?
+    /// Called with a tapped image's URL and alt text. See `GlimmerView.onImageTap`.
+    public var onImageTap: ((URL, String) -> Void)?
     /// Items appended to the edit menu for a selection. See `GlimmerView.editMenuActions`.
     public var editMenuActions: ((GlimmerSelection) -> [UIMenuElement])?
     /// Items appended to a link's menu. See `GlimmerView.linkMenuActions`.
@@ -23,6 +25,7 @@ public struct GlimmerText: UIViewRepresentable {
         configuration: GlimmerConfiguration = .default,
         onLinkTap: ((URL) -> Void)? = nil,
         onTokenTap: ((GlimmerInlineToken) -> Void)? = nil,
+        onImageTap: ((URL, String) -> Void)? = nil,
         editMenuActions: ((GlimmerSelection) -> [UIMenuElement])? = nil,
         linkMenuActions: ((URL) -> [UIMenuElement])? = nil
     ) {
@@ -32,6 +35,7 @@ public struct GlimmerText: UIViewRepresentable {
         self.configuration = configuration
         self.onLinkTap = onLinkTap
         self.onTokenTap = onTokenTap
+        self.onImageTap = onImageTap
         self.editMenuActions = editMenuActions
         self.linkMenuActions = linkMenuActions
     }
@@ -45,6 +49,7 @@ public struct GlimmerText: UIViewRepresentable {
     public func updateUIView(_ view: GlimmerView, context: Context) {
         view.onLinkTap = onLinkTap
         view.onTokenTap = onTokenTap
+        view.onImageTap = onImageTap
         view.editMenuActions = editMenuActions
         view.linkMenuActions = linkMenuActions
         view.update(markdown: markdown, isStreaming: isStreaming, revealID: revealID)

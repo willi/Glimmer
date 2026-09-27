@@ -159,6 +159,12 @@ public final class GlimmerView: UIView {
         return GlimmerMarkdownSerializer.markdown(from: textView.textStorage, range: range)
     }
 
+    /// The plain text for `range` of the shown text, or — for nil — the whole answer: what copy writes as plain text.
+    public func plainText(for range: NSRange? = nil) -> String {
+        let all = NSRange(location: 0, length: textView.textStorage.length)
+        return GlimmerMarkdownSerializer.plainText(from: textView.textStorage, range: range ?? all)
+    }
+
     // MARK: - Accessibility
 
     /// While a reveal runs the view is one element that reads what is revealed so far. The text view underneath is
@@ -206,6 +212,10 @@ public final class GlimmerView: UIView {
     /// Called with an extension token the reader taps: a mention (`GlimmerMentions`), or any token an extension shows
     /// as tappable text.
     public var onTokenTap: ((GlimmerInlineToken) -> Void)?
+
+    /// Called with an image's URL and alt text when the reader taps a standalone image or an inline image. While
+    /// nil, images don't take taps.
+    public var onImageTap: ((URL, String) -> Void)?
 
     /// The token shown at `index` as text or an image, or nil.
     func token(atCharacter index: Int) -> GlimmerInlineToken? {
