@@ -154,17 +154,17 @@ view.linkMenuActions = { url in [UIAction(title: "Copy Link") { _ in UIPasteboar
 
 ## Performance
 
-These are the spec's budgets. The numbers are Release builds on the iOS 27 simulator, measured on an Apple silicon
-Mac under load. [The Plan 5 results](docs/superpowers/perf/2026-09-26-glimmer-2-plan-5-device-results.md) have the
-full tables and the commands for the iPhone 16 Pro Max harness.
+Measured on an iPhone 16 Pro Max in a Release build, against the spec's budgets. The full tables, the misses and how to
+run the harness are in [the Plan 5 results](docs/superpowers/perf/2026-09-26-glimmer-2-plan-5-device-results.md).
 
-| Metric | Budget | Measured |
+| Metric | Budget | iPhone 16 Pro Max |
 |---|---|---|
-| Applying one streamed update on the main thread, p95 (5,000-word answer) | ≤ 2 ms | 0.7–0.8 ms |
-| The same, streaming a 150-line code block | ≤ 2 ms | 1.9 ms |
-| The same, streaming a 40-row table | ≤ 2 ms | 0.5 ms |
-| Finding the last glyph of a 5,000-word answer (most of starting a phrase) | ≤ 0.2 ms | 0.01 ms |
-| Main-thread CPU per 120 Hz frame while a reveal runs between updates | about 0 | 0.3–0.4 ms (Debug) |
+| Applying one streamed update on the main thread, p95 (5,000-word answer) | ≤ 2 ms | 0.48 ms |
+| The same, streaming a 150-line code block | ≤ 2 ms | 1.97 ms |
+| The same, streaming a 40-row table | ≤ 2 ms | 0.43 ms |
+| Finding the last glyph of a 5,000-word answer (most of starting a phrase) | ≤ 0.2 ms | 0.010 ms |
+| Frames dropped while streaming below a 5,000-word answer | 0 | 4 single frames in 30 s |
+| Showing a cached settled answer again (~1,200 words) | ≤ 4 ms | 27 ms (59 ms uncached) |
 
 How it stays fast:
 
