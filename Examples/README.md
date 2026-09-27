@@ -17,7 +17,8 @@ open Examples/GlimmerDemo/GlimmerDemo.xcodeproj
 
 ### Glimmer 1.x's examples, on 2.0
 
-Open one directly with `--example=<id>`. Screens with tabs or sections open on one with `--section=<n>`, counting from 0. `--dark` and `--large-text` apply to every screen.
+Open one directly with `--example=<id>`. Screens with tabs or sections open on one with `--section=<n>`, counting from 0. `--dark` and `--large-text` apply to every screen. `--large-text` sets SwiftUI's Dynamic Type size, which reaches
+Glimmer's views through their trait collection, so the rendered markdown scales as well as the screen around it.
 
 | Screen | id | What it shows |
 |---|---|---|

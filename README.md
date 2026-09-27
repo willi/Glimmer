@@ -105,7 +105,8 @@ let view = GlimmerView(configuration: configuration)
   `GlimmerText`) to make images tappable: it is called with the image's URL and alt text.
 - **`reveal`**: `.smooth(GlimmerRevealOptions())`, with fade duration, pacing and phrase-length options, or `.none`.
   When Reduce Motion is on, text always appears at once.
-- **`dataDetectors`**: phone numbers, addresses and so on. Off by default.
+- **`dataDetectors`**: phone numbers, addresses and so on. Off by default. While any are on, the text view styles every
+  link in the theme's `linkColor`, so tappable tokens are drawn in it too instead of `mentionColor`.
 - **`allowsFind`**: turns on the system Find interaction. Present it with
   `view.findInteraction?.presentFindNavigator(showingReplace: false)`.
 

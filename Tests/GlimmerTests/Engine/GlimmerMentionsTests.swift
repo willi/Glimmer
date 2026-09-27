@@ -40,16 +40,43 @@ final class GlimmerMentionsTests: XCTestCase {
         }
     }
 
-    /// The text view styles only data-detector links, so a mention keeps a colour of its own.
-    func testAMentionKeepsItsOwnColor() {
-        var configuration = GlimmerConfiguration(extensions: [GlimmerMentions()], imageLoader: nil)
-        configuration.theme.mentionColor = .systemGreen
+    /// The text view styles only data-detector links, so a mention is drawn in a colour of its own. Checked on the
+    /// drawn pixels: the text view's link attributes restyle links when drawing, not in the text storage. With data
+    /// detectors on, they restyle mentions too (the README says so), which also shows the check sees a restyle.
+    func testAMentionIsDrawnInItsOwnColor() throws {
+        XCTAssertGreaterThan(try mentionGreenPixels(dataDetectors: []), 20, "the mention is drawn in the mention colour")
+        XCTAssertLessThan(try mentionGreenPixels(dataDetectors: [.phoneNumber]), 5, "data detectors restyle every link")
+    }
+
+    private func mentionGreenPixels(dataDetectors: UIDataDetectorTypes) throws -> Int {
+        var configuration = GlimmerConfiguration(
+            extensions: [GlimmerMentions()], imageLoader: nil, reveal: .none, dataDetectors: dataDetectors
+        )
+        configuration.theme.mentionColor = UIColor(red: 0, green: 0.8, blue: 0, alpha: 1)
         let view = GlimmerView(configuration: configuration)
-        let window = hostInWindow(view, width: 390, height: 800)
-        view.update(markdown: "Thanks @ada!")
-        XCTAssertNil(view.textView.linkTextAttributes[.foregroundColor])
-        XCTAssertEqual(view.textView.textStorage.attribute(.foregroundColor, at: 7, effectiveRange: nil) as? UIColor, .systemGreen)
+        let window = hostInWindow(view, width: 390, height: 200)
+        view.update(markdown: "Thanks @adalovelace!")
+        settle(view)
+        let textView = view.textView
+        let start = try XCTUnwrap(textView.position(from: textView.beginningOfDocument, offset: 7))
+        let end = try XCTUnwrap(textView.position(from: start, offset: 12))
+        let glyphs = textView.firstRect(for: try XCTUnwrap(textView.textRange(from: start, to: end)))
+        let rect = textView.convert(glyphs, to: window).intersection(window.bounds).integral
+        XCTAssertFalse(rect.isNull || rect.isEmpty, "the mention is on screen: \(glyphs)")
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { context in window.layer.render(in: context.cgContext) }
+        guard !rect.isNull, !rect.isEmpty, let cgImage = image.cgImage, let data = cgImage.dataProvider?.data,
+              let bytes = CFDataGetBytePtr(data) else { return 0 }
+        let scale = image.scale, perRow = cgImage.bytesPerRow, perPixel = cgImage.bitsPerPixel / 8
+        var count = 0
+        for y in max(0, Int(rect.minY * scale))..<min(cgImage.height, Int(rect.maxY * scale)) {
+            for x in max(0, Int(rect.minX * scale))..<min(cgImage.width, Int(rect.maxX * scale)) {
+                let pixel = bytes + y * perRow + x * perPixel
+                // BGRA or RGBA: green is the middle byte either way.
+                if pixel[1] > 150, pixel[0] < 100, pixel[2] < 100 { count += 1 }
+            }
+        }
         _ = window
+        return count
     }
 
     func testTappingAMentionCallsOnTokenTap() throws {
