@@ -34,6 +34,32 @@ final class GlimmerVisibleBandTests: XCTestCase {
         return content.offset(from: content.documentRange.location, to: fragment.rangeInElement.location)
     }
 
+    /// A code block taller than the screen: its own text view renders the lines on screen, at first and after a scroll.
+    func testATallCodeBlockRendersTheLinesOnScreen() throws {
+        let code = (1...200).map { "let line\($0) = \($0)" }.joined(separator: "\n")
+        let scrollView = UIScrollView()
+        let window = hostInWindow(scrollView, width: 390, height: 800)
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil, reveal: .none))
+        view.update(markdown: "Intro.\n\n```swift\n\(code)\n```\n\nOutro.")
+        let height = view.sizeThatFits(CGSize(width: 390, height: CGFloat.greatestFiniteMagnitude)).height
+        view.frame = CGRect(x: 0, y: 0, width: 390, height: height)
+        scrollView.addSubview(view)
+        scrollView.contentSize = view.frame.size
+        settle(scrollView)
+        let block = try XCTUnwrap(findSubview(GlimmerCodeBlockView.self, in: view))
+        func assertLinesOnScreenRendered(_ moment: String) throws {
+            let textView = block.textView
+            let onScreen = textView.convert(window.bounds, from: window).intersection(textView.bounds)
+            let viewport = try XCTUnwrap(textView.textLayoutManager?.textViewportLayoutController.viewportBounds)
+            XCTAssertLessThanOrEqual(viewport.minY, onScreen.minY + 1, "\(moment): viewport \(viewport), screen \(onScreen)")
+            XCTAssertGreaterThanOrEqual(viewport.maxY, onScreen.maxY - 1, "\(moment): viewport \(viewport), screen \(onScreen)")
+        }
+        try assertLinesOnScreenRendered("at the top")
+        scrollView.contentOffset.y = 2_000
+        settle(scrollView)
+        try assertLinesOnScreenRendered("scrolled 2,000 pt")
+    }
+
     func testRendersOnlyTheTextNearTheScreen() throws {
         let (view, _, window) = scrolled()
         XCTAssertLessThan(renderedViewCount(view.textView), 300, "a 5,000-word answer rendered every paragraph")

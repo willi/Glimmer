@@ -21,6 +21,9 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
         didSet { textView.pasteboard = pasteboard }
     }
 
+    /// Moves the text view's band as scroll views above scroll: the answer's own tracker moves only the answer's band.
+    private let viewportTracker = GlimmerViewportTracker()
+
     private let theme: GlimmerTheme
     /// Settable so a prepared view (`GlimmerEmbedViewPool`) takes the highlighter of the block it shows.
     var highlighter: any GlimmerHighlighter
@@ -96,6 +99,23 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil else { return viewportTracker.stop() }
+        viewportTracker.onScroll = { [weak self] in self?.textView.refreshVisibleBandIfNeeded() }
+        viewportTracker.track(ancestorsOf: self)
+        textView.refreshVisibleBandIfNeeded()
+    }
+
+    /// The answer moves the block when text above it changes; the band follows, as for `GlimmerView`.
+    override var frame: CGRect {
+        didSet { if frame.origin != oldValue.origin { UIView.performWithoutAnimation { textView.refreshVisibleBandIfNeeded() } } }
+    }
+
+    override var center: CGPoint {
+        didSet { if center != oldValue { UIView.performWithoutAnimation { textView.refreshVisibleBandIfNeeded() } } }
+    }
 
     /// Unwrapped size of the highlighted code.
     var textSize: CGSize {
