@@ -47,7 +47,7 @@ On a connected, unlocked iPhone, in Release:
 xcodebuild test -project Examples/GlimmerDemo/GlimmerDemo.xcodeproj -scheme GlimmerDevicePerf \
   -configuration Release -destination 'id=<device UDID>' -allowProvisioningUpdates ENABLE_TESTABILITY=YES
 
-# The benchmark under XCTHitchMetric. On a device it fails at a hitch-time ratio of 8 ms/s or more.
+# The benchmark under XCTHitchMetric. On a device it fails at a hitch-time ratio of 4.5 ms/s or more.
 xcodebuild test -project Examples/GlimmerDemo/GlimmerDemo.xcodeproj -scheme GlimmerDemo \
   -configuration Release -destination 'id=<device UDID>' -allowProvisioningUpdates \
   -only-testing:GlimmerDemoUITests/BenchmarkHitchUITests

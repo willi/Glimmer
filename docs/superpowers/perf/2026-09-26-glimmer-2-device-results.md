@@ -1,7 +1,64 @@
 # Glimmer 2.0 — device performance results
 
-Measured on "WW 16", an iPhone 16 Pro Max on iOS 27.0 (24A435), in Release. Plan 6's results come first; Plan 5's
-follow unchanged.
+Measured on "WW 16", an iPhone 16 Pro Max on iOS 27.0 (24A435), in Release. The newest results come first: Plan 6b,
+then Plan 6, then Plan 5.
+
+## Plan 6b
+
+Measured on 2026-09-26. Every run is the flick benchmark launched hands-off, alternating builds.
+
+| Metric | Goal | Plan 6 | Plan 6b | Result |
+|---|---|---|---|---|
+| Hitch-time ratio | addendum: ≤ 1 ms/s | 5.9, 10.0, 5.3 ms/s | 2.8, 2.7, 1.9 ms/s (1.9–3.5 over seven runs) | better, not met |
+| Hitches per run | spec: 0 | 10–19 | 3–8 | better |
+| Worst frame gap | — | 23–25 ms | 17–25 ms | — |
+| Main thread per streamed code block update, rest of the frame, p95 | — | 5.0 ms | 2.9 ms | better |
+| Reveal work per frame | spec: ~0 | 0.17 ms | 0.15 ms | — |
+| Cached configure | spec: ≤ 4 ms | 21.3 ms | 20.3 ms | miss |
+
+What each change moved:
+- **Reusing the fragment views UIKit already drew.**
+  - On iOS 27, UIKit asks the text view for a cached rendering surface for every fragment on every viewport pass.
+    WWDC26's TextKit session recommends keying those surfaces by `NSTextLayoutFragment`.
+  - Handing back the view already drawn for the same fragment skips UIKit's redraw. The fragment's size and its
+    rendering attributes (UIKit's link and find tints) must also be unchanged.
+  - Before, every pass redrew every fragment in the band. On the simulator, redraws of already-drawn fragments fell
+    from about 8,000 to about 870 per run.
+  - `GlimmerConfiguration.reusesDrawnText` turns it off.
+- **One viewport pass per band move.** Calling `layoutViewport()` ran one pass at once and UIKit's canvas ran another
+  in the commit. The band now marks the canvas for layout instead. The canvas is the superview of the surfaces UIKit
+  hands over.
+- **Laying out ahead of the band in idle frames.** For up to 2 ms a frame, 1.5 screens ahead in the scroll direction
+  and 0.5 behind, as Texture's preload range does. The flick's return no longer lays text out in the frame it
+  arrives: its hitch slices went from 16–18 ms to 3–6 ms.
+- **A prepared code block view.** While an answer streams, one code block view is built and laid out once on an idle
+  turn. The next fence takes it: 0.3–0.9 ms on the device, against 4.3–10 ms fresh.
+- **Two options were tried and rejected:**
+  - half-screen band steps: 4.1–5.6 ms/s, against 2.2–3.5 interleaved;
+  - `drawsAsynchronously` on the fragment views: 3.7–8.0 ms/s.
+- **iOS 26 floor.** The iOS 27 hooks are declared by Objective-C selector, so the package builds for iOS 26. iOS 26
+  never calls them.
+
+### What's left
+
+A throwaway probe on this build attributed the remaining hitches. They fall almost all in frames that apply a streamed
+update, not in the flick.
+- **Glimmer's apply:** 1.5–3.5 ms, including the reveal's height report.
+- **Five to seven milliseconds outside Glimmer's code.** Most likely SwiftUI re-laying out the scroll view's content as
+  the answer grows, then Core Animation's commit.
+- **Two viewport passes for the streaming answer.** UIKit resizes the answer's canvas to the new text between them.
+  Each pass costs about 2 ms.
+
+The next steps these point to:
+- Report height changes to SwiftUI at most once per frame while streaming.
+- Keep the canvas from resizing on every update, for example by growing it in larger steps.
+- Profile the unattributed part with Instruments on the device.
+
+### Gates
+
+- The device benchmark gate moves from 8 to 4.5 ms/s: the worst of seven rested runs (3.5) plus 0.5, rounded up to
+  the next half.
+- `GlimmerDevicePerf` passes on the device with its gates unchanged.
 
 ## Plan 6
 

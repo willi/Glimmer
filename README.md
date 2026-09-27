@@ -161,17 +161,19 @@ run the harness are in [the device results](docs/superpowers/perf/2026-09-26-gli
 | Metric | Budget | iPhone 16 Pro Max |
 |---|---|---|
 | Applying one streamed update on the main thread, p95 (5,000-word answer) | ≤ 2 ms | 0.49–0.62 ms |
-| The same, streaming a 150-line code block | ≤ 2 ms | 1.02 ms |
+| The same, streaming a 150-line code block | ≤ 2 ms | 1.15 ms |
 | The same, streaming a 40-row table | ≤ 2 ms | 0.52–0.56 ms |
 | Starting a phrase during a reveal (median) | ≤ 0.5 ms | 0.22 ms |
-| Hitches while streaming and scrolling a 5,000-word answer (frame monitor) | 0 | 1.4–1.9 ms per s with an eased scroll; 5.1–7.3 ms per s with a flick |
-| Showing a cached settled answer again (~1,200 words) | ≤ 4 ms | 21.5 ms (62 ms uncached) |
+| Hitches while streaming and scrolling a 5,000-word answer (frame monitor) | 0 | 1.9–3.5 ms per s with a flick, Apple's "good" |
+| Showing a cached settled answer again (~1,200 words) | ≤ 4 ms | 20.3 ms (60 ms uncached) |
 
 How it stays fast:
 
 - **Parse and compose on a worker.** Only the open tail of the answer is parsed again, and code is highlighted there
   too. The main thread applies one small edit.
 - **A visible band.** TextKit renders only the text near the screen, even in a 5,000-word answer.
+- **Text is drawn once.** Scrolling and streaming reuse the text TextKit already drew, and text about to scroll in is
+  laid out in idle frames.
 - **An unbounded text container.** Finding text late in a long answer takes microseconds, not milliseconds.
 - **Core Animation fades.** The reveal is a mask of phrase layers that Core Animation animates, so the main thread
   only starts phrases.
