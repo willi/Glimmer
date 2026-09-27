@@ -73,6 +73,16 @@ final class GlimmerTailHealerTests: XCTestCase {
         XCTAssertFalse(text.contains("*"))
         XCTAssertFalse(text.contains("`"))
     }
+
+    /// A break tag still arriving would show as text, then turn into a line break.
+    func testAPartialBreakTagIsHeldBack() {
+        for partial in ["One<", "One<b", "One<br", "One<BR", "One<br ", "One<br /"] {
+            XCTAssertEqual(GlimmerTailHealer.heal(partial), "One", partial)
+        }
+        XCTAssertEqual(GlimmerTailHealer.heal("One<br>"), "One<br>")
+        XCTAssertEqual(GlimmerTailHealer.heal("a < b"), "a < b", "a comparison")
+        XCTAssertEqual(GlimmerTailHealer.heal("One<bold"), "One<bold", "not a break tag")
+    }
 }
 
 /// Plain rendered text of markdown, for assertions that care only about visible characters.

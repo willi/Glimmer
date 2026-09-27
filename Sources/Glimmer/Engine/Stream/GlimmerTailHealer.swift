@@ -34,6 +34,7 @@ enum GlimmerTailHealer {
         tail = holdBackOpeningPipe(tail)
         tail = holdBackSetextUnderline(tail)
         tail = holdBackFootnoteStarts(tail)
+        tail = holdBackPartialBreakTag(tail)
         tail = healLinks(tail)
         tail = closeInlineDelimiters(tail)
         return String(markdown[..<tailStart]) + tail
@@ -197,6 +198,12 @@ enum GlimmerTailHealer {
             return String(tail[..<match.range.lowerBound])
         }
         return tail
+    }
+
+    /// A `<br>` still arriving (`<`, `<b`, `<br /`) waits: shown as text, it would turn into a line break.
+    private static func holdBackPartialBreakTag(_ tail: String) -> String {
+        guard tail.last != ">", let match = tail.firstMatch(of: #/<(?:[bB](?:[rR]\s*/?)?)?$/#) else { return tail }
+        return String(tail[..<match.range.lowerBound])
     }
 
     private static func healLinks(_ tail: String) -> String {

@@ -270,4 +270,21 @@ final class GlimmerComposerTests: XCTestCase {
         let gap = ceil(theme.bodyFont.pointSize * 0.4)
         XCTAssertEqual(style(of: "done", in: compose("- [x] done"))?.headIndent, max(theme.listIndent, ceil(box + gap)))
     }
+
+    /// `<br>` is the one HTML tag with a plain meaning, and a common way to break a line in a table cell: a line break.
+    /// Other inline HTML stays text, and copies escaped, as the text it shows.
+    func testABreakTagIsALineBreak() {
+        let text = compose("one<br>two<BR/>three<br />four <kbd>x</kbd>")
+        XCTAssertEqual(text.string, "one\u{2028}two\u{2028}three\u{2028}four <kbd>x</kbd>")
+        let all = NSRange(location: 0, length: text.length)
+        XCTAssertEqual(GlimmerMarkdownSerializer.markdown(from: text, range: all), "one<br>two<BR/>three<br />four \\<kbd>x\\</kbd>")
+        XCTAssertEqual(GlimmerMarkdownSerializer.plainText(from: text, range: all), "one\ntwo\nthree\nfour <kbd>x</kbd>")
+    }
+
+    func testABreakTagBreaksATableCell() throws {
+        let text = compose("| Items |\n|---|\n| • one<br>• two |")
+        let attachment = try XCTUnwrap(text.attribute(.attachment, at: 0, effectiveRange: nil) as? GlimmerBlockAttachment)
+        guard case .table(_, let rows, _) = attachment.embed else { return XCTFail("not a table") }
+        XCTAssertEqual(rows.first?.first?.string, "• one\u{2028}• two")
+    }
 }

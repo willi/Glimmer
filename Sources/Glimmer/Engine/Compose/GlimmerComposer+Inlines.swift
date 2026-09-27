@@ -38,6 +38,11 @@ extension GlimmerComposer {
                 output.append(NSAttributedString(string: " ", attributes: attributes))
             case .lineBreak:
                 output.append(NSAttributedString(string: "\u{2028}", attributes: attributes))
+            case .html(let html) where html.wholeMatch(of: #/<br\s*/?>/#.ignoresCase()) != nil:
+                // The one tag with a plain meaning, and a common way to break a line in a table cell. Copies as itself.
+                var lineBreak = attributes
+                lineBreak[.glimmerSource] = html
+                output.append(NSAttributedString(string: "\u{2028}", attributes: lineBreak))
             case .html(let html):
                 output.append(NSAttributedString(string: html, attributes: attributes))
             case .footnoteReference(let label):
