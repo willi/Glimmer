@@ -203,6 +203,40 @@ final class GlimmerStreamingPerformanceTests: XCTestCase {
         _ = window
     }
 
+    /// Spec addendum A3: a phrase start costs ≤ 0.5 ms on an iPhone 16 Pro Max. Each clock step here starts or
+    /// settles phrases, as a wake does.
+    func testPhraseStartsStayCheap() async {
+        // Before Plan 6 Task 3: 0.287 ms (Debug) and 0.225 ms (Release) on the simulator; the device measured about
+        // 1.1 ms. The gates sit about 30% under the simulator's old medians.
+        #if DEBUG
+        let gate: Duration = .microseconds(200)
+        #else
+        let gate: Duration = .microseconds(150)
+        #endif
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
+        let clock = ManualRevealClock()
+        view.clock = clock
+        let window = hostInWindow(view, width: 390, height: 800)
+        // Mixed markdown, as the device probe measured: lists, quotes and headings put many lines within reach.
+        view.update(markdown: String(longMixedAnswer.prefix(3_000)), isStreaming: true, revealID: "phrase-starts")
+        await view.pendingDocument?.value
+        settle(view)
+        var samples: [Duration] = []
+        var time = 0.0
+        while view.engine != nil, time < 30 {
+            guard let due = clock.scheduled else { break }
+            time = due
+            let start = threadCPUTime()
+            clock.advance(to: time)
+            samples.append(threadCPUTime() - start)
+        }
+        let median = samples.sorted()[samples.count / 2]
+        print("PERF phrase start median \(median) over \(samples.count) wakes")
+        XCTAssertGreaterThan(samples.count, 20)
+        XCTAssertLessThan(median, gate)
+        _ = window
+    }
+
     /// Load on a shared machine (another simulator, a compile) can push one run's p95 over a gate; a real regression
     /// fails both runs. So each gated measurement gets one retry.
     private func measured(

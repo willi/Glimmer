@@ -148,6 +148,32 @@ final class GlimmerTextViewTests: XCTestCase {
         XCTAssertEqual(textView.linkTextAttributes[.foregroundColor] as? UIColor, themed.linkColor)
         XCTAssertEqual(textView.linkTextAttributes[.underlineStyle] as? Int, NSUnderlineStyle.single.rawValue)
     }
+
+    func testSettledLineMatchesTheWideQuery() {
+        let textView = GlimmerTextView()
+        let window = hostInWindow(textView, width: 390, height: 4_000)
+        textView.attributedText = GlimmerComposer(theme: .default).compose(GlimmerParser.parse(
+            StreamingFixtures.all.map(\.markdown).joined(separator: "\n\n")
+        ))
+        textView.layoutIfNeeded()
+        let string = textView.textStorage.string as NSString
+        var checked = 0
+        for index in stride(from: 1, to: textView.textStorage.length - 1, by: 7) where string.character(at: index - 1) != 0x0A {
+            guard let line = textView.settledLine(upTo: index), let lineTop = textView.lineRect(atCharacter: index)?.minY else { continue }
+            let wide = textView.segmentRects(for: NSRange(location: max(0, index - 512), length: min(index, 512)))
+                .filter { $0.minY >= lineTop - 0.5 }
+            XCTAssertEqual(line.top, lineTop, accuracy: 0.5, "top at \(index)")
+            XCTAssertEqual(line.rects.count, wide.count, "rects at \(index)")
+            for (a, b) in zip(line.rects, wide) {
+                XCTAssertEqual(a.minX, b.minX, accuracy: 0.5)
+                XCTAssertEqual(a.maxX, b.maxX, accuracy: 0.5)
+                XCTAssertEqual(a.minY, b.minY, accuracy: 0.5)
+            }
+            checked += 1
+        }
+        XCTAssertGreaterThan(checked, 100)
+        _ = window
+    }
 }
 
 /// Counts fetches; returns an empty image.

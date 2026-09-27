@@ -80,11 +80,10 @@ final class GlimmerRevealMask {
         )
         if key != settledKey || rebuild || moved <= firstUnsettled {
             settledKey = key
-            let lineTop = textView.lineRect(atCharacter: firstUnsettled)?.minY ?? bounds.height
+            let line = textView.settledLine(upTo: firstUnsettled)
+            let lineTop = line?.top ?? bounds.height
             settledLayer.frame = CGRect(x: 0, y: 0, width: bounds.width, height: lineTop)
-            let lineStart = max(0, firstUnsettled - 512)
-            let settledOnLine = textView.segmentRects(for: NSRange(location: lineStart, length: firstUnsettled - lineStart))
-                .filter { $0.minY >= lineTop - 0.5 }
+            let settledOnLine = line?.rects ?? []
             // The settled part of a line always starts the line, so it also uncovers the gutter (quote bars).
             var settledRects = settledOnLine.map(Self.extendedToLeadingEdge)
             // An embed revealing in units: the units that finished fading stay uncovered.

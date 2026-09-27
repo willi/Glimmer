@@ -26,4 +26,16 @@ final class GlimmerRevealStoreTests: XCTestCase {
         store.record(5, text: regenerated, for: "m")
         XCTAssertEqual(store.revealedLength(for: "m", text: regenerated), 5, "a new generation restarts at its own length")
     }
+
+    func testRecordingTheSameTextVersionAgainKeepsTheLongestLength() {
+        let store = GlimmerRevealStore(capacity: 4)
+        let text = NSString(string: String(repeating: "word ", count: 400))
+        store.record(100, text: text, version: 7, for: "m")
+        store.record(300, text: text, version: 7, for: "m")
+        store.record(200, text: text, version: 7, for: "m")
+        XCTAssertEqual(store.revealedLength(for: "m", text: text), 300)
+        let other = NSString(string: "different " + (text as String))
+        store.record(50, text: other, version: 8, for: "m")
+        XCTAssertEqual(store.revealedLength(for: "m", text: other), 50, "a new text starts over")
+    }
 }

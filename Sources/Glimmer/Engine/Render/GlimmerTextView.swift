@@ -195,6 +195,22 @@ final class GlimmerTextView: UITextView {
         return segmentRects(for: NSRange(location: index, length: 1)).first
     }
 
+    /// The top of the line holding the character at `index`, and the segment rects of that line's text before it.
+    /// Lays out and asks about one line, so a phrase start costs the same at the end of a long answer as at its start.
+    func settledLine(upTo index: Int) -> (top: CGFloat, rects: [CGRect])? {
+        guard index >= 0, index < textStorage.length, let manager = textLayoutManager, let content = manager.textContentManager,
+              let location = content.location(content.documentRange.location, offsetBy: index),
+              let characterRange = textRange(for: NSRange(location: index, length: 1)) else { return nil }
+        manager.ensureLayout(for: characterRange)
+        guard let fragment = manager.textLayoutFragment(for: location) else { return nil }
+        let paragraphStart = content.offset(from: content.documentRange.location, to: fragment.rangeInElement.location)
+        let offset = index - paragraphStart
+        guard let line = fragment.textLineFragments.first(where: { NSLocationInRange(offset, $0.characterRange) }) else { return nil }
+        let top = fragment.layoutFragmentFrame.minY + line.typographicBounds.minY + textContainerInset.top
+        let lineStart = paragraphStart + line.characterRange.location
+        return (top, index > lineStart ? segmentRects(for: NSRange(location: lineStart, length: index - lineStart)) : [])
+    }
+
     /// Whether the character at `index` begins a visual line: a paragraph start or a wrap point.
     func isLineStart(atCharacter index: Int) -> Bool {
         guard index > 0 else { return true }
