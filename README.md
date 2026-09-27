@@ -55,6 +55,11 @@ view.update(markdown: received, isStreaming: false, revealID: messageID)
 While an answer reveals, the view's height ends at the last revealed line and never shrinks. `onHeightChange` fires
 whenever the height may have changed.
 
+Footnotes render as the web renders them: superscript numbers in order of first reference, and the notes as a list
+after the last block. A marker shows as a number as soon as it arrives. The notes appear only once the answer
+settles, because body text keeps arriving after a definition. A host that shows a stream with no end should pass
+`isStreaming: false` to show them.
+
 ## SwiftUI
 
 `GlimmerText` wraps `GlimmerView`:
@@ -94,8 +99,9 @@ let view = GlimmerView(configuration: configuration)
 - **`extensions`**: custom syntax. See [Extensions](#extensions).
 - **`highlighter`** (`GlimmerHighlighter`): syntax highlighting for code blocks. The default,
   `GlimmerBasicHighlighter`, covers keywords, strings, comments and numbers in common languages.
-- **`imageLoader`** (`GlimmerImageLoader`): loads standalone images. `nil` shows each image's alt text in its
-  reserved space. A load never shifts the text below, because the space is reserved before the image arrives.
+- **`imageLoader`** (`GlimmerImageLoader`): loads images. A standalone image gets a reserved box, and an image inside
+  a paragraph gets a square as tall as the line. `nil` shows a standalone image's alt text in its box. A load never
+  shifts the text, because the space is reserved before the image arrives.
 - **`reveal`**: `.smooth(GlimmerRevealOptions())`, with fade duration, pacing and phrase-length options, or `.none`.
   When Reduce Motion is on, text always appears at once.
 - **`dataDetectors`**: phone numbers, addresses and so on. Off by default.
@@ -122,6 +128,23 @@ struct Citations: GlimmerExtension {
 var configuration = GlimmerConfiguration()
 configuration.extensions = [Citations()]
 GlimmerView(configuration: configuration).update(markdown: "As shown [1].")
+```
+
+A token can also show as text or as an image: set its `presentation` to `.text(tappable:)` or `.image(url)`. Tappable
+text uses the theme's `mentionColor`, and `onTokenTap` (on `GlimmerView` and `GlimmerText`) reports the token. An
+extension can skip link text (`appliesInsideLinks`). It can also hold back a token still being typed at the end of a
+stream (`streamingHoldBack(in:)`), so `:rock` never turns into 🚀 after it was shown.
+
+Two extensions are built in, and both are opt-in:
+
+- `GlimmerEmojiShortcodes`: GitHub's shortcodes. `:rocket:` becomes 🚀, and GitHub's custom ones (`:octocat:`) inline
+  images. Not in code, and not glued to a word (`a:b:c`).
+- `GlimmerMentions`: `@username`, by GitHub's rules. A mention is tappable text, reported through `onTokenTap`
+  with the name in `payload["username"]`.
+
+```swift
+let configuration = GlimmerConfiguration(extensions: [GlimmerEmojiShortcodes(), GlimmerMentions()])
+GlimmerText(answer, configuration: configuration, onTokenTap: { token in openProfile(token.payload["username"]) })
 ```
 
 ## Copy, selection and menus
@@ -212,8 +235,7 @@ Gone, with no replacement:
 
 - the markdown linter and the exporters;
 - the HTML and plain-text renderers (copy still writes plain text and markdown);
-- the GitHub mention, issue and SHA extensions (write a `GlimmerExtension`);
-- emoji shortcodes;
+- the GitHub issue and SHA extensions (write a `GlimmerExtension`);
 - the parallel and cached parsers.
 
 ## License

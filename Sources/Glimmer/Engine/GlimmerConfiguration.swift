@@ -4,7 +4,8 @@ import UIKit
 public struct GlimmerConfiguration: Sendable {
     public var theme: GlimmerTheme
     public var extensions: [any GlimmerExtension]
-    /// Loads standalone images. `nil` shows each image's alt text in its reserved box.
+    /// Loads images: standalone ones, in a reserved box, and ones inside a paragraph, in a line-height square. `nil`
+    /// shows a standalone image's alt text in its box and leaves an inline square empty.
     public var imageLoader: (any GlimmerImageLoader)?
     public var highlighter: any GlimmerHighlighter
     /// How streaming text appears. Reduce Motion always shows text immediately.

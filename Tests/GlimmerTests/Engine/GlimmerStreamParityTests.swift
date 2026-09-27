@@ -42,6 +42,35 @@ final class GlimmerStreamParityTests: XCTestCase {
 
     func testStreamedViewEndsIdenticalToASettledView() async throws {
         for fixture in StreamingFixtures.all {
+            await assertStreamedEndsLikeSettled(fixture, configuration: configuration)
+        }
+    }
+
+    /// Footnotes, emoji, mentions, an inline image and a JSON block, with both extensions on.
+    func testTheParityFixtureEndsIdenticalToASettledView() async throws {
+        let parity = (name: "parity", markdown: """
+        # Parity
+
+        Glimmer renders footnotes[^1], emoji :tada: and :octocat:, mentions like @ada, and a badge \
+        ![ci](https://example.com/b.png) inside a paragraph.
+
+        ```json
+        {"name": "Ada", "ok": true}
+        ```
+
+        A second reference[^1] keeps its number.
+
+        [^1]: As the web shows them.
+        """)
+        await assertStreamedEndsLikeSettled(parity, configuration: GlimmerConfiguration(
+            extensions: [GlimmerEmojiShortcodes(), GlimmerMentions()], imageLoader: nil
+        ))
+    }
+
+    private func assertStreamedEndsLikeSettled(
+        _ fixture: (name: String, markdown: String), configuration: GlimmerConfiguration
+    ) async {
+        do {
             let streamed = GlimmerView(configuration: configuration)
             let clock = ManualRevealClock()
             streamed.clock = clock
