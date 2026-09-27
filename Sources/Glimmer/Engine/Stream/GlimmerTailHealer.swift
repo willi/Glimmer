@@ -31,6 +31,7 @@ enum GlimmerTailHealer {
         let tailStart = lastParagraphStart(in: markdown)
         var tail = String(markdown[tailStart...])
         tail = holdBackTableHeader(tail)
+        tail = holdBackOpeningPipe(tail)
         tail = holdBackSetextUnderline(tail)
         tail = healLinks(tail)
         tail = closeInlineDelimiters(tail)
@@ -144,6 +145,15 @@ enum GlimmerTailHealer {
         }
         lines.removeSubrange(header...)
         return lines.joined(separator: "\n") + (header > 0 ? "\n" : "")
+    }
+
+    /// A last line that is only a pipe (a table row just begun) parses as a paragraph "|" below the table, then joins
+    /// the table when its first cell arrives; hold it back until then.
+    private static func holdBackOpeningPipe(_ tail: String) -> String {
+        guard let newline = tail.lastIndex(of: "\n") else { return tail }
+        let lastLine = tail[tail.index(after: newline)...]
+        guard lastLine.trimmingCharacters(in: .whitespaces) == "|" else { return tail }
+        return String(tail[...newline])
     }
 
     /// Whether `line` is a delimiter row still being typed: only `|`, `-`, `:` and spaces, but not yet one valid cell

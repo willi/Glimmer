@@ -8,6 +8,9 @@ final class GlimmerTailHealerTests: XCTestCase {
         ("a _b", "a _b_"),
         ("snake_case_name", "snake_case_name"),
         ("Title\n-", "Title\n"),
+        // A body row that is only its opening pipe would parse as a paragraph "|" below the table.
+        ("| A |\n|---|\n| ", "| A |\n|---|\n"),
+        ("| A |\n|---|\n| x |\n|", "| A |\n|---|\n| x |\n"),
         ("Title\n---", "Title\n"),
         ("text\n\n---", "text\n\n---"),
         ("Hello **wor ", "Hello **wor** "),

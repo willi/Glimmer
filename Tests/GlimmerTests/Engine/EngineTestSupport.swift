@@ -165,3 +165,72 @@ func threadCPUTime() -> Duration {
         + Int64(info.user_time.microseconds + info.system_time.microseconds)
     return .microseconds(micros)
 }
+
+/// Streams every `step`th prefix of `markdown` into a view and checks that text shown earlier never moves: at each step,
+/// the text before the last paragraph shown at the previous step must be unchanged, with the same segment rects
+/// (within 0.5 pt). The last paragraph may reflow as words arrive. Ends with the settled answer.
+/// Synchronous (the run loop is pumped until the view's worker is done): a long chain of awaits in one XCTest async
+/// method crashed the test runner in Swift Concurrency's task allocator.
+@MainActor
+func assertStreamingKeepsShownTextInPlace(
+    _ markdown: String, configuration: GlimmerConfiguration = GlimmerConfiguration(imageLoader: nil, reveal: .none),
+    every step: Int = 3, file: StaticString = #filePath, line: UInt = #line
+) {
+    let view = GlimmerView(configuration: configuration)
+    let window = hostInWindow(view, width: 390, height: 800)
+    var previous: ShownText?
+    var end = markdown.startIndex
+    while end < markdown.endIndex {
+        end = markdown.index(end, offsetBy: step, limitedBy: markdown.endIndex) ?? markdown.endIndex
+        view.update(markdown: String(markdown[..<end]), isStreaming: end < markdown.endIndex, revealID: "stability")
+        let deadline = Date().addingTimeInterval(5)
+        while view.pendingDocument != nil, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.002)) }
+        view.layoutIfNeeded()
+        let shown = ShownText(view.textView)
+        if let previous, let failure = shown.movedText(since: previous) {
+            XCTFail("at prefix \(markdown.distance(from: markdown.startIndex, to: end)) " +
+                    "(…\(String(markdown[..<end].suffix(30)).debugDescription)): \(failure)", file: file, line: line)
+            break
+        }
+        previous = shown
+    }
+    _ = window
+}
+
+/// What a text view shows before its last paragraph: the text, and its glyphs' segment rects. Zero-width segments are
+/// line ends, not glyphs (their metrics follow the next line's font), so they are left out.
+@MainActor
+struct ShownText {
+    let text: NSString
+    let stableLength: Int
+    let rects: [CGRect]
+
+    init(_ textView: GlimmerTextView) {
+        // A copy: the text storage's string is mutable and changes with the next update.
+        text = NSString(string: textView.textStorage.string)
+        let newline = text.range(of: "\n", options: .backwards)
+        stableLength = newline.location == NSNotFound ? 0 : NSMaxRange(newline)
+        rects = Self.glyphRects(in: textView, length: stableLength)
+    }
+
+    static func glyphRects(in textView: GlimmerTextView, length: Int) -> [CGRect] {
+        textView.segmentRects(for: NSRange(location: 0, length: length)).filter { $0.width > 0 }
+    }
+
+    /// Why text `previous` showed before its last paragraph isn't where it was, or nil.
+    func movedText(since previous: ShownText) -> String? {
+        let stable = previous.stableLength
+        guard text.length >= stable, text.substring(to: stable) == previous.text.substring(to: stable) else {
+            return "text before offset \(stable) changed: \(previous.text.substring(to: stable).debugDescription) became " +
+                "\(text.substring(to: min(stable, text.length)).debugDescription)"
+        }
+        let now = Array(rects.prefix(previous.rects.count))
+        guard now.count == previous.rects.count else { return "\(previous.rects.count) glyph rects became \(now.count)" }
+        for (before, after) in zip(previous.rects, now) where
+            abs(before.minX - after.minX) > 0.5 || abs(before.minY - after.minY) > 0.5 ||
+            abs(before.maxX - after.maxX) > 0.5 || abs(before.maxY - after.maxY) > 0.5 {
+            return "a glyph rect moved: \(before) → \(after)"
+        }
+        return nil
+    }
+}
