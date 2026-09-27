@@ -17,9 +17,9 @@ final class GlimmerInlineImageView: UIImageView {
         layer.cornerRadius = 3
         layer.cornerCurve = .continuous
         backgroundColor = theme.codeBlockBackground
-        // The spoken-only alt text after it reads the image; the view itself stays out of VoiceOver's way.
-        isAccessibilityElement = false
-        accessibilityElementsHidden = true
+        accessibilityLabel = alt
+        accessibilityTraits = [.image, .button]
+        updateAccessibility()
         isUserInteractionEnabled = true
         addGestureRecognizer(tapRecognizer)
         guard let loader else { return }
@@ -36,6 +36,24 @@ final class GlimmerInlineImageView: UIImageView {
 
     @objc func handleTap() {
         glimmerImageTapHandler?(source, alt)
+    }
+
+    /// The spoken-only alt text after the image reads it, so the view stays out of VoiceOver's way, unless the host takes
+    /// image taps: then it is a button. Set, not computed: UIKit's accessibility may read a view off the main thread.
+    func updateAccessibility() {
+        isAccessibilityElement = acceptsTaps
+        accessibilityElementsHidden = !acceptsTaps
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        updateAccessibility()
+    }
+
+    override func accessibilityActivate() -> Bool {
+        guard acceptsTaps else { return false }
+        handleTap()
+        return true
     }
 
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {

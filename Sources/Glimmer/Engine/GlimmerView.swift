@@ -215,7 +215,18 @@ public final class GlimmerView: UIView {
 
     /// Called with an image's URL and alt text when the reader taps a standalone image or an inline image. While
     /// nil, images don't take taps.
-    public var onImageTap: ((URL, String) -> Void)?
+    public var onImageTap: ((URL, String) -> Void)? {
+        didSet {
+            guard (oldValue == nil) != (onImageTap == nil) else { return }
+            Self.inlineImageViews(in: textView).forEach { $0.updateAccessibility() }
+        }
+    }
+
+    private static func inlineImageViews(in view: UIView) -> [GlimmerInlineImageView] {
+        view.subviews.flatMap { subview in
+            (subview as? GlimmerInlineImageView).map { [$0] } ?? inlineImageViews(in: subview)
+        }
+    }
 
     /// The token shown at `index` as text or an image, or nil.
     func token(atCharacter index: Int) -> GlimmerInlineToken? {
@@ -534,9 +545,12 @@ extension GlimmerView: UITextViewDelegate {
         _ textView: UITextView, menuConfigurationFor textItem: UITextItem, defaultMenu: UIMenu
     ) -> UITextItem.MenuConfiguration? {
         guard case .link(let url) = textItem.content else { return nil }
-        // A token is no web link: no Open, Copy Link or preview.
-        if GlimmerTokenBox.isTokenLink(url) { return UITextItem.MenuConfiguration(menu: UIMenu(children: [])) }
-        guard linkMenuActions != nil else { return nil }
+        return menuConfiguration(forLink: url, defaultMenu: defaultMenu)
+    }
+
+    func menuConfiguration(forLink url: URL, defaultMenu: UIMenu) -> UITextItem.MenuConfiguration? {
+        // A token is no web link: no menu, and no preview of its internal URL.
+        guard !GlimmerTokenBox.isTokenLink(url), linkMenuActions != nil else { return nil }
         return UITextItem.MenuConfiguration(menu: linkMenu(for: url, defaultMenu: defaultMenu))
     }
 
