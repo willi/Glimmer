@@ -215,7 +215,8 @@ enum GlimmerMarkdownSerializer {
 
         init(_ attributes: [NSAttributedString.Key: Any]) {
             var marks: [Mark] = []
-            if let url = attributes[.link] as? URL { marks.append(.link(url)) }
+            // A token's link is how UIKit reaches it, not part of the markdown.
+            if let url = attributes[.link] as? URL, !GlimmerTokenBox.isTokenLink(url) { marks.append(.link(url)) }
             if attributes[.glimmerStrong] as? Bool == true { marks.append(.strong) }
             if attributes[.glimmerEmphasis] as? Bool == true { marks.append(.emphasis) }
             if (attributes[.strikethroughStyle] as? Int ?? 0) != 0 { marks.append(.strikethrough) }

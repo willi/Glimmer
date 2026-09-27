@@ -327,8 +327,7 @@ public final class GlimmerView: UIView {
     /// Re-composes everything (theme, configuration or text size changed).
     private func rebuildDocument() {
         textView.reusesDrawnText = configuration.reusesDrawnText
-        textView.apply(theme: configuration.theme.scaled(for: traitCollection))
-        textView.dataDetectorTypes = configuration.dataDetectors
+        textView.apply(theme: configuration.theme.scaled(for: traitCollection), dataDetectors: configuration.dataDetectors)
         textView.isFindInteractionEnabled = configuration.allowsFind
         if revealOptions == nil { endReveal() }
         composeSynchronously()
@@ -522,10 +521,10 @@ public final class GlimmerView: UIView {
 extension GlimmerView: UITextViewDelegate {
     public func textView(_ textView: UITextView, primaryActionFor textItem: UITextItem, defaultAction: UIAction) -> UIAction? {
         switch textItem.content {
+        case .link(let url) where GlimmerTokenBox.isTokenLink(url):
+            return tokenAction(atCharacter: textItem.range.location)
         case .link(let url):
             return linkAction(for: url) ?? defaultAction
-        case .tag:
-            return tokenAction(atCharacter: textItem.range.location)
         default:
             return defaultAction
         }
@@ -534,7 +533,10 @@ extension GlimmerView: UITextViewDelegate {
     public func textView(
         _ textView: UITextView, menuConfigurationFor textItem: UITextItem, defaultMenu: UIMenu
     ) -> UITextItem.MenuConfiguration? {
-        guard case .link(let url) = textItem.content, linkMenuActions != nil else { return nil }
+        guard case .link(let url) = textItem.content else { return nil }
+        // A token is no web link: no Open, Copy Link or preview.
+        if GlimmerTokenBox.isTokenLink(url) { return UITextItem.MenuConfiguration(menu: UIMenu(children: [])) }
+        guard linkMenuActions != nil else { return nil }
         return UITextItem.MenuConfiguration(menu: linkMenu(for: url, defaultMenu: defaultMenu))
     }
 

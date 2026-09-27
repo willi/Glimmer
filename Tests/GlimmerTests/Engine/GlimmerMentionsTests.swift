@@ -25,10 +25,24 @@ final class GlimmerMentionsTests: XCTestCase {
         XCTAssertEqual(mentions(in: text), ["@ada"])
         let location = (text.string as NSString).range(of: "@ada").location
         XCTAssertEqual(text.attribute(.foregroundColor, at: location, effectiveRange: nil) as? UIColor, theme.mentionColor)
-        XCTAssertNotNil(text.attribute(.textItemTag, at: location, effectiveRange: nil), "UIKit reports taps on it")
+        let link = try XCTUnwrap(text.attribute(.link, at: location, effectiveRange: nil) as? URL,
+                                 "a link, so VoiceOver and the links rotor reach it")
+        XCTAssertTrue(GlimmerTokenBox.isTokenLink(link))
         let box = try XCTUnwrap(text.attribute(.glimmerToken, at: location, effectiveRange: nil) as? GlimmerTokenBox)
         XCTAssertEqual(box.token.kind, "mention")
         XCTAssertEqual(box.token.payload["username"], "ada")
+    }
+
+    /// The text view styles only data-detector links, so a mention keeps a colour of its own.
+    func testAMentionKeepsItsOwnColor() {
+        var configuration = GlimmerConfiguration(extensions: [GlimmerMentions()], imageLoader: nil)
+        configuration.theme.mentionColor = .systemGreen
+        let view = GlimmerView(configuration: configuration)
+        let window = hostInWindow(view, width: 390, height: 800)
+        view.update(markdown: "Thanks @ada!")
+        XCTAssertNil(view.textView.linkTextAttributes[.foregroundColor])
+        XCTAssertEqual(view.textView.textStorage.attribute(.foregroundColor, at: 7, effectiveRange: nil) as? UIColor, .systemGreen)
+        _ = window
     }
 
     func testTappingAMentionCallsOnTokenTap() throws {

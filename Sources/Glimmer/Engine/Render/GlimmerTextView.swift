@@ -109,14 +109,17 @@ final class GlimmerTextView: UITextView {
         forgetDrawnSurfaces()
     }
 
-    func apply(theme: GlimmerTheme) {
+    /// Markdown links and tappable tokens carry their own style in the text. The text view styles only the links data
+    /// detectors find, and only while there are any: its link attributes apply to every link, tokens included.
+    func apply(theme: GlimmerTheme, dataDetectors: UIDataDetectorTypes = []) {
         self.theme = theme
         textVersion &+= 1
         forgetDrawnSurfaces()
         fragmentProvider.theme = theme
+        dataDetectorTypes = dataDetectors
         var link: [NSAttributedString.Key: Any] = [.foregroundColor: theme.linkColor]
         if theme.underlinesLinks { link[.underlineStyle] = NSUnderlineStyle.single.rawValue }
-        linkTextAttributes = link
+        linkTextAttributes = dataDetectors.isEmpty ? [:] : link
     }
 
     /// Measured by `UITextView`: a full layout at `size.width`, so it is cached per text version and width. Use it only

@@ -30,7 +30,12 @@ extension GlimmerComposer {
                 appendInlines(children, attributes: struck, reuse: reuse, to: output)
             case .link(let destination, _, let children):
                 var linked = attributes
-                if let url = URL(string: destination) { linked[.link] = url }
+                if let url = URL(string: destination) {
+                    // The text carries the link style: the text view's link attributes would restyle token links too.
+                    linked[.link] = url
+                    linked[.foregroundColor] = theme.linkColor
+                    if theme.underlinesLinks { linked[.underlineStyle] = NSUnderlineStyle.single.rawValue }
+                }
                 appendInlines(children, attributes: linked, reuse: reuse, to: output)
             case .image(let source, _, let alt):
                 appendInlineImage(source: source, alt: alt, markdown: "![\(alt)](\(source))", attributes: attributes, reuse: reuse, to: output)
@@ -129,7 +134,7 @@ extension GlimmerComposer {
             run[.glimmerToken] = GlimmerTokenBox(token)
             if tappable {
                 run[.foregroundColor] = theme.mentionColor
-                run[.textItemTag] = token.kind
+                run[.link] = GlimmerTokenBox.link(kind: token.kind)
             }
             output.append(NSAttributedString(string: token.displayText, attributes: run))
         case .image(let url):

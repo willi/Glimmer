@@ -140,11 +140,18 @@ final class GlimmerTextViewTests: XCTestCase {
         XCTAssertTrue(cancelled, "a dropped image view must not keep fetching")
     }
 
+    /// Markdown links carry the theme's link style in the text; the text view styles only the links data detectors find.
     func testThemeSetsLinkAttributes() {
         var themed = theme
         themed.underlinesLinks = true
+        let text = GlimmerComposer(theme: themed).compose(GlimmerParser.parse("A [link](https://example.com)."))
+        let location = (text.string as NSString).range(of: "link").location
+        XCTAssertEqual(text.attribute(.foregroundColor, at: location, effectiveRange: nil) as? UIColor, themed.linkColor)
+        XCTAssertEqual(text.attribute(.underlineStyle, at: location, effectiveRange: nil) as? Int, NSUnderlineStyle.single.rawValue)
         let textView = GlimmerTextView()
-        textView.apply(theme: themed)
+        textView.apply(theme: themed, dataDetectors: [])
+        XCTAssertTrue(textView.linkTextAttributes.isEmpty)
+        textView.apply(theme: themed, dataDetectors: [.phoneNumber])
         XCTAssertEqual(textView.linkTextAttributes[.foregroundColor] as? UIColor, themed.linkColor)
         XCTAssertEqual(textView.linkTextAttributes[.underlineStyle] as? Int, NSUnderlineStyle.single.rawValue)
     }
