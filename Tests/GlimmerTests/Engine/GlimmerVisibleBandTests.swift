@@ -159,6 +159,40 @@ final class GlimmerVisibleBandTests: XCTestCase {
         _ = window
     }
 
+    func testConfiguringAViewStillSizedToALongAnswerCostsNoMoreThanAScreenTallOne() {
+        // A reused cell or a SwiftUI update: the view is still as tall as the answer it showed before. Its cached
+        // configure must lay out the screen, not everything inside its old height.
+        let earlier = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
+        earlier.frame = CGRect(x: 0, y: 0, width: 390, height: 800)
+        earlier.update(markdown: long)
+        func configure(inHeight height: CGFloat) -> Duration {
+            let scrollView = UIScrollView()
+            let window = hostInWindow(scrollView, width: 390, height: 800)
+            let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
+            view.frame = CGRect(x: 0, y: 0, width: 390, height: height)
+            scrollView.addSubview(view)
+            scrollView.contentSize = view.frame.size
+            view.layoutIfNeeded()
+            let start = threadCPUTime()
+            view.update(markdown: long)
+            view.layoutIfNeeded()
+            view.textView.layoutIfNeeded()
+            let cost = threadCPUTime() - start
+            _ = window
+            return cost
+        }
+        var tall: [Duration] = []
+        var screen: [Duration] = []
+        for _ in 0..<5 {
+            tall.append(configure(inHeight: 100_000))
+            screen.append(configure(inHeight: 800))
+        }
+        let tallMedian = tall.sorted()[2]
+        let screenMedian = screen.sorted()[2]
+        print("PERF cached configure: view 100,000 pt tall \(tallMedian), 800 pt \(screenMedian)")
+        XCTAssertLessThan(tallMedian, screenMedian * 1.5)
+    }
+
     func testScrollingBeforeTheBandWidensStillRendersTheScreen() throws {
         let scrollView = UIScrollView()
         let window = hostInWindow(scrollView, width: 390, height: 800)

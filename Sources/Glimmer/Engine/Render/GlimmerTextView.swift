@@ -148,10 +148,11 @@ final class GlimmerTextView: UITextView {
     /// Replaces the whole text. After a whole-text change, UIKit's first viewport layout asks for the text
     /// container's used rect, which lays out every paragraph inside the view's bounds; in a view as tall as
     /// `GlimmerView.textViewHeight` that is the whole answer (13 ms more for 1,200 words on the simulator). So the swap
-    /// happens at `shortHeight`, about a screen; `GlimmerView` makes the view tall again right after, and TextKit then
-    /// renders only the band (31 of 168 paragraphs, against all of them).
-    func replaceText(with text: NSAttributedString, shortHeight: CGFloat) {
-        frame.size.height = max(shortHeight, 1)
+    /// happens at 1 pt: `GlimmerView` makes the view tall again right after, before any viewport pass, and TextKit then
+    /// renders only the band (31 of 168 paragraphs, against all of them). Not the host's height: a reused cell is
+    /// still as tall as its previous answer.
+    func replaceText(with text: NSAttributedString) {
+        frame.size.height = 1
         attributedText = text
     }
 

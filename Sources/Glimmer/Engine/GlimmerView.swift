@@ -325,7 +325,7 @@ public final class GlimmerView: UIView {
             cacheKey = key
             appliedUpdate = requestedUpdate
             textView.renderScreenFirst()
-            textView.replaceText(with: cached, shortHeight: bounds.height)
+            textView.replaceText(with: cached)
             apply(GlimmerDocumentResult(edit: nil, embedUnits: [:], isStreaming: false), replacedText: true)
             return
         }
@@ -337,7 +337,7 @@ public final class GlimmerView: UIView {
         viewHoldsWorkerText = true
         appliedUpdate = requestedUpdate
         textView.renderScreenFirst()
-        textView.replaceText(with: document.text, shortHeight: bounds.height)
+        textView.replaceText(with: document.text)
         apply(GlimmerDocumentResult(edit: nil, embedUnits: document.embedUnits, isStreaming: isStreaming), replacedText: true)
     }
 
@@ -355,7 +355,7 @@ public final class GlimmerView: UIView {
                 // The view shows a cached text the worker never composed: take its whole text instead of an edit.
                 let full = await worker.text().text
                 guard worker === self.worker else { continue }
-                textView.replaceText(with: full, shortHeight: bounds.height)
+                textView.replaceText(with: full)
                 viewHoldsWorkerText = true
                 cacheKey = nil
                 apply(GlimmerDocumentResult(edit: nil, embedUnits: result.embedUnits, isStreaming: result.isStreaming),
