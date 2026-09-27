@@ -104,4 +104,40 @@ final class GlimmerTableViewTests: XCTestCase {
         XCTAssertEqual(table.cellLabels[1][0].attributedText?.attribute(.font, at: 0, effectiveRange: nil) as? UIFont,
                        UIFont.boldSystemFont(ofSize: 17), "a restyled cell updates")
     }
+
+    func testAppendingARowKeepsEarlierLabels() {
+        let header = [cell("Name"), cell("Value")]
+        let rows = (1...3).map { [cell("row \($0)"), cell("\($0)")] }
+        let table = GlimmerTableView(header: header, rows: rows, alignments: [.none, .none], theme: .default)
+        let before = table.cellLabels.flatMap { $0 }
+        table.update(to: .table(header: header, rows: rows + [[cell("row 4"), cell("4")]], alignments: [.none, .none]))
+        XCTAssertEqual(table.cellLabels.count, 5)
+        XCTAssertTrue(zip(before, table.cellLabels.prefix(4).flatMap { $0 }).allSatisfy { $0 === $1 }, "earlier rows keep their labels")
+        XCTAssertEqual(table.cellLabels[4][0].attributedText?.string, "row 4")
+        XCTAssertEqual((table.accessibilityElements ?? []).count, 10, "the new row reaches VoiceOver")
+    }
+
+    func testIncrementalLayoutMatchesAFreshTable() {
+        let header = [cell("Name"), cell("Value")]
+        var rows = (1...3).map { [cell("row \($0)"), cell("\($0)")] }
+        let table = GlimmerTableView(header: header, rows: rows, alignments: [.none, .none], theme: .default)
+        _ = table.layout(forWidth: 300)
+        rows.append([cell("a much longer name that widens the first column and wraps"), cell("4")])
+        table.update(to: .table(header: header, rows: rows, alignments: [.none, .none]))
+        let fresh = GlimmerTableView(header: header, rows: rows, alignments: [.none, .none], theme: .default)
+        XCTAssertEqual(table.layout(forWidth: 300), fresh.layout(forWidth: 300))
+    }
+
+    func testALastRowThatGrowsInPlaceUpdates() {
+        let header = [cell("a"), cell("b")]
+        let table = GlimmerTableView(header: header, rows: [[cell("1"), cell("2")]], alignments: [.none, .none], theme: .default)
+        table.update(to: .table(header: header, rows: [[cell("1"), cell("23")]], alignments: [.none, .none]))
+        XCTAssertEqual(table.cellLabels[1][1].attributedText?.string, "23")
+        let ragged = GlimmerTableView(header: header, rows: [[cell("1")]], alignments: [.none, .none], theme: .default)
+        ragged.update(to: .table(header: header, rows: [[cell("1"), cell("2")]], alignments: [.none, .none]))
+        XCTAssertEqual(ragged.cellLabels[1][1].attributedText?.string, "2")
+        XCTAssertEqual(ragged.layout(forWidth: 300),
+                       GlimmerTableView(header: header, rows: [[cell("1"), cell("2")]], alignments: [.none, .none], theme: .default)
+                           .layout(forWidth: 300))
+    }
 }

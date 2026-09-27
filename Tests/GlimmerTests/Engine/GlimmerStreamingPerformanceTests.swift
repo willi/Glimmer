@@ -18,9 +18,7 @@ final class GlimmerStreamingPerformanceTests: XCTestCase {
     private let embedStreamingBudget: Duration = .milliseconds(8)
     #else
     private let budget: Duration = .milliseconds(2)
-    /// Over the spec's 2 ms for now: a streaming code block is highlighted again on main (~1.3 ms; §4.2 wants it on
-    /// the worker) and a streaming table rebuilds its labels per row. Both are Plan 5 work.
-    private let embedStreamingBudget: Duration = .milliseconds(4)
+    private let embedStreamingBudget: Duration = .milliseconds(2)
     #endif
     /// TextKit re-lays out the ~60 fragments of the rendered band after every change: 3–4 ms p95 here, 4–6 ms with a
     /// reveal's mask (it was 30 ms before the band). Plan 5's on-device harness checks the Release cost against hitches.

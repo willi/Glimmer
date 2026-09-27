@@ -157,7 +157,8 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
         metricsStorage.performEditingTransaction {
             metricsStorage.textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
         }
-        let unchangedLines = (old.string as NSString).substring(to: edit.range.location).filter { $0 == "\n" }.count
+        // UTF-16 units, not Characters: this runs on main for every streamed chunk.
+        let unchangedLines = old.string.utf16.prefix(edit.range.location).reduce(0) { $0 + ($1 == 0x0A ? 1 : 0) }
         measureLines(fromLine: unchangedLines, at: edit.range.location)
         setNeedsLayout()
     }

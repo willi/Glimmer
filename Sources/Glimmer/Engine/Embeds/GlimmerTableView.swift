@@ -24,8 +24,25 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
     private var alignments: [GlimmerTable.Alignment]
     private let theme: GlimmerTheme
     private var cachedLayout: (width: CGFloat, layout: Layout)?
+    /// Per row, each cell's natural width (padded, capped); kept for rows that did not change.
+    private var naturalRowWidths: [[CGFloat]] = []
+    /// Row heights and the column widths they were measured at; kept for rows that did not change while the widths
+    /// hold.
+    private var measuredRows: (columnWidths: [CGFloat], heights: [CGFloat])?
+    /// VoiceOver's cells, built when it first asks and again after a change.
+    private var cellElementsCache: [[GlimmerTableCellElement]]?
+
     /// VoiceOver's cells, one per label, header row first.
-    private var cellElements: [[GlimmerTableCellElement]] = []
+    private var cellElements: [[GlimmerTableCellElement]] {
+        if let cellElementsCache { return cellElementsCache }
+        let elements = cellLabels.enumerated().map { row, labels in
+            labels.enumerated().map { column, label in
+                GlimmerTableCellElement(container: self, row: row, column: column, label: label)
+            }
+        }
+        cellElementsCache = elements
+        return elements
+    }
 
     init(header: [NSAttributedString], rows: [[NSAttributedString]], alignments: [GlimmerTable.Alignment], theme: GlimmerTheme) {
         self.theme = theme
@@ -68,8 +85,35 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
                 new.count == old.count && zip(new, old).allSatisfy { $0.isEqual(to: $1) }
             }
         guard !unchanged else { return }
-        self.alignments = alignments
-        rebuildCells(header: header, rows: rows)
+        guard alignments == self.alignments, incoming.first?.count == cells.first?.count else {
+            // The columns changed (a header cell or an alignment): rebuild.
+            self.alignments = alignments
+            rebuildCells(header: header, rows: rows)
+            cachedLayout = nil
+            setNeedsLayout()
+            return
+        }
+        let firstChanged = (0..<min(incoming.count, cells.count)).first { row in
+            !zip(incoming[row], cells[row]).allSatisfy { $0.isEqual(to: $1) }
+        } ?? min(incoming.count, cells.count)
+        // Rows from the first change: update labels in place, add labels for new rows, drop labels for removed rows.
+        for row in firstChanged..<incoming.count {
+            if row < cellLabels.count {
+                for (column, text) in incoming[row].enumerated() where !text.isEqual(to: cells[row][column]) {
+                    cellLabels[row][column].attributedText = text
+                }
+            } else {
+                cellLabels.append(incoming[row].enumerated().map { column, text in makeLabel(text, column: column) })
+            }
+        }
+        for label in cellLabels.dropFirst(incoming.count).joined() { label.removeFromSuperview() }
+        cellLabels.removeSubrange(min(incoming.count, cellLabels.count)...)
+        cells = incoming
+        naturalRowWidths.removeSubrange(min(firstChanged, naturalRowWidths.count)...)
+        if let measured = measuredRows {
+            measuredRows = (measured.columnWidths, Array(measured.heights.prefix(firstChanged)))
+        }
+        cellElementsCache = nil
         cachedLayout = nil
         setNeedsLayout()
     }
@@ -82,22 +126,20 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
             row + Array(repeating: NSAttributedString(), count: max(0, columns - row.count))
         }
         cells = [padded(header)] + rows.map(padded)
-        cellLabels = cells.map { row in
-            row.enumerated().map { column, text in
-                let label = UILabel()
-                label.numberOfLines = 0
-                label.attributedText = text
-                label.textAlignment = Self.textAlignment(column < alignments.count ? alignments[column] : .none)
-                content.addSubview(label)
-                return label
-            }
-        }
-        cellElements = cellLabels.enumerated().map { row, labels in
-            labels.enumerated().map { column, label in
-                GlimmerTableCellElement(container: self, row: row, column: column, label: label)
-            }
-        }
+        cellLabels = cells.map { row in row.enumerated().map { column, text in makeLabel(text, column: column) } }
+        cellElementsCache = nil
+        naturalRowWidths = []
+        measuredRows = nil
         updateColors()
+    }
+
+    private func makeLabel(_ text: NSAttributedString, column: Int) -> UILabel {
+        let label = UILabel()
+        label.numberOfLines = 0
+        label.attributedText = text
+        label.textAlignment = Self.textAlignment(column < alignments.count ? alignments[column] : .none)
+        content.addSubview(label)
+        return label
     }
 
     override var accessibilityElements: [Any]? {
@@ -131,25 +173,29 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
         let padding = Self.cellPadding
         let columns = cells.first?.count ?? 0
         let maxColumn = max(theme.maxTableColumnWidth, Self.minimumColumnWidth)
+        while naturalRowWidths.count < cells.count {
+            naturalRowWidths.append(cells[naturalRowWidths.count].map { min(ceil($0.size().width) + padding * 2, maxColumn) })
+        }
         var natural = Array(repeating: Self.minimumColumnWidth, count: columns)
-        for row in cells {
-            for (column, text) in row.enumerated() {
-                natural[column] = max(natural[column], min(ceil(text.size().width) + padding * 2, maxColumn))
-            }
+        for row in naturalRowWidths {
+            for (column, width) in row.enumerated() { natural[column] = max(natural[column], width) }
         }
         let total = natural.reduce(0, +)
         let widths = total > 0 && total < width ? natural.map { $0 * width / total } : natural
-        let rowHeights = cells.map { row in
-            row.enumerated().map { column, text in
+        // Heights measured at these column widths stay valid; any other widths measure every row again.
+        var heights = measuredRows?.columnWidths == widths ? measuredRows?.heights ?? [] : []
+        while heights.count < cells.count {
+            heights.append(cells[heights.count].enumerated().map { column, text in
                 let bounds = text.boundingRect(
                     with: CGSize(width: max(1, widths[column] - padding * 2), height: CGFloat.greatestFiniteMagnitude),
                     options: [.usesLineFragmentOrigin, .usesFontLeading],
                     context: nil
                 )
                 return ceil(bounds.height) + padding * 2
-            }.max() ?? padding * 2
+            }.max() ?? padding * 2)
         }
-        let layout = Layout(columnWidths: widths, rowHeights: rowHeights)
+        measuredRows = (widths, heights)
+        let layout = Layout(columnWidths: widths, rowHeights: heights)
         cachedLayout = (width, layout)
         return layout
     }
