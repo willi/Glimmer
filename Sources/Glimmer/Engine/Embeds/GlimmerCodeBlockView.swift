@@ -28,6 +28,8 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
     /// fragment. Kept across streaming updates, so only the lines that changed are measured again.
     private let metricsStorage = NSTextContentStorage()
     private let metricsManager = NSTextLayoutManager()
+    /// The highlighted code's colour runs, from the last update.
+    private var runs: [ColorRun] = []
     /// Bottom of each code line, cumulative, and each line's width.
     private var lineBottoms: [CGFloat] = []
     private var lineWidths: [CGFloat] = []
@@ -66,6 +68,7 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
         // Backed by a text storage, so streaming edits can replace just the changed lines.
         metricsStorage.textStorage = NSTextStorage(attributedString: self.highlighted)
         measureLines(fromLine: 0, at: 0)
+        runs = Self.colorRuns(of: self.highlighted)
         scrollView.showsVerticalScrollIndicator = false
         scrollView.alwaysBounceVertical = false
         scrollView.addSubview(textView)
@@ -139,9 +142,23 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
         return extendingLastVisibleUnit(rects, in: box)
     }
 
+    /// A span of one colour in highlighted code.
+    struct ColorRun: Equatable {
+        let range: NSRange
+        let color: UIColor?
+    }
+
+    static func colorRuns(of text: NSAttributedString) -> [ColorRun] {
+        var runs: [ColorRun] = []
+        text.enumerateAttribute(.foregroundColor, in: NSRange(location: 0, length: text.length)) { value, range, _ in
+            runs.append(ColorRun(range: range, color: value as? UIColor))
+        }
+        return runs
+    }
+
     /// Streams in place. The composer highlights the whole code on the worker (a closing `*/` can recolor earlier
-    /// lines, and hosts bring their own highlighters); only the lines whose text or colors changed reach TextKit and
-    /// are measured.
+    /// lines, and hosts bring their own highlighters); only the lines from the first one whose text or colours changed
+    /// reach TextKit and are measured.
     func update(to embed: GlimmerEmbed) {
         guard case .codeBlock(let language, let code, let highlighted) = embed,
               code != self.code || language != self.language else { return }
@@ -150,16 +167,36 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
         let old = self.highlighted
         self.highlighted = highlighted
             ?? GlimmerCodeHighlighting.highlightedCode(code, language: language, theme: theme, highlighter: highlighter)
-        let edit = GlimmerStreamingDocument.trimmingUnchangedParagraphs(
-            of: GlimmerDocumentEdit(range: NSRange(location: 0, length: old.length), replacement: self.highlighted), in: old
+        let newString = self.highlighted.string as NSString
+        let newRuns = Self.colorRuns(of: self.highlighted)
+        // The first change: where the text first differs, or where the colours first do (a closing `*/` recolours
+        // earlier lines). Colour is the only attribute that varies inside code, and comparing runs is much cheaper
+        // than comparing attributed strings.
+        let textChange = (old.string as NSString).commonPrefix(with: newString as String, options: .literal).utf16.count
+        let colorChange = (0..<min(runs.count, newRuns.count)).first { runs[$0] != newRuns[$0] }.map { index in
+            // Runs before it match, so both start here: a new colour changes from the start, a longer or shorter run
+            // from where the shorter one ends (plain code is one run that grows with every update).
+            runs[index].color == newRuns[index].color
+                ? min(NSMaxRange(runs[index].range), NSMaxRange(newRuns[index].range))
+                : runs[index].range.location
+        } ?? min(runs.last.map { NSMaxRange($0.range) } ?? 0, newRuns.last.map { NSMaxRange($0.range) } ?? 0)
+        runs = newRuns
+        let change = min(textChange, colorChange)
+        // Replace from the start of the line holding the change to the end.
+        let before = NSRange(location: 0, length: min(change, newString.length))
+        let newline = newString.range(of: "\n", options: .backwards, range: before)
+        let lineStart = newline.location == NSNotFound ? 0 : NSMaxRange(newline)
+        let edit = GlimmerDocumentEdit(
+            range: NSRange(location: lineStart, length: old.length - lineStart),
+            replacement: self.highlighted.attributedSubstring(from: NSRange(location: lineStart, length: newString.length - lineStart))
         )
         textView.apply(edit)
         metricsStorage.performEditingTransaction {
             metricsStorage.textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
         }
         // UTF-16 units, not Characters: this runs on main for every streamed chunk.
-        let unchangedLines = old.string.utf16.prefix(edit.range.location).reduce(0) { $0 + ($1 == 0x0A ? 1 : 0) }
-        measureLines(fromLine: unchangedLines, at: edit.range.location)
+        let unchangedLines = old.string.utf16.prefix(lineStart).reduce(0) { $0 + ($1 == 0x0A ? 1 : 0) }
+        measureLines(fromLine: unchangedLines, at: lineStart)
         setNeedsLayout()
     }
 

@@ -108,4 +108,39 @@ final class GlimmerCodeBlockViewTests: XCTestCase {
         XCTAssertEqual(streamed.textSize, fresh.textSize)
         XCTAssertEqual(streamed.embedHeight(forWidth: 300), fresh.embedHeight(forWidth: 300))
     }
+
+    func testStreamedCodeMatchesAFreshHighlightAtEveryStep() {
+        let theme = GlimmerTheme.default
+        let highlighter = GlimmerBasicHighlighter()
+        let code = """
+        /* A header comment
+           that spans lines */
+        let greeting = "Hello, world" // trailing
+        func count(to limit: Int) -> Int {
+            var total = 0 /* inline */ + 42
+            return total
+        }
+        """
+        // Swift recolours as it streams; plain code is one colour run the whole way.
+        for language in ["swift", nil] as [String?] {
+            let view = GlimmerCodeBlockView(code: "", language: language, theme: theme, highlighter: highlighter)
+            var end = code.startIndex
+            while end < code.endIndex {
+                end = code.index(end, offsetBy: 3, limitedBy: code.endIndex) ?? code.endIndex
+                let prefix = String(code[..<end])
+                let fresh = GlimmerCodeHighlighting.highlightedCode(prefix, language: language, theme: theme, highlighter: highlighter)
+                view.update(to: .codeBlock(language: language, code: prefix, highlighted: fresh))
+                XCTAssertTrue(view.textView.textStorage.isEqual(to: fresh), "\(language ?? "plain") after \(prefix.count) characters")
+            }
+        }
+    }
+
+    func testColorRunsDescribeTheHighlight() {
+        let theme = GlimmerTheme.default
+        let text = GlimmerCodeHighlighting.highlightedCode("let x = 1 // c", language: "swift", theme: theme, highlighter: GlimmerBasicHighlighter())
+        let runs = GlimmerCodeBlockView.colorRuns(of: text)
+        XCTAssertEqual(runs.first?.range.location, 0)
+        XCTAssertEqual(runs.map(\.range.length).reduce(0, +), text.length)
+        XCTAssertTrue(runs.contains { $0.color == theme.syntaxCommentColor })
+    }
 }

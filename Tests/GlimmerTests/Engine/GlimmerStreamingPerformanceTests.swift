@@ -19,7 +19,7 @@ final class GlimmerStreamingPerformanceTests: XCTestCase {
     #else
     private let budget: Duration = .milliseconds(2)
     #if targetEnvironment(simulator)
-    private let embedStreamingBudget: Duration = .milliseconds(2)
+    private let embedStreamingBudget: Duration = .microseconds(1_500)
     #else
     /// An iPhone 16 Pro Max measures 1.97–2.2 ms p95 for the long code block (Plan 5): at the spec's 2 ms, not under
     /// it. Gated at that baseline with headroom, so a regression turns it red; the results doc tracks the spec.
