@@ -1,0 +1,73 @@
+name: GlimmerDemo
+options:
+  bundleIdPrefix: dk.wu
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    DEVELOPMENT_TEAM: RUV7V2TGVX
+    CODE_SIGN_STYLE: Automatic
+packages:
+  Glimmer:
+    path: ../..
+targets:
+  GlimmerDemo:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+      - path: Shared
+        excludes: [".gitkeep"]
+    dependencies:
+      - package: Glimmer
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Glimmer
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        # ProMotion: without this key an iPhone app is capped at 60 Hz, which would hide hitches at 120 Hz.
+        CADisableMinimumFrameDurationOnPhone: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dk.wu.GlimmerDemo
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+  GlimmerDemoUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: UITests
+      - path: Shared
+        excludes: [".gitkeep"]
+    dependencies:
+      - target: GlimmerDemo
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dk.wu.GlimmerDemoUITests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: GlimmerDemo
+schemes:
+  GlimmerDemo:
+    build:
+      targets:
+        GlimmerDemo: all
+        GlimmerDemoUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - GlimmerDemoUITests
+    profile:
+      config: Release
+    archive:
+      config: Release
