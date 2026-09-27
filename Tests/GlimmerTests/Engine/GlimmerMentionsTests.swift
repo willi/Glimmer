@@ -33,6 +33,13 @@ final class GlimmerMentionsTests: XCTestCase {
         XCTAssertEqual(box.token.payload["username"], "ada")
     }
 
+    /// Any kind makes a token link, even one a URL path can't hold as given.
+    func testEveryKindMakesATokenLink() {
+        for kind in ["mention", "issue", "//odd", "with space", ""] {
+            XCTAssertTrue(GlimmerTokenBox.isTokenLink(GlimmerTokenBox.link(kind: kind)), kind)
+        }
+    }
+
     /// The text view styles only data-detector links, so a mention keeps a colour of its own.
     func testAMentionKeepsItsOwnColor() {
         var configuration = GlimmerConfiguration(extensions: [GlimmerMentions()], imageLoader: nil)

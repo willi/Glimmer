@@ -17,10 +17,10 @@ final class GlimmerTokenBox: NSObject, @unchecked Sendable {
     /// The link a tappable token's text carries, so UIKit treats it as a link: VoiceOver and the links rotor reach it,
     /// and `GlimmerView` turns its tap into `onTokenTap`. Only the scheme matters; the token is read from the text.
     static func link(kind: String) -> URL {
-        var components = URLComponents()
-        components.scheme = "glimmer-token"
-        components.path = kind
-        return components.url ?? URL(fileURLWithPath: kind)
+        // Percent-encoded down to letters and digits, the kind always makes a valid URL.
+        let path = kind.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+        guard let url = URL(string: "glimmer-token:" + path) else { preconditionFailure("an invalid token link: \(path)") }
+        return url
     }
 
     static func isTokenLink(_ url: URL) -> Bool { url.scheme == "glimmer-token" }
