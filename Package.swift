@@ -29,11 +29,7 @@ let package = Package(
         ),
         .target(
             name: "Glimmer",
-            dependencies: ["cmark-gfm", "cmark-gfm-extensions"],
-            resources: [
-                // Emoji URL map for optional lazy loading (1.x; removed in Plan 3)
-                .process("Resources/emoji_urls.json")
-            ]
+            dependencies: ["cmark-gfm", "cmark-gfm-extensions"]
         ),
         .testTarget(
             name: "GlimmerTests",
