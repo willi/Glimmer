@@ -35,6 +35,37 @@ final class GlimmerCodeBlockViewTests: XCTestCase {
         XCTAssertEqual(spans.map(\.kind), [.comment])
     }
 
+    func testEachNewLanguageHighlightsItsTokens() {
+        let highlighter = GlimmerBasicHighlighter()
+        func kinds(_ code: String, _ language: String) -> [String: GlimmerHighlightSpan.Kind] {
+            let string = code as NSString
+            return Dictionary(highlighter.highlight(code, language: language).map { (string.substring(with: $0.range), $0.kind) },
+                              uniquingKeysWith: { first, _ in first })
+        }
+        let samples: [(language: String, code: String, keyword: String, string: String?, comment: String?)] = [
+            ("json", #"{"name": "Ada", "ok": true}"#, #""name""#, #""Ada""#, nil),
+            ("sql", "select name from users -- all\nWHERE id = 'x'", "select", "'x'", "-- all"),
+            ("yaml", "name: \"Ada\" # who\nok: true", "name", "\"Ada\"", "# who"),
+            ("html", #"<a href="/x">Go</a> <!-- note -->"#, "<a", #""/x""#, "<!-- note -->"),
+            ("css", "@media screen { .a { color: red; /* c */ } }", "@media", nil, "/* c */"),
+            ("csharp", "public class A { string s = \"x\"; } // c", "public", "\"x\"", "// c"),
+            ("php", "<?php function f() { echo 'x'; } # c", "function", "'x'", "# c"),
+        ]
+        for sample in samples {
+            let found = kinds(sample.code, sample.language)
+            XCTAssertEqual(found[sample.keyword], .keyword, "\(sample.language) keyword \(sample.keyword): \(found)")
+            if let string = sample.string { XCTAssertEqual(found[string], .string, "\(sample.language) string") }
+            if let comment = sample.comment { XCTAssertEqual(found[comment], .comment, "\(sample.language) comment") }
+        }
+    }
+
+    func testTheRegexIsBuiltOncePerFamily() throws {
+        let swift = try XCTUnwrap(GlimmerBasicHighlighter.expression(for: "swift"))
+        XCTAssertTrue(swift === GlimmerBasicHighlighter.expression(for: "Swift"))
+        XCTAssertTrue(GlimmerBasicHighlighter.expression(for: "yml") === GlimmerBasicHighlighter.expression(for: "yaml"))
+        XCTAssertNil(GlimmerBasicHighlighter.expression(for: "brainfuck"))
+    }
+
     func testUnknownLanguageHasNoSpans() {
         XCTAssertEqual(GlimmerBasicHighlighter().highlight("let x = 1", language: "klingon"), [])
         XCTAssertEqual(GlimmerBasicHighlighter().highlight("let x = 1", language: nil), [])
