@@ -124,12 +124,21 @@ enum GlimmerMarkdownSerializer {
         }
         guard asMarkdown else { return marker + body.replacingOccurrences(of: "\u{2028}", with: "\n") }
         // Later lines of the paragraph (an embed's source, a hard break) continue inside its containers.
-        let continuation = includesStart ? paragraph.prefix + String(repeating: " ", count: marker.count) : ""
+        let continuation = includesStart ? paragraph.prefix + continuation(ofMarker: marker) : ""
         body = body.replacingOccurrences(of: "\u{2028}", with: "\\\n")
             .replacingOccurrences(of: "\n", with: "\n" + continuation)
         guard includesStart else { return body }
         let heading = paragraph.headingLevel.map { String(repeating: "#", count: $0) + " " } ?? ""
         return paragraph.prefix + marker + heading + escapingBlockStart(body)
+    }
+
+    /// What a list item's later lines start with: spaces to its content column, where a task checkbox counts as
+    /// content (`- [x] ` → two spaces, as GFM reads it), and any quote the item opens (`- > ` → `  > `).
+    static func continuation(ofMarker marker: String) -> String {
+        guard let space = marker.firstIndex(of: " ") else { return String(repeating: " ", count: marker.count) }
+        var rest = String(marker[marker.index(after: space)...])
+        if rest.hasPrefix("[ ] ") || rest.hasPrefix("[x] ") || rest.hasPrefix("[X] ") { rest.removeFirst(4) }
+        return String(repeating: " ", count: marker.distance(from: marker.startIndex, to: space) + 1) + rest
     }
 
     // MARK: - Inline runs

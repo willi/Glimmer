@@ -108,6 +108,14 @@ final class GlimmerMarkdownSerializerTests: XCTestCase {
         assertEquivalent(compose(copied), original, "code in a list item")
     }
 
+    func testTaskItemChildrenKeepTheirStructure() {
+        let nested = compose("- [ ] Buy milk\n  - whole\n  - skim")
+        XCTAssertEqual(markdown(nested), "- [ ] Buy milk\n  - whole\n  - skim")
+        assertEquivalent(compose(markdown(nested)), nested, "a sublist under a task item")
+        let fenced = compose("- [x] Step\n\n  ```sh\n  make\n  ```")
+        assertEquivalent(compose(markdown(fenced)), fenced, "a code block under a task item; copied:\n\(markdown(fenced))")
+    }
+
     func testPlainTextKeepsMarkersAndEmbedContent() {
         let text = compose("- item\n\n```\nlet x = 1\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |")
         XCTAssertEqual(GlimmerMarkdownSerializer.plainText(from: text, range: NSRange(location: 0, length: text.length)),

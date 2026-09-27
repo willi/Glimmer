@@ -82,6 +82,7 @@ final class GlimmerTableViewTests: XCTestCase {
         let window = hostInWindow(table, width: 300, height: 200)
         window.makeKeyAndVisible()
         settle(table)  // commits the grid layer: an uncommitted layer never animates
+        XCTAssertNotNil(table.grid.presentation(), "the grid is on screen, so a path change could animate")
         let before = table.grid.path
         table.frame.size.width = 200
         table.layoutIfNeeded()

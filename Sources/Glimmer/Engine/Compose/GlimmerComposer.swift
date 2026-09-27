@@ -129,11 +129,11 @@ struct GlimmerComposer {
         inner.paragraphSpacing = list.isTight ? theme.tightListSpacing : nil
         for (offset, item) in list.items.enumerated() {
             let marker = markers[offset]
-            // The item's content is indented by its marker's source width, which is what continuation lines need.
+            // The item's later lines are indented to its content column, which is what continuation lines need.
             let markerSource = marker.attribute(.glimmerListMarker, at: 0, effectiveRange: nil) as? String ?? ""
             var itemContext = inner
             itemContext.markerLinePrefix = context.markdownPrefix
-            itemContext.markdownPrefix = context.markdownPrefix + String(repeating: " ", count: markerSource.count)
+            itemContext.markdownPrefix = context.markdownPrefix + GlimmerMarkdownSerializer.continuation(ofMarker: markerSource)
             itemContext.isTight = list.isTight
             if item.blocks.isEmpty {
                 appendTextParagraph([], font: theme.bodyFont, context: itemContext, marker: marker, to: output)
