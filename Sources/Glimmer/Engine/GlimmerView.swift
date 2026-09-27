@@ -295,6 +295,7 @@ public final class GlimmerView: UIView {
 
     /// Re-composes everything (theme, configuration or text size changed).
     private func rebuildDocument() {
+        textView.reusesDrawnText = configuration.reusesDrawnText
         textView.apply(theme: configuration.theme.scaled(for: traitCollection))
         textView.dataDetectorTypes = configuration.dataDetectors
         textView.isFindInteractionEnabled = configuration.allowsFind

@@ -104,6 +104,36 @@ final class GlimmerSurfaceReuseTests: XCTestCase {
         _ = window
     }
 
+    func testTurningReuseOffOnALiveViewRedrawsOnEveryPass() {
+        let (view, window) = shown()
+        view.configuration.reusesDrawnText = false
+        view.layoutIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        view.layoutIfNeeded()
+        CATransaction.flush()
+        let count = fragmentViews(in: view.textView).count
+        XCTAssertGreaterThan(count, 10)
+        pass(view)
+        XCTAssertGreaterThan(pendingRedraws(in: view.textView), count / 2, "the escape hatch works on a live view")
+        _ = window
+    }
+
+    func testRevealingAnEmbedRedrawsOnlyItsFragment() throws {
+        let (view, window) = shown()
+        let textView = view.textView
+        let string = textView.textStorage.string as NSString
+        let location = try XCTUnwrap((0..<string.length).first {
+            string.character(at: $0) == 0xFFFC && textView.blockAttachment(atCharacter: $0)?.existingView is GlimmerCodeBlockView
+        }, "a code block on screen")
+        let attachment = try XCTUnwrap(textView.blockAttachment(atCharacter: location))
+        XCTAssertGreaterThan(fragmentViews(in: textView).count, 10)
+        attachment.visibleUnitCount = 1
+        textView.invalidateEmbedLayout(atCharacter: location)
+        pass(view)
+        XCTAssertLessThanOrEqual(pendingRedraws(in: textView), 2, "a revealed code line redraws its own fragment, not the band")
+        _ = window
+    }
+
     /// A rendering attribute (how UIKit tints a pressed link) must redraw its fragment with reuse on.
     func testARenderingAttributeRedrawsItsFragment() throws {
         let (view, window) = shown()

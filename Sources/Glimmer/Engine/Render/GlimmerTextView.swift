@@ -268,8 +268,9 @@ final class GlimmerTextView: UITextView {
     /// Lays the embed at `index` out again after its height changed (its visible units).
     func invalidateEmbedLayout(atCharacter index: Int) {
         guard let manager = textLayoutManager, let range = textRange(for: NSRange(location: index, length: 1)) else { return }
-        // The fragment keeps its instance through an invalidation; its old pixels must not come back.
-        forgetDrawnSurfaces()
+        // The fragment keeps its instance through an invalidation; its old pixels must not come back. Only its own:
+        // a code block reveals line by line, and each line must not redraw the band.
+        if let fragment = manager.textLayoutFragment(for: range.location) { forgetDrawnSurface(of: fragment) }
         manager.invalidateLayout(for: range)
         manager.ensureLayout(for: range)
         textVersion &+= 1
@@ -281,6 +282,11 @@ final class GlimmerTextView: UITextView {
     func forgetDrawnSurfaces() {
         drawnSurfaces.removeAllObjects()
         drawnStates.removeAll()
+    }
+
+    private func forgetDrawnSurface(of fragment: NSTextLayoutFragment) {
+        drawnSurfaces.removeObject(forKey: fragment)
+        drawnStates[ObjectIdentifier(fragment)] = nil
     }
 
     private func drawnState(of fragment: NSTextLayoutFragment) -> DrawnState {
