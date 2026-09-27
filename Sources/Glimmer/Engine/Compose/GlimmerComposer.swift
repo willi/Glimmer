@@ -97,8 +97,9 @@ struct GlimmerComposer {
             if let marker { appendTextParagraph([], font: theme.bodyFont, context: context, marker: marker, to: output) }
             appendList(list, context: context, to: output)
         case .codeBlock(let language, let code):
-            appendEmbed(.codeBlock(language: language, code: code), source: Self.fencedSource(code, language: language),
-                        context: context, marker: marker, to: output)
+            let highlighted = GlimmerCodeHighlighting.highlightedCode(code, language: language, theme: theme, highlighter: highlighter)
+            appendEmbed(.codeBlock(language: language, code: code, highlighted: highlighted),
+                        source: Self.fencedSource(code, language: language), context: context, marker: marker, to: output)
         case .table(let table):
             let embed = tableEmbed(table)
             appendEmbed(embed, source: tableSource(embed), context: context, marker: marker, to: output)

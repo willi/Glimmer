@@ -276,7 +276,7 @@ enum GlimmerMarkdownSerializer {
 
     private static func plainText(of embed: GlimmerEmbed) -> String {
         switch embed {
-        case .codeBlock(_, let code):
+        case .codeBlock(_, let code, _):
             code
         case .table(let header, let rows, _):
             ([header] + rows).map { $0.map(\.string).joined(separator: "\t") }.joined(separator: "\n")

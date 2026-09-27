@@ -2,7 +2,8 @@ import Foundation
 
 /// A block rendered as its own view inside the text flow. Table cells arrive already styled by the composer.
 enum GlimmerEmbed {
-    case codeBlock(language: String?, code: String)
+    /// `highlighted` is the code styled by the composer on the worker; nil makes the view highlight it.
+    case codeBlock(language: String?, code: String, highlighted: NSAttributedString? = nil)
     case table(header: [NSAttributedString], rows: [[NSAttributedString]], alignments: [GlimmerTable.Alignment])
     case image(source: URL, alt: String)
     case thematicBreak
@@ -13,7 +14,7 @@ extension GlimmerEmbed {
     /// header, or the same image or rule. Such an embed keeps its attachment and view.
     func continues(_ previous: GlimmerEmbed) -> Bool {
         switch (self, previous) {
-        case let (.codeBlock(language, code), .codeBlock(oldLanguage, oldCode)):
+        case let (.codeBlock(language, code, _), .codeBlock(oldLanguage, oldCode, _)):
             language == oldLanguage && code.hasPrefix(oldCode)
         case let (.table(header, _, alignments), .table(oldHeader, _, oldAlignments)):
             alignments == oldAlignments && header.map(\.string) == oldHeader.map(\.string)
@@ -32,7 +33,7 @@ extension GlimmerEmbed {
     /// none; each reveals as one phrase.
     var revealUnitLengths: [Int] {
         switch self {
-        case .codeBlock(_, let code):
+        case .codeBlock(_, let code, _):
             code.split(separator: "\n", omittingEmptySubsequences: false).map { max(1, $0.utf16.count) }
         case .table(let header, let rows, _):
             ([header] + rows).map { row in max(1, row.reduce(0) { $0 + $1.length }) }

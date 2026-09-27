@@ -139,7 +139,7 @@ final class GlimmerComposerTests: XCTestCase {
         let text = compose("```swift\nlet x = 1\n```")
         XCTAssertEqual(text.string, "\u{FFFC}")
         let attachment = try XCTUnwrap(blockAttachment(in: text))
-        guard case .codeBlock(let language, let code) = attachment.embed else { return XCTFail("expected code") }
+        guard case .codeBlock(let language, let code, _) = attachment.embed else { return XCTFail("expected code") }
         XCTAssertEqual(language, "swift")
         XCTAssertEqual(code, "let x = 1")
         XCTAssertEqual(text.attribute(.glimmerSource, at: 0, effectiveRange: nil) as? String, "```swift\nlet x = 1\n```")

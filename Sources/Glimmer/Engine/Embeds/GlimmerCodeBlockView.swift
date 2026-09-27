@@ -36,12 +36,17 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
         didSet { if visibleUnitCount != oldValue { setNeedsLayout() } }
     }
 
-    init(code: String, language: String?, theme: GlimmerTheme, highlighter: any GlimmerHighlighter) {
+    /// `highlighted` is the code as the composer styled it on the worker; nil highlights it here.
+    init(
+        code: String, language: String?, theme: GlimmerTheme, highlighter: any GlimmerHighlighter,
+        highlighted: NSAttributedString? = nil
+    ) {
         self.code = code
         self.language = language
         self.theme = theme
         self.highlighter = highlighter
-        highlighted = Self.highlightedCode(code, language: language, theme: theme, highlighter: highlighter)
+        self.highlighted = highlighted
+            ?? GlimmerCodeHighlighting.highlightedCode(code, language: language, theme: theme, highlighter: highlighter)
         super.init(frame: .zero)
 
         backgroundColor = theme.codeBlockBackground
@@ -52,14 +57,14 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
         let padding = theme.embedPadding
         textView.backgroundColor = .clear
         textView.textContainerInset = UIEdgeInsets(top: padding, left: padding, bottom: padding, right: padding)
-        textView.attributedText = highlighted
+        textView.attributedText = self.highlighted
         textView.copiesMarkdown = false
         let container = NSTextContainer(size: CGSize(width: CGFloat.greatestFiniteMagnitude, height: 0))
         container.lineFragmentPadding = 0
         metricsManager.textContainer = container
         metricsStorage.addTextLayoutManager(metricsManager)
         // Backed by a text storage, so streaming edits can replace just the changed lines.
-        metricsStorage.textStorage = NSTextStorage(attributedString: highlighted)
+        metricsStorage.textStorage = NSTextStorage(attributedString: self.highlighted)
         measureLines(fromLine: 0, at: 0)
         scrollView.showsVerticalScrollIndicator = false
         scrollView.alwaysBounceVertical = false
@@ -134,16 +139,19 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
         return extendingLastVisibleUnit(rects, in: box)
     }
 
-    /// Streams in place. The whole code is highlighted again (a closing `*/` can recolor earlier lines, and hosts
-    /// bring their own highlighters), but only the lines whose text or colors changed reach TextKit and are measured.
+    /// Streams in place. The composer highlights the whole code on the worker (a closing `*/` can recolor earlier
+    /// lines, and hosts bring their own highlighters); only the lines whose text or colors changed reach TextKit and
+    /// are measured.
     func update(to embed: GlimmerEmbed) {
-        guard case .codeBlock(let language, let code) = embed, code != self.code || language != self.language else { return }
+        guard case .codeBlock(let language, let code, let highlighted) = embed,
+              code != self.code || language != self.language else { return }
         self.code = code
         self.language = language
-        let old = highlighted
-        highlighted = Self.highlightedCode(code, language: language, theme: theme, highlighter: highlighter)
+        let old = self.highlighted
+        self.highlighted = highlighted
+            ?? GlimmerCodeHighlighting.highlightedCode(code, language: language, theme: theme, highlighter: highlighter)
         let edit = GlimmerStreamingDocument.trimmingUnchangedParagraphs(
-            of: GlimmerDocumentEdit(range: NSRange(location: 0, length: old.length), replacement: highlighted), in: old
+            of: GlimmerDocumentEdit(range: NSRange(location: 0, length: old.length), replacement: self.highlighted), in: old
         )
         textView.apply(edit)
         metricsStorage.performEditingTransaction {
@@ -176,30 +184,5 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
         // content size keeps the visible height, so the code never scrolls vertically.
         textView.frame = CGRect(x: 0, y: 0, width: textWidth, height: textSize.height + theme.embedPadding * 2)
         scrollView.contentSize = CGSize(width: contentWidth, height: scrollView.bounds.height)
-    }
-
-    static func highlightedCode(
-        _ code: String, language: String?, theme: GlimmerTheme, highlighter: any GlimmerHighlighter
-    ) -> NSAttributedString {
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineHeightMultiple = theme.lineHeightMultiple
-        let result = NSMutableAttributedString(string: code, attributes: [
-            .font: theme.codeFont,
-            .foregroundColor: theme.textColor,
-            .paragraphStyle: paragraph,
-        ])
-        for span in highlighter.highlight(code, language: language) where NSMaxRange(span.range) <= result.length {
-            result.addAttribute(.foregroundColor, value: color(for: span.kind, theme: theme), range: span.range)
-        }
-        return result
-    }
-
-    private static func color(for kind: GlimmerHighlightSpan.Kind, theme: GlimmerTheme) -> UIColor {
-        switch kind {
-        case .keyword: theme.syntaxKeywordColor
-        case .string: theme.syntaxStringColor
-        case .comment: theme.syntaxCommentColor
-        case .number: theme.syntaxNumberColor
-        }
     }
 }

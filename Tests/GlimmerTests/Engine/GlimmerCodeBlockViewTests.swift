@@ -41,7 +41,7 @@ final class GlimmerCodeBlockViewTests: XCTestCase {
     }
 
     func testHighlightedCodeColorsKeywords() {
-        let text = GlimmerCodeBlockView.highlightedCode("let x = 1", language: "swift", theme: theme, highlighter: GlimmerBasicHighlighter())
+        let text = GlimmerCodeHighlighting.highlightedCode("let x = 1", language: "swift", theme: theme, highlighter: GlimmerBasicHighlighter())
         let color = text.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor
         XCTAssertEqual(color, theme.syntaxKeywordColor)
         XCTAssertEqual(text.attribute(.font, at: 0, effectiveRange: nil) as? UIFont, theme.codeFont)

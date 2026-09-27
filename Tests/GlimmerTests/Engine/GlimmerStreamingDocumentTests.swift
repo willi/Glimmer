@@ -47,7 +47,7 @@ final class GlimmerStreamingDocumentTests: XCTestCase {
         XCTAssertTrue(blockAttachments(in: document.text).first === before, "the growing code block keeps its attachment")
         let update = try XCTUnwrap(edit.embedUpdates.first)
         XCTAssertTrue(update.attachment === before)
-        guard case .codeBlock(_, let code) = update.embed else { return XCTFail("expected a code block, got \(update.embed)") }
+        guard case .codeBlock(_, let code, _) = update.embed else { return XCTFail("expected a code block, got \(update.embed)") }
         XCTAssertEqual(code, "let a = 1\nlet b")
     }
 
@@ -68,7 +68,7 @@ final class GlimmerStreamingDocumentTests: XCTestCase {
         _ = document.update(markdown: "```python\nx = 1", isStreaming: true)
         let after = try XCTUnwrap(blockAttachments(in: document.text).first)
         XCTAssertFalse(after === before, "a different language is a different code block")
-        guard case .codeBlock(let language, _) = after.embed else { return XCTFail("expected a code block") }
+        guard case .codeBlock(let language, _, _) = after.embed else { return XCTFail("expected a code block") }
         XCTAssertEqual(language, "python")
     }
 

@@ -98,8 +98,9 @@ final class GlimmerEmbedViewProvider: NSTextAttachmentViewProvider {
 enum GlimmerEmbedViewFactory {
     static func makeView(for attachment: GlimmerBlockAttachment) -> any GlimmerEmbedView {
         switch attachment.embed {
-        case .codeBlock(let language, let code):
-            return GlimmerCodeBlockView(code: code, language: language, theme: attachment.theme, highlighter: attachment.highlighter)
+        case .codeBlock(let language, let code, let highlighted):
+            return GlimmerCodeBlockView(code: code, language: language, theme: attachment.theme,
+                                        highlighter: attachment.highlighter, highlighted: highlighted)
         case .table(let header, let rows, let alignments):
             return GlimmerTableView(header: header, rows: rows, alignments: alignments, theme: attachment.theme)
         case .image(let source, let alt):
