@@ -7,10 +7,21 @@ final class GlimmerLayoutFragment: NSTextLayoutFragment {
     static let pillHorizontalInset: CGFloat = 3
     static let quoteBarWidth: CGFloat = 3
 
+    /// Asked for every fragment on every viewport pass (by UIKit and by the drawn-surface reuse), so kept once laid out.
+    private var cachedSurfaceBounds: CGRect?
+
     override var renderingSurfaceBounds: CGRect {
-        quoteBarRects().reduce(super.renderingSurfaceBounds.insetBy(dx: -(Self.pillHorizontalInset + 1), dy: -2)) {
+        if let cachedSurfaceBounds { return cachedSurfaceBounds }
+        let bounds = quoteBarRects().reduce(super.renderingSurfaceBounds.insetBy(dx: -(Self.pillHorizontalInset + 1), dy: -2)) {
             $0.union($1)
         }
+        if state == .layoutAvailable { cachedSurfaceBounds = bounds }
+        return bounds
+    }
+
+    override func invalidateLayout() {
+        cachedSurfaceBounds = nil
+        super.invalidateLayout()
     }
 
     override func draw(at point: CGPoint, in context: CGContext) {

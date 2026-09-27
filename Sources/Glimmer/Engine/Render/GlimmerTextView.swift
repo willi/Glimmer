@@ -28,6 +28,19 @@ final class GlimmerTextView: UITextView {
     var pasteboard: UIPasteboard = .general
     /// False for a code block's text, which copies as the code itself.
     var copiesMarkdown = true
+    /// Whether a viewport pass hands UIKit back the fragment views it already drew (iOS 27). UIKit otherwise redraws
+    /// every fragment in the band on every pass: each scroll step and each streamed edit.
+    var reusesDrawnText = true {
+        didSet { if !reusesDrawnText { forgetDrawnSurfaces() } }
+    }
+    private let drawnSurfaces = NSMapTable<NSTextLayoutFragment, UIView>.weakToWeakObjects()
+    /// What each drawn surface showed: its size and its rendering attributes (link and find highlights, …).
+    private var drawnStates: [ObjectIdentifier: DrawnState] = [:]
+
+    private struct DrawnState: Equatable {
+        let size: CGSize
+        let rendering: Int
+    }
 
     init() {
         // On iOS 16+, a nil text container gives a TextKit 2 text view.
@@ -89,12 +102,16 @@ final class GlimmerTextView: UITextView {
     }
 
     override var attributedText: NSAttributedString! {
-        didSet { textVersion &+= 1 }
+        didSet {
+            textVersion &+= 1
+            forgetDrawnSurfaces()
+        }
     }
 
     func apply(theme: GlimmerTheme) {
         self.theme = theme
         textVersion &+= 1
+        forgetDrawnSurfaces()
         fragmentProvider.theme = theme
         var link: [NSAttributedString.Key: Any] = [.foregroundColor: theme.linkColor]
         if theme.underlinesLinks { link[.underlineStyle] = NSUnderlineStyle.single.rawValue }
@@ -251,9 +268,80 @@ final class GlimmerTextView: UITextView {
     /// Lays the embed at `index` out again after its height changed (its visible units).
     func invalidateEmbedLayout(atCharacter index: Int) {
         guard let manager = textLayoutManager, let range = textRange(for: NSRange(location: index, length: 1)) else { return }
+        // The fragment keeps its instance through an invalidation; its old pixels must not come back.
+        forgetDrawnSurfaces()
         manager.invalidateLayout(for: range)
         manager.ensureLayout(for: range)
         textVersion &+= 1
+    }
+
+    // MARK: - Drawn surfaces
+
+    /// Forgets every drawn surface, so the next pass redraws: after changes that keep a fragment but change its pixels.
+    func forgetDrawnSurfaces() {
+        drawnSurfaces.removeAllObjects()
+        drawnStates.removeAll()
+    }
+
+    private func drawnState(of fragment: NSTextLayoutFragment) -> DrawnState {
+        DrawnState(size: fragment.renderingSurfaceBounds.size, rendering: renderingSignature(of: fragment))
+    }
+
+    /// A hash of the rendering attributes over `fragment`'s text: UIKit tints pressed links and find results with them.
+    private func renderingSignature(of fragment: NSTextLayoutFragment) -> Int {
+        guard let manager = textLayoutManager else { return 0 }
+        let range = fragment.rangeInElement
+        var hasher = Hasher()
+        manager.enumerateRenderingAttributes(from: range.location, reverse: false) { manager, attributes, attributeRange in
+            guard attributeRange.location.compare(range.endLocation) == .orderedAscending else { return false }
+            hasher.combine(manager.offset(from: range.location, to: attributeRange.location))
+            for (key, value) in attributes {
+                hasher.combine(key)
+                hasher.combine((value as? NSObject)?.hash ?? 0)
+            }
+            return true
+        }
+        return hasher.finalize()
+    }
+
+    // The iOS 27 SDK's rendering-surface cache hooks (WWDC26: key rendering surfaces by NSTextLayoutFragment), declared
+    // by selector so they compile at the iOS 26 floor; iOS 26 never calls them. UITextView implements both, and its
+    // implementations are always called: UIKit asserts if the surface it made isn't stored.
+    @objc(textViewportLayoutController:retrieveCachedRenderingSurfaceForKey:)
+    func retrieveDrawnSurface(_ controller: NSTextViewportLayoutController, key: AnyObject) -> AnyObject? {
+        if reusesDrawnText, let fragment = key as? NSTextLayoutFragment, let view = drawnSurfaces.object(forKey: fragment),
+           view.superview != nil, !view.isHidden, drawnStates[ObjectIdentifier(fragment)] == drawnState(of: fragment) {
+            return view
+        }
+        let selector = #selector(retrieveDrawnSurface(_:key:))
+        guard UITextView.instancesRespond(to: selector), let implementation = class_getMethodImplementation(UITextView.self, selector) else {
+            return nil
+        }
+        typealias Retrieve = @convention(c) (AnyObject, Selector, AnyObject, AnyObject) -> AnyObject?
+        return unsafeBitCast(implementation, to: Retrieve.self)(self, selector, controller, key)
+    }
+
+    @objc(textViewportLayoutController:cacheRenderingSurface:forKey:)
+    func cacheDrawnSurface(_ controller: NSTextViewportLayoutController, surface: AnyObject, key: AnyObject) {
+        if reusesDrawnText, let fragment = key as? NSTextLayoutFragment, let view = surface as? UIView {
+            drawnSurfaces.setObject(view, forKey: fragment)
+            drawnStates[ObjectIdentifier(fragment)] = drawnState(of: fragment)
+            if drawnStates.count > 1_024 { pruneDrawnStates() }
+        }
+        let selector = #selector(cacheDrawnSurface(_:surface:key:))
+        guard UITextView.instancesRespond(to: selector), let implementation = class_getMethodImplementation(UITextView.self, selector) else {
+            return
+        }
+        typealias Cache = @convention(c) (AnyObject, Selector, AnyObject, AnyObject, AnyObject) -> Void
+        unsafeBitCast(implementation, to: Cache.self)(self, selector, controller, surface, key)
+    }
+
+    /// Drops the states of fragments that no longer have a drawn surface.
+    private func pruneDrawnStates() {
+        var live = Set<ObjectIdentifier>()
+        let fragments = drawnSurfaces.keyEnumerator()
+        while let fragment = fragments.nextObject() as? NSTextLayoutFragment { live.insert(ObjectIdentifier(fragment)) }
+        drawnStates = drawnStates.filter { live.contains($0.key) }
     }
 
     // MARK: - Visible band

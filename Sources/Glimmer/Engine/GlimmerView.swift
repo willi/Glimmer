@@ -66,6 +66,7 @@ public final class GlimmerView: UIView {
         // While revealing, this view is shorter than the text and clips the rest (see `fitTextViewToContent`).
         clipsToBounds = true
         textView.delegate = self
+        textView.reusesDrawnText = configuration.reusesDrawnText
         addSubview(textView)
         rebuildDocument()
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: GlimmerView, _: UITraitCollection) in

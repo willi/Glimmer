@@ -13,6 +13,9 @@ public struct GlimmerConfiguration: Sendable {
     public var dataDetectors: UIDataDetectorTypes
     /// Whether the text offers the system Find interaction.
     public var allowsFind: Bool
+    /// Whether scrolling and streaming reuse the text TextKit already drew (iOS 27). On by default; turn it off if
+    /// text ever shows stale pixels.
+    public var reusesDrawnText: Bool
 
     public init(
         theme: GlimmerTheme = .default,
@@ -21,7 +24,8 @@ public struct GlimmerConfiguration: Sendable {
         highlighter: any GlimmerHighlighter = GlimmerBasicHighlighter(),
         reveal: GlimmerReveal = .smooth(GlimmerRevealOptions()),
         dataDetectors: UIDataDetectorTypes = [],
-        allowsFind: Bool = false
+        allowsFind: Bool = false,
+        reusesDrawnText: Bool = true
     ) {
         self.theme = theme
         self.extensions = extensions
@@ -30,6 +34,7 @@ public struct GlimmerConfiguration: Sendable {
         self.reveal = reveal
         self.dataDetectors = dataDetectors
         self.allowsFind = allowsFind
+        self.reusesDrawnText = reusesDrawnText
     }
 
     public static var `default`: GlimmerConfiguration { GlimmerConfiguration() }
