@@ -163,7 +163,7 @@ run the harness are in [the Plan 5 results](docs/superpowers/perf/2026-09-26-gli
 | The same, streaming a 150-line code block | ≤ 2 ms | 1.97 ms |
 | The same, streaming a 40-row table | ≤ 2 ms | 0.43 ms |
 | Finding the last glyph of a 5,000-word answer (most of starting a phrase) | ≤ 0.2 ms | 0.010 ms |
-| Frames dropped while streaming below a 5,000-word answer | 0 | 4 single frames in 30 s |
+| Hitches while streaming and scrolling a 5,000-word answer (`XCTHitchMetric`) | 0 | 2.3 ms per s ("good" under Apple's 5); 5–9 short drops in 30 s |
 | Showing a cached settled answer again (~1,200 words) | ≤ 4 ms | 27 ms (59 ms uncached) |
 
 How it stays fast:

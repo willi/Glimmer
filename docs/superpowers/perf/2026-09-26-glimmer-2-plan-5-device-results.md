@@ -16,7 +16,7 @@ a load average of 5.7–8.4) are alongside for comparison.
 | Starting a phrase: its segment lookup at the end of 5,000 words | ≤ 0.2 ms | 0.010 ms | 0.011 ms | pass |
 | Main-thread work per reveal frame, between updates | ~0 | 0.73 ms of CPU per 120 Hz frame | 0.31–0.42 ms (Debug) | miss (see below) |
 | Configuring a cached settled answer (~1,200 words) | ≤ 4 ms | 27.0 ms (uncached 59.2 ms) | 14.2–15.9 ms | miss |
-| Hitches while streaming and scrolling | 0 | 4 one-frame drops in 30 s (worst 16.7 ms) | not measurable | near miss (see below) |
+| Hitches while streaming and scrolling | 0 | hitch-time ratio 2.3 ms/s; 5–9 short drops in 30 s (worst 20 ms) | not measurable | near miss: "good" by Apple's scale (see below) |
 
 Rest of the main thread per update, p95 (TextKit's layout and drawing, plus the reveal's wake-ups):
 
@@ -36,27 +36,29 @@ What Plan 5 changed, on the simulator:
 
 ## Hitches
 
-The benchmark streams about 1,000 words at a seeded Gemini cadence below a settled 5,000-word answer. A 120 Hz display
-link counts frames that arrive more than one and a half frame durations late.
+The benchmark streams about 1,000 words at a seeded Gemini cadence below a settled 5,000-word answer. While it
+streams, the screen scrolls itself up through the whole earlier answer and back down, as a reader would. A 120 Hz
+display link counts frames that arrive more than one and a half frame durations late.
 
-| Run | Frames | Hitches | Worst interval | XCTHitchMetric |
+| Run | Frames | Hitches (frame monitor) | Worst interval | XCTHitchMetric |
 |---|---|---|---|---|
-| Launched alone (`devicectl process launch --console`), following the bottom | 2,148 | 4 | 16.7 ms | — |
-| Under XCUITest, with swipes and element queries during the stream | 1,880 | 19 | 1,028 ms | 9 hitches, 1.08 s in total, 25.4 ms per s |
+| Self-scrolling, under XCUITest, which leaves the app alone while measuring | 2,123 | 9 | 20.2 ms | 15 hitches, 125 ms in total, **2.3 ms per s** |
+| Self-scrolling, launched alone (`devicectl process launch --console`) | 2,135 | 5 | 16.7 ms | — |
+| Following the bottom only, launched alone | 2,148 | 4 | 16.7 ms | — |
+| First harness: XCUITest swipes and element queries during the stream | 1,880 | 19 | 1,028 ms | 9 hitches, 1.08 s in total, 25.4 ms per s |
 
-**Read the first row.** Each of its four hitches is one missed 120 Hz frame (16.7 ms where 8.3 ms was due). That is
-close to the spec's zero, but not zero. On the simulator, the same run reported 1 hitch (worst 35.1 ms) out of about
-1,066 frames, which says little, because the simulator doesn't pace frames like a phone.
+**The hitch-time ratio is 2.3 ms per second.** Apple's scale calls under 5 ms/s good (not noticeable), 5–10 a warning,
+and over 10 critical. Streaming while scrolling through a 5,000-word answer is smooth by that measure. The spec asks
+for zero hitches, and there are a handful of short ones: the worst is 20 ms, where 8.3 ms was due, so one or two
+missed frames. They coincide with phrase starts and embeds growing by a line or row (see the misses below).
 
-**The second row measures the harness.** Every XCUITest swipe and element query snapshots the app's whole
-accessibility tree. For a screen holding a 5,000-word answer, that stalled the app's main thread for about a second.
-The UI test now leaves the app alone while it measures: the app scrolls itself up through the earlier answer and back
-down, and the test reads the summary only after the frame monitor stops. That version passes on the simulator. Its
-device run is waiting for the phone to be unlocked.
+**The last row measured the harness.** Every XCUITest swipe and element query snapshots the app's whole
+accessibility tree. For a screen holding a 5,000-word answer, that stalled the main thread for about a second. The UI
+test now leaves the app alone while it measures, and the stall is gone.
 
 The stall is also a finding for VoiceOver. It suggests UIKit's accessibility for a long `UITextView` lays out far
 more than the visible band. VoiceOver asks for elements lazily rather than snapshotting everything, so it may not hit
-the same cost, but a person using VoiceOver on a long answer should be tested on a device.
+the same cost, but VoiceOver on a long answer should be tried on a device.
 
 ## The misses
 
@@ -70,10 +72,11 @@ the same cost, but a person using VoiceOver on a long answer should be tested on
   every frame, so this is phrase-start work averaged over frames: about 5 ms per phrase start. Each start fits within
   a 120 Hz frame, which is why the benchmark shows single-frame drops at most rather than stalls. To profile: the
   mask's geometry for the new phrase, and the height report each start makes.
-- **Hitches: four one-frame drops in 30 s.** They coincide with the costs above: phrase starts, and embeds growing
-  by a line or row.
+- **Hitches: a handful of one- or two-frame drops in 30 s (2.3 ms/s).** They coincide with the costs above: phrase
+  starts, and embeds growing by a line or row.
 
-The package's tests gate on the simulator. On the device, `GlimmerDevicePerf` reports these two misses as failures
+The package's tests gate on the simulator. On the device, `BenchmarkHitchUITests` fails its zero-hitch assertion, and
+`GlimmerDevicePerf` reports the other two misses as failures
 (`testConfiguringACachedSettledAnswerStaysWithinBudget` at 27 ms against its 24 ms regression gate, and
 `testARevealBetweenUpdatesCostsAlmostNothingPerFrame` at 0.73 ms against 0.5 ms). That is the harness doing its job.
 
