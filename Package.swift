@@ -5,6 +5,7 @@ import PackageDescription
 
 let package = Package(
     name: "Glimmer",
+    defaultLocalization: "en",
     platforms: [
         .iOS(.v18)
     ],
@@ -29,7 +30,8 @@ let package = Package(
         ),
         .target(
             name: "Glimmer",
-            dependencies: ["cmark-gfm", "cmark-gfm-extensions"]
+            dependencies: ["cmark-gfm", "cmark-gfm-extensions"],
+            resources: [.process("Engine/Resources")]
         ),
         .testTarget(
             name: "GlimmerTests",

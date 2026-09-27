@@ -1,0 +1,39 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "Code": {
+      "comment": "VoiceOver label for a code block without a language.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Code"
+          }
+        }
+      }
+    },
+    "Code, %@": {
+      "comment": "VoiceOver label for a code block; the argument is its language.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Code, %@"
+          }
+        }
+      }
+    },
+    "Copy code": {
+      "comment": "VoiceOver label for a code block's Copy button.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy code"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

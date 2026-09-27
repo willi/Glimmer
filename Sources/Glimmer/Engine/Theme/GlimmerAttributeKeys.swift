@@ -24,4 +24,6 @@ extension NSAttributedString.Key {
     static let glimmerListTightness = NSAttributedString.Key("glimmer.listTightness")
     /// `true` on the marker paragraph of a list's first item.
     static let glimmerListOpens = NSAttributedString.Key("glimmer.listOpens")
+    /// `true` on text VoiceOver reads but nothing draws or measures, such as a task checkbox's state.
+    static let glimmerSpokenOnly = NSAttributedString.Key("glimmer.spokenOnly")
 }

@@ -262,4 +262,11 @@ final class GlimmerComposerTests: XCTestCase {
         XCTAssertEqual(attributes(of: "1.", in: compose("1. a"))[.foregroundColor] as? UIColor, theme.textColor)
         XCTAssertEqual(attributes(of: "•", in: compose("> - a"))[.foregroundColor] as? UIColor, theme.secondaryTextColor)
     }
+
+    func testTaskItemsIndentByTheirBoxAlone() {
+        // The checkbox's state is spoken-only text; the marker column is the box and the gap, as before it existed.
+        let box = ceil(theme.bodyFont.capHeight + 6)
+        let gap = ceil(theme.bodyFont.pointSize * 0.4)
+        XCTAssertEqual(style(of: "done", in: compose("- [x] done"))?.headIndent, max(theme.listIndent, ceil(box + gap)))
+    }
 }

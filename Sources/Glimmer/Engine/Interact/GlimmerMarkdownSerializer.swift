@@ -9,8 +9,9 @@ enum GlimmerMarkdownSerializer {
         serialize(text, range: range, asMarkdown: true)
     }
 
-    static func plainText(from text: NSAttributedString, range: NSRange) -> String {
-        serialize(text, range: range, asMarkdown: false)
+    /// `forAccessibility` reads chips by their accessibility label, as VoiceOver reads a settled chip.
+    static func plainText(from text: NSAttributedString, range: NSRange, forAccessibility: Bool = false) -> String {
+        serialize(text, range: range, asMarkdown: false, forAccessibility: forAccessibility)
     }
 
     // MARK: - Paragraphs
@@ -51,7 +52,9 @@ enum GlimmerMarkdownSerializer {
         }
     }
 
-    private static func serialize(_ text: NSAttributedString, range: NSRange, asMarkdown: Bool) -> String {
+    private static func serialize(
+        _ text: NSAttributedString, range: NSRange, asMarkdown: Bool, forAccessibility: Bool = false
+    ) -> String {
         let string = text.string as NSString
         let wanted = NSIntersectionRange(range, NSRange(location: 0, length: string.length))
         guard wanted.length > 0 else { return "" }
@@ -66,7 +69,8 @@ enum GlimmerMarkdownSerializer {
             let selected = NSIntersectionRange(paragraph.content, wanted)
             // A selection that starts on a paragraph's newline, or on a marker-only line's tab, takes nothing from it.
             guard selected.length > 0 || includesStart else { continue }
-            let written = write(paragraph, selected: selected, includesStart: includesStart, in: text, asMarkdown: asMarkdown)
+            let written = write(paragraph, selected: selected, includesStart: includesStart, in: text,
+                                asMarkdown: asMarkdown, forAccessibility: forAccessibility)
             guard includesStart || !written.isEmpty else { continue }
             if let previous { output += separator(after: previous, before: paragraph, asMarkdown: asMarkdown) }
             output += written
@@ -110,7 +114,8 @@ enum GlimmerMarkdownSerializer {
     }
 
     private static func write(
-        _ paragraph: Paragraph, selected: NSRange, includesStart: Bool, in text: NSAttributedString, asMarkdown: Bool
+        _ paragraph: Paragraph, selected: NSRange, includesStart: Bool, in text: NSAttributedString, asMarkdown: Bool,
+        forAccessibility: Bool
     ) -> String {
         let string = text.string as NSString
         var marker = ""
@@ -129,7 +134,8 @@ enum GlimmerMarkdownSerializer {
                     body += asMarkdown ? attributes[.glimmerSource] as? String ?? "" : plainText(of: attachment.embed)
                 } else if let chip = attributes[.attachment] as? GlimmerInlineAttachment {
                     flush()
-                    body += asMarkdown ? chip.token.source : chip.token.displayText
+                    body += asMarkdown ? chip.token.source
+                        : forAccessibility ? chip.token.accessibilityLabel ?? chip.token.displayText : chip.token.displayText
                 } else if let source = attributes[.glimmerSource] as? String {
                     // An inline image's alt text: written once, however its runs split, inside its link if it has one.
                     var whole = NSRange()

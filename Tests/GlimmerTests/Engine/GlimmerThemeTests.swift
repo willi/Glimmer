@@ -63,6 +63,7 @@ final class GlimmerThemeTests: XCTestCase {
         XCTAssertEqual(NSAttributedString.Key.glimmerMarkdownPrefix.rawValue, "glimmer.markdownPrefix")
         XCTAssertEqual(NSAttributedString.Key.glimmerListTightness.rawValue, "glimmer.listTightness")
         XCTAssertEqual(NSAttributedString.Key.glimmerListOpens.rawValue, "glimmer.listOpens")
+        XCTAssertEqual(NSAttributedString.Key.glimmerSpokenOnly.rawValue, "glimmer.spokenOnly")
         XCTAssertEqual(NSAttributedString.Key.glimmerStrong.rawValue, "glimmer.strong")
         XCTAssertEqual(NSAttributedString.Key.glimmerEmphasis.rawValue, "glimmer.emphasis")
     }

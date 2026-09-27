@@ -76,7 +76,7 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
         languageLabel.textColor = theme.secondaryTextColor
         copyButton.setImage(UIImage(systemName: "doc.on.doc"), for: .normal)
         copyButton.tintColor = theme.secondaryTextColor
-        copyButton.accessibilityLabel = "Copy code"
+        copyButton.accessibilityLabel = String(localized: "Copy code", bundle: .module, comment: "VoiceOver label for a code block's Copy button.")
         copyButton.addAction(UIAction { [weak self] _ in
             guard let self else { return }
             pasteboard.string = self.code
@@ -86,7 +86,9 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
             addSubview(copyButton)
         }
         // VoiceOver: "Code, swift", then the code, then the Copy button. The header label would repeat the language.
-        textView.accessibilityLabel = language.map { "Code, \($0)" } ?? "Code"
+        textView.accessibilityLabel = language.map {
+            String(localized: "Code, \($0)", bundle: .module, comment: "VoiceOver label for a code block; the argument is its language.")
+        } ?? String(localized: "Code", bundle: .module, comment: "VoiceOver label for a code block without a language.")
         languageLabel.isAccessibilityElement = false
         accessibilityElements = theme.showsCodeBlockHeader ? [textView, copyButton] : [textView]
     }

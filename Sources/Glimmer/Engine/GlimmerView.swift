@@ -16,6 +16,9 @@ public final class GlimmerView: UIView {
     public var editMenuActions: ((GlimmerSelection) -> [UIMenuElement])?
     /// Items appended to a link's menu.
     public var linkMenuActions: ((URL) -> [UIMenuElement])?
+    /// The text's Find interaction when `configuration.allowsFind` is on. Hosts present it from a toolbar or menu:
+    /// `findInteraction?.presentFindNavigator(showingReplace: false)`.
+    public var findInteraction: UIFindInteraction? { configuration.allowsFind ? textView.findInteraction : nil }
 
     let textView = GlimmerTextView()
     let revealMask = GlimmerRevealMask()
@@ -101,11 +104,12 @@ public final class GlimmerView: UIView {
     /// A host that moves the view without resizing it (content above grew) gives it no layout pass, so the rendered
     /// band would stay where it was: refresh it here.
     public override var frame: CGRect {
-        didSet { if frame.origin != oldValue.origin { textView.refreshVisibleBandIfNeeded() } }
+        // Outside any animation the host is running: fragment views appear in place, they don't fly in.
+        didSet { if frame.origin != oldValue.origin { UIView.performWithoutAnimation { textView.refreshVisibleBandIfNeeded() } } }
     }
 
     public override var center: CGPoint {
-        didSet { if center != oldValue { textView.refreshVisibleBandIfNeeded() } }
+        didSet { if center != oldValue { UIView.performWithoutAnimation { textView.refreshVisibleBandIfNeeded() } } }
     }
 
     public override func sizeThatFits(_ size: CGSize) -> CGSize {
@@ -153,17 +157,31 @@ public final class GlimmerView: UIView {
 
     /// While a reveal runs the view is one element that reads what is revealed so far. The text view underneath is
     /// hidden, because its unrevealed text is laid out but invisible. At settle the text view takes over, with
-    /// line and word navigation and the links rotor.
+    /// line and word navigation and the links rotor. A host may group a settled answer into one element too.
     public override var isAccessibilityElement: Bool {
-        get { engine != nil }
-        set {}
+        get { engine != nil || hostGroupsAnswer == true }
+        set { hostGroupsAnswer = newValue }
     }
 
+    /// A host's own choice to group the answer into one element; nil lets the view decide.
+    private var hostGroupsAnswer: Bool?
+
+    /// While revealing, the revealed text; for a host-grouped answer without a label of its own, the whole text.
     public override var accessibilityLabel: String? {
         get {
-            guard let engine else { return super.accessibilityLabel }
-            let revealed = min(engine.revealedLength, textView.textStorage.length)
-            return GlimmerMarkdownSerializer.plainText(from: textView.textStorage, range: NSRange(location: 0, length: revealed))
+            if let engine {
+                let revealed = min(engine.revealedLength, textView.textStorage.length)
+                return GlimmerMarkdownSerializer.plainText(
+                    from: textView.textStorage, range: NSRange(location: 0, length: revealed), forAccessibility: true
+                )
+            }
+            if hostGroupsAnswer == true, super.accessibilityLabel == nil {
+                return GlimmerMarkdownSerializer.plainText(
+                    from: textView.textStorage, range: NSRange(location: 0, length: textView.textStorage.length),
+                    forAccessibility: true
+                )
+            }
+            return super.accessibilityLabel
         }
         set { super.accessibilityLabel = newValue }
     }

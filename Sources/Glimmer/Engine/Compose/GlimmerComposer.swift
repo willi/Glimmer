@@ -121,7 +121,7 @@ struct GlimmerComposer {
         }
         // At least `listIndent`, and always a gap after the widest marker (wide numbers, large text sizes). Numbers get
         // room for two digits up front, so items already shown do not shift right when item 10 streams in.
-        var widestMarker = markers.map { $0.attributedSubstring(from: NSRange(location: 0, length: $0.length - 1)).size().width }.max() ?? 0
+        var widestMarker = markers.map { visibleWidth(of: $0) }.max() ?? 0
         if case .ordered(let start) = list.kind {
             let digits = max(2, String(start + list.items.count - 1).count)
             widestMarker = max(widestMarker, reservedNumberWidth(digits: digits))
@@ -209,7 +209,7 @@ struct GlimmerComposer {
         style.headIndent = context.indent
         if let marker {
             // Numbers share a right edge, like a browser's list: "10." grows to the left, not into the gap.
-            let width = marker.attributedSubstring(from: NSRange(location: 0, length: marker.length - 1)).size().width
+            let width = visibleWidth(of: marker)
             style.firstLineHeadIndent = context.alignsMarkersToText
                 ? max(0, context.indent - markerGap - width)
                 : max(0, context.indent - context.listStep)
@@ -240,6 +240,15 @@ struct GlimmerComposer {
         output.addAttribute(.paragraphStyle, value: style, range: range)
     }
 
+    /// A marker's drawn width: without its trailing tab, and without text only VoiceOver reads.
+    private func visibleWidth(of marker: NSAttributedString) -> CGFloat {
+        let visible = NSMutableAttributedString(attributedString: marker.attributedSubstring(from: NSRange(location: 0, length: marker.length - 1)))
+        visible.enumerateAttribute(.glimmerSpokenOnly, in: NSRange(location: 0, length: visible.length), options: .reverse) { value, range, _ in
+            if value as? Bool == true { visible.deleteCharacters(in: range) }
+        }
+        return visible.size().width
+    }
+
     /// The width of the widest `digits`-digit number marker in the body font, such as "88.".
     private func reservedNumberWidth(digits: Int) -> CGFloat {
         let attributes: [NSAttributedString.Key: Any] = [.font: theme.bodyFont]
@@ -259,6 +268,10 @@ struct GlimmerComposer {
             let side = ceil(theme.bodyFont.capHeight + 6)
             box.bounds = CGRect(x: 0, y: (theme.bodyFont.capHeight - side) / 2, width: side, height: side)
             marker.append(NSAttributedString(attachment: box))
+            // VoiceOver builds a line's label from its text and skips the image, so the state is text: tiny and clear.
+            marker.append(NSAttributedString(string: checkbox ? "Checked, " : "Unchecked, ", attributes: [
+                .font: theme.bodyFont.withSize(0.01), .foregroundColor: UIColor.clear, .glimmerSpokenOnly: true,
+            ]))
             source = checkbox ? "- [x] " : "- [ ] "
         } else {
             switch kind {

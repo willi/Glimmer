@@ -109,4 +109,11 @@ final class GlimmerInteractionTests: XCTestCase {
         XCTAssertEqual(view.textView.dataDetectorTypes, [.phoneNumber, .link])
         XCTAssertTrue(view.textView.isFindInteractionEnabled)
     }
+
+    func testFindCanBePresentedByTheHost() {
+        var configuration = GlimmerConfiguration(imageLoader: nil)
+        XCTAssertNil(GlimmerView(configuration: configuration).findInteraction)
+        configuration.allowsFind = true
+        XCTAssertNotNil(GlimmerView(configuration: configuration).findInteraction)
+    }
 }

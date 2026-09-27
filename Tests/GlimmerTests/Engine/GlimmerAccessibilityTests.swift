@@ -97,6 +97,48 @@ final class GlimmerAccessibilityTests: XCTestCase {
         let plainChip = GlimmerInlineAttachment(token: plainToken, glimmerExtension: NoViewExtension(), theme: theme)
         XCTAssertEqual(plainChip.chipView().accessibilityLabel, "@Ada")
     }
+
+    func testAHostCanGroupASettledAnswer() {
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
+        let window = hostInWindow(view, width: 320, height: 800)
+        view.update(markdown: "Grouped **answer**.")
+        view.isAccessibilityElement = true
+        XCTAssertTrue(view.isAccessibilityElement)
+        XCTAssertEqual(view.accessibilityLabel, "Grouped answer.")
+        _ = window
+    }
+
+    func testTheRevealingLabelReadsChipsLikeTheSettledChip() async {
+        var configuration = GlimmerConfiguration(imageLoader: nil)
+        configuration.extensions = [LabeledCitationExtension()]
+        let view = GlimmerView(configuration: configuration)
+        let clock = ManualRevealClock()
+        view.clock = clock
+        let window = hostInWindow(view, width: 320, height: 800)
+        view.update(markdown: "Sources say so [3] and more words follow here to keep revealing.", isStreaming: true)
+        await view.pendingDocument?.value
+        clock.advance(to: 3)
+        XCTAssertTrue((view.accessibilityLabel ?? "").contains("Source 3"), view.accessibilityLabel ?? "nil")
+        _ = window
+    }
+
+    func testTaskCheckboxesSayWhetherTheyAreDone() {
+        let text = GlimmerComposer(theme: theme).compose(GlimmerParser.parse("- [x] done\n- [ ] open"))
+        XCTAssertTrue(text.string.contains("Checked"))
+        XCTAssertTrue(text.string.contains("Unchecked"))
+        XCTAssertEqual(GlimmerMarkdownSerializer.markdown(from: text, range: NSRange(location: 0, length: text.length)),
+                       "- [x] done\n- [ ] open", "copy still writes the task syntax")
+    }
 }
 
 private struct NoViewExtension: GlimmerExtension {}
+
+private struct LabeledCitationExtension: GlimmerExtension {
+    func scan(_ text: String) -> [GlimmerInlineToken] {
+        text.ranges(of: #/\[\d+\]/#).map { range in
+            let label = String(text[range])
+            return GlimmerInlineToken(range: range, kind: "citation", displayText: label, source: label,
+                                      accessibilityLabel: "Source \(label.dropFirst().dropLast())")
+        }
+    }
+}

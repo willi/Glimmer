@@ -113,4 +113,21 @@ final class GlimmerVisibleBandTests: XCTestCase {
         XCTAssertGreaterThan(rects.last?.rect.maxY ?? 0, view.bounds.height - 200)
         _ = window
     }
+
+    func testMovingTheViewInsideAnAnimationDoesNotAnimateTheText() throws {
+        let container = UIView()
+        let window = hostInWindow(container, width: 390, height: 800)
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
+        view.update(markdown: long)
+        let height = view.sizeThatFits(CGSize(width: 390, height: CGFloat.greatestFiniteMagnitude)).height
+        view.frame = CGRect(x: 0, y: 0, width: 390, height: height)
+        container.addSubview(view)
+        settle(container)
+        UIView.animate(withDuration: 1) { view.frame.origin.y = -(height / 2).rounded() }
+        func animated(_ root: UIView) -> Bool {
+            (root.layer.animationKeys()?.isEmpty == false) || root.subviews.contains(where: animated)
+        }
+        XCTAssertFalse(view.textView.subviews.contains(where: animated), "fragment views appear in place")
+        _ = window
+    }
 }
