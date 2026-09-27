@@ -26,7 +26,7 @@ actor GlimmerDocumentWorker {
     }
 
     func update(markdown: String, isStreaming: Bool) -> GlimmerDocumentResult {
-        let source = extensions.reduce(markdown) { $1.preprocess($0) }
+        let source = extensions.prepared(markdown, isStreaming: isStreaming)
         let edit = document.update(markdown: source, isStreaming: isStreaming)
         return GlimmerDocumentResult(edit: edit, embedUnits: document.embedUnits, isStreaming: isStreaming)
     }

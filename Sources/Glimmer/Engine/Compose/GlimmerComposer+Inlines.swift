@@ -29,7 +29,7 @@ extension GlimmerComposer {
                 if let url = URL(string: destination) { linked[.link] = url }
                 appendInlines(children, attributes: linked, to: output)
             case .image(let source, _, let alt):
-                appendInlineImage(source: source, alt: alt, attributes: attributes, to: output)
+                appendInlineImage(source: source, alt: alt, markdown: "![\(alt)](\(source))", attributes: attributes, to: output)
             case .softBreak:
                 output.append(NSAttributedString(string: " ", attributes: attributes))
             case .lineBreak:
@@ -51,8 +51,10 @@ extension GlimmerComposer {
 
     /// An image inside a paragraph: a line-height square, then its alt text for VoiceOver only. An unusable URL shows
     /// the alt text, dimmed, as before.
-    func appendInlineImage(source: String, alt: String, attributes: [NSAttributedString.Key: Any], to output: NSMutableAttributedString) {
-        let markdown = "![\(alt)](\(source))"
+    func appendInlineImage(
+        source: String, alt: String, markdown: String, spoken: String? = nil, attributes: [NSAttributedString.Key: Any],
+        to output: NSMutableAttributedString
+    ) {
         guard let url = URL(string: source) else {
             var faded = attributes
             faded[.foregroundColor] = theme.secondaryTextColor
@@ -64,17 +66,19 @@ extension GlimmerComposer {
         image[.attachment] = GlimmerInlineImageAttachment(source: url, alt: alt, theme: theme, loader: imageLoader)
         image[.glimmerSource] = markdown
         output.append(NSAttributedString(string: "\u{FFFC}", attributes: image))
-        guard !alt.isEmpty else { return }
-        var spoken = attributes
-        spoken[.font] = (attributes[.font] as? UIFont ?? theme.bodyFont).withSize(0.01)
-        spoken[.foregroundColor] = UIColor.clear
-        spoken[.glimmerSpokenOnly] = true
-        output.append(NSAttributedString(string: alt, attributes: spoken))
+        let label = spoken ?? alt
+        guard !label.isEmpty else { return }
+        var spokenAttributes = attributes
+        spokenAttributes[.font] = (attributes[.font] as? UIFont ?? theme.bodyFont).withSize(0.01)
+        spokenAttributes[.foregroundColor] = UIColor.clear
+        spokenAttributes[.glimmerSpokenOnly] = true
+        output.append(NSAttributedString(string: label, attributes: spokenAttributes))
     }
 
-    /// Appends plain text, turning extension tokens into inline chips.
+    /// Appends plain text, turning extension tokens into chips, text or inline images.
     func appendText(_ text: String, attributes: [NSAttributedString.Key: Any], to output: NSMutableAttributedString) {
-        let tokens = extensions.flatMap { glimmerExtension in
+        let inLink = attributes[.link] != nil
+        let tokens = extensions.filter { !inLink || $0.appliesInsideLinks }.flatMap { glimmerExtension in
             glimmerExtension.scan(text)
                 .filter { $0.range.lowerBound >= text.startIndex && $0.range.upperBound <= text.endIndex }
                 .map { (glimmerExtension: glimmerExtension, token: $0) }
@@ -85,14 +89,39 @@ extension GlimmerComposer {
             if cursor < match.token.range.lowerBound {
                 output.append(NSAttributedString(string: String(text[cursor..<match.token.range.lowerBound]), attributes: attributes))
             }
-            var chip = attributes
-            chip[.attachment] = GlimmerInlineAttachment(token: match.token, glimmerExtension: match.glimmerExtension, theme: theme)
-            chip[.glimmerSource] = match.token.source
-            output.append(NSAttributedString(string: "\u{FFFC}", attributes: chip))
+            appendToken(match.token, glimmerExtension: match.glimmerExtension, attributes: attributes, to: output)
             cursor = match.token.range.upperBound
         }
         if cursor < text.endIndex {
             output.append(NSAttributedString(string: String(text[cursor...]), attributes: attributes))
+        }
+    }
+
+    private func appendToken(
+        _ token: GlimmerInlineToken, glimmerExtension: any GlimmerExtension, attributes: [NSAttributedString.Key: Any],
+        to output: NSMutableAttributedString
+    ) {
+        switch token.presentation {
+        case .chip:
+            var chip = attributes
+            chip[.attachment] = GlimmerInlineAttachment(token: token, glimmerExtension: glimmerExtension, theme: theme)
+            chip[.glimmerSource] = token.source
+            output.append(NSAttributedString(string: "\u{FFFC}", attributes: chip))
+        case .text(let tappable):
+            // Text like any other: it wraps and selects as words do. Copy writes the source; a tap reports the token.
+            var run = attributes
+            run[.glimmerSource] = token.source
+            run[.glimmerToken] = GlimmerTokenBox(token)
+            if tappable {
+                run[.foregroundColor] = theme.mentionColor
+                run[.textItemTag] = token.kind
+            }
+            output.append(NSAttributedString(string: token.displayText, attributes: run))
+        case .image(let url):
+            var run = attributes
+            run[.glimmerToken] = GlimmerTokenBox(token)
+            appendInlineImage(source: url.absoluteString, alt: token.displayText, markdown: token.source,
+                              spoken: token.accessibilityLabel, attributes: run, to: output)
         }
     }
 

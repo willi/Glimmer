@@ -26,4 +26,6 @@ extension NSAttributedString.Key {
     static let glimmerListOpens = NSAttributedString.Key("glimmer.listOpens")
     /// `true` on text VoiceOver reads but nothing draws or measures, such as a task checkbox's state.
     static let glimmerSpokenOnly = NSAttributedString.Key("glimmer.spokenOnly")
+    /// The extension token a text or image presentation shows (a `GlimmerTokenBox`), for `onTokenTap`.
+    static let glimmerToken = NSAttributedString.Key("glimmer.token")
 }

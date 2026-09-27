@@ -203,6 +203,27 @@ public final class GlimmerView: UIView {
         return defaultMenu.replacingChildren(defaultMenu.children + linkMenuActions(url))
     }
 
+    /// Called with an extension token the reader taps: a mention (`GlimmerMentions`), or any token an extension shows
+    /// as tappable text.
+    public var onTokenTap: ((GlimmerInlineToken) -> Void)?
+
+    /// The token shown at `index` as text or an image, or nil.
+    func token(atCharacter index: Int) -> GlimmerInlineToken? {
+        guard index >= 0, index < textView.textStorage.length else { return nil }
+        return (textView.textStorage.attribute(.glimmerToken, at: index, effectiveRange: nil) as? GlimmerTokenBox)?.token
+    }
+
+    /// What a tap on the token at `index` does, or nil when the host doesn't handle token taps.
+    func tokenAction(atCharacter index: Int) -> UIAction? {
+        guard onTokenTap != nil, token(atCharacter: index) != nil else { return nil }
+        return UIAction { [weak self] _ in self?.tapToken(atCharacter: index) }
+    }
+
+    func tapToken(atCharacter index: Int) {
+        guard let token = token(atCharacter: index) else { return }
+        onTokenTap?(token)
+    }
+
     func linkAction(for url: URL) -> UIAction? {
         guard let onLinkTap else { return nil }
         return UIAction { _ in onLinkTap(url) }
@@ -290,7 +311,7 @@ public final class GlimmerView: UIView {
     // MARK: - Document
 
     private func preprocessed(_ markdown: String) -> String {
-        configuration.extensions.reduce(markdown) { $1.preprocess($0) }
+        configuration.extensions.prepared(markdown, isStreaming: isStreaming)
     }
 
     /// Re-composes everything (theme, configuration or text size changed).
@@ -490,8 +511,14 @@ public final class GlimmerView: UIView {
 
 extension GlimmerView: UITextViewDelegate {
     public func textView(_ textView: UITextView, primaryActionFor textItem: UITextItem, defaultAction: UIAction) -> UIAction? {
-        guard case .link(let url) = textItem.content else { return defaultAction }
-        return linkAction(for: url) ?? defaultAction
+        switch textItem.content {
+        case .link(let url):
+            return linkAction(for: url) ?? defaultAction
+        case .tag:
+            return tokenAction(atCharacter: textItem.range.location)
+        default:
+            return defaultAction
+        }
     }
 
     public func textView(

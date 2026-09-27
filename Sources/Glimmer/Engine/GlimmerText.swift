@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// SwiftUI wrapper for `GlimmerView`. Markdown and `onLinkTap` update in place; the configuration is read once, when
+/// SwiftUI wrapper for `GlimmerView`. Markdown, `onLinkTap` and `onTokenTap` update in place; the configuration is read once, when
 /// the view is created. To apply a different configuration (theme, extensions, image loader), give the view a new
 /// identity, for example `.id(themeVersion)`.
 public struct GlimmerText: UIViewRepresentable {
@@ -9,6 +9,8 @@ public struct GlimmerText: UIViewRepresentable {
     public var revealID: String?
     public var configuration: GlimmerConfiguration
     public var onLinkTap: ((URL) -> Void)?
+    /// Called with a tapped extension token, such as a mention. See `GlimmerView.onTokenTap`.
+    public var onTokenTap: ((GlimmerInlineToken) -> Void)?
     /// Items appended to the edit menu for a selection. See `GlimmerView.editMenuActions`.
     public var editMenuActions: ((GlimmerSelection) -> [UIMenuElement])?
     /// Items appended to a link's menu. See `GlimmerView.linkMenuActions`.
@@ -20,6 +22,7 @@ public struct GlimmerText: UIViewRepresentable {
         revealID: String? = nil,
         configuration: GlimmerConfiguration = .default,
         onLinkTap: ((URL) -> Void)? = nil,
+        onTokenTap: ((GlimmerInlineToken) -> Void)? = nil,
         editMenuActions: ((GlimmerSelection) -> [UIMenuElement])? = nil,
         linkMenuActions: ((URL) -> [UIMenuElement])? = nil
     ) {
@@ -28,6 +31,7 @@ public struct GlimmerText: UIViewRepresentable {
         self.revealID = revealID
         self.configuration = configuration
         self.onLinkTap = onLinkTap
+        self.onTokenTap = onTokenTap
         self.editMenuActions = editMenuActions
         self.linkMenuActions = linkMenuActions
     }
@@ -40,6 +44,7 @@ public struct GlimmerText: UIViewRepresentable {
 
     public func updateUIView(_ view: GlimmerView, context: Context) {
         view.onLinkTap = onLinkTap
+        view.onTokenTap = onTokenTap
         view.editMenuActions = editMenuActions
         view.linkMenuActions = linkMenuActions
         view.update(markdown: markdown, isStreaming: isStreaming, revealID: revealID)
