@@ -81,8 +81,8 @@ struct BenchmarkDemo: View {
             try? await Task.sleep(for: .seconds(3))
             monitor.stop()
             let counter = monitor.counter
-            summary = String(format: "done frames=%d hitches=%d worst=%.1fms", counter.frames, counter.hitches,
-                             counter.worstInterval * 1000)
+            summary = String(format: "done frames=%d hitches=%d worst=%.1fms ratio=%.2fms/s", counter.frames, counter.hitches,
+                             counter.worstInterval * 1000, counter.hitchTimeRatio)
             print("BENCHMARK \(summary)")
             if ProcessInfo.processInfo.arguments.contains("--benchmark-exit") { exit(0) }
         }

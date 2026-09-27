@@ -9,9 +9,10 @@ Glimmer 2.0 is a rewrite. See [Migrating from 1.x](#migrating-from-1x).
 
 ## Requirements
 
-- iOS 18 or later
+- iOS 18 or later to run
+- Xcode 27 or later (the iOS 27 SDK) to build: on iOS 27 Glimmer renders only the text near the screen through an
+  API that SDK introduced
 - Swift 6
-- Xcode 26 or later
 
 ## Installation
 

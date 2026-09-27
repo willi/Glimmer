@@ -1,6 +1,17 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Checked, ": {
+      "comment": "VoiceOver reads this before a checked task-list item.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checked, "
+          }
+        }
+      }
+    },
     "Code": {
       "comment": "VoiceOver label for a code block without a language.",
       "localizations": {
@@ -30,6 +41,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Copy code"
+          }
+        }
+      }
+    },
+    "Unchecked, ": {
+      "comment": "VoiceOver reads this before an unchecked task-list item.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unchecked, "
           }
         }
       }

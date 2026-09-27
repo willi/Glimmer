@@ -129,6 +129,15 @@ final class GlimmerAccessibilityTests: XCTestCase {
         XCTAssertEqual(GlimmerMarkdownSerializer.markdown(from: text, range: NSRange(location: 0, length: text.length)),
                        "- [x] done\n- [ ] open", "copy still writes the task syntax")
     }
+
+    func testLibraryStringsAreInTheCatalog() throws {
+        // Everything VoiceOver reads from Glimmer itself goes through Localizable.xcstrings, so it can be translated.
+        let path = try XCTUnwrap(GlimmerStrings.bundle.path(forResource: "Localizable", ofType: "strings", inDirectory: nil, forLocalization: "en"))
+        let table = try XCTUnwrap(NSDictionary(contentsOfFile: path) as? [String: String])
+        for key in ["Code", "Code, %@", "Copy code", "Checked, ", "Unchecked, "] {
+            XCTAssertNotNil(table[key], key)
+        }
+    }
 }
 
 private struct NoViewExtension: GlimmerExtension {}

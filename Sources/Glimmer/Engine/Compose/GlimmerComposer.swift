@@ -269,7 +269,7 @@ struct GlimmerComposer {
             box.bounds = CGRect(x: 0, y: (theme.bodyFont.capHeight - side) / 2, width: side, height: side)
             marker.append(NSAttributedString(attachment: box))
             // VoiceOver builds a line's label from its text and skips the image, so the state is text: tiny and clear.
-            marker.append(NSAttributedString(string: checkbox ? "Checked, " : "Unchecked, ", attributes: [
+            marker.append(NSAttributedString(string: checkbox ? GlimmerStrings.checked : GlimmerStrings.unchecked, attributes: [
                 .font: theme.bodyFont.withSize(0.01), .foregroundColor: UIColor.clear, .glimmerSpokenOnly: true,
             ]))
             source = checkbox ? "- [x] " : "- [ ] "
