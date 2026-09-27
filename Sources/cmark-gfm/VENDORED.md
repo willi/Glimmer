@@ -7,4 +7,6 @@
 - Local changes:
   - `iterator.c`, `cmark_consolidate_text_nodes`: a backslash-escaped character stays its own text node instead of
     merging into its neighbours, so `\@ada` is not a mention and `\:rocket:` not a shortcode (`GlimmerParser`).
+  - `cmark-gfm-extensions/tasklist.c`, `open_tasklist_item`: scans from the item's own marker, so tasks inside a
+    block quote are tasks, and reads the checked state from the item's own brackets instead of anywhere on the line.
 - To update, re-run the copy at a new commit, re-apply the local changes, and bump this file.

@@ -126,4 +126,27 @@ final class GlimmerParserTests: XCTestCase {
         }
         XCTAssertEqual(language, "swift")
     }
+
+    private func checkboxes(_ markdown: String) -> [Bool?] {
+        func items(in blocks: [GlimmerBlock]) -> [Bool?] {
+            blocks.flatMap { block -> [Bool?] in
+                switch block {
+                case .list(let list): list.items.flatMap { [$0.checkbox] + items(in: $0.blocks) }
+                case .blockQuote(let children): items(in: children)
+                default: []
+                }
+            }
+        }
+        return items(in: GlimmerParser.parse(markdown))
+    }
+
+    /// GitHub shows tasks inside quotes; cmark-gfm's scanner only looked from the start of the line.
+    func testTasksInsideAQuoteAreTasks() {
+        XCTAssertEqual(checkboxes("> - [x] Done\n> - [ ] Open\n>   > - [x] Nested"), [true, false, true])
+    }
+
+    /// Only the item's own brackets say whether it is done.
+    func testATaskIsCheckedByItsOwnBrackets() {
+        XCTAssertEqual(checkboxes("- [ ] Compare with [x] later\n- [x] Done"), [false, true])
+    }
 }

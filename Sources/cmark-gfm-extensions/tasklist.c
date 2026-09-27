@@ -1,4 +1,5 @@
 #include <stdbool.h>
+#include <string.h>
 
 #include "tasklist.h"
 #include <parser.h>
@@ -84,7 +85,14 @@ static cmark_node *open_tasklist_item(cmark_syntax_extension *self,
     return NULL;
   }
 
-  bufsize_t matched = scan_tasklist(input, len, 0);
+  // Glimmer: scan from the marker of an item that opened on this line, not from the start of the line, so a task
+  // inside a block quote (`> - [x]`) is found; and read its state from its own brackets, not anywhere on the line.
+  bufsize_t start = 0;
+  if (parent_container->start_line == parser->line_number && parent_container->start_column > 0 &&
+      parent_container->start_column - 1 < len) {
+    start = parent_container->start_column - 1;
+  }
+  bufsize_t matched = scan_tasklist(input, len, start);
   if (!matched) {
     return NULL;
   }
@@ -93,7 +101,8 @@ static cmark_node *open_tasklist_item(cmark_syntax_extension *self,
   cmark_parser_advance_offset(parser, (char *)input, 3, false);
 
   // Either an upper or lower case X means the task is completed.
-  parent_container->as.list.checked = (strstr((char*)input, "[x]") || strstr((char*)input, "[X]"));
+  unsigned char *box = memchr(input + start, '[', matched);
+  parent_container->as.list.checked = box && (box[1] == 'x' || box[1] == 'X');
 
   return NULL;
 }
