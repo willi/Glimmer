@@ -22,7 +22,8 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
     }
 
     private let theme: GlimmerTheme
-    private let highlighter: any GlimmerHighlighter
+    /// Settable so a prepared view (`GlimmerEmbedViewPool`) takes the highlighter of the block it shows.
+    var highlighter: any GlimmerHighlighter
     private var highlighted: NSAttributedString
     /// A standalone TextKit 2 layout of the unwrapped code, its container unbounded both ways so each code line is one
     /// fragment. Kept across streaming updates, so only the lines that changed are measured again.
@@ -163,6 +164,10 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
         guard case .codeBlock(let language, let code, let highlighted) = embed,
               code != self.code || language != self.language else { return }
         self.code = code
+        if language != self.language {
+            languageLabel.text = language?.lowercased() ?? "code"
+            textView.accessibilityLabel = language.map(GlimmerStrings.code(language:)) ?? GlimmerStrings.code
+        }
         self.language = language
         let old = self.highlighted
         self.highlighted = highlighted

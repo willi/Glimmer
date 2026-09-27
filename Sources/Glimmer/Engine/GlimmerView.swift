@@ -91,6 +91,11 @@ public final class GlimmerView: UIView {
         self.markdown = markdown
         self.isStreaming = isStreaming
         self.revealID = revealID
+        if isStreaming, window != nil {
+            GlimmerEmbedViewPool.shared.prepareCodeBlockView(
+                theme: configuration.theme.scaled(for: traitCollection), highlighter: configuration.highlighter, in: self
+            )
+        }
         if !isStreaming, engine == nil, pendingDocument == nil {
             // A settled answer: compose now, so the host can size it in this layout pass.
             composeSynchronously()

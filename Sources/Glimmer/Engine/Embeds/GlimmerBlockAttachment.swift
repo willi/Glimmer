@@ -99,6 +99,11 @@ enum GlimmerEmbedViewFactory {
     static func makeView(for attachment: GlimmerBlockAttachment) -> any GlimmerEmbedView {
         switch attachment.embed {
         case .codeBlock(let language, let code, let highlighted):
+            if let prepared = GlimmerEmbedViewPool.shared.takeCodeBlockView(
+                for: attachment.embed, theme: attachment.theme, highlighter: attachment.highlighter
+            ) {
+                return prepared
+            }
             return GlimmerCodeBlockView(code: code, language: language, theme: attachment.theme,
                                         highlighter: attachment.highlighter, highlighted: highlighted)
         case .table(let header, let rows, let alignments):
