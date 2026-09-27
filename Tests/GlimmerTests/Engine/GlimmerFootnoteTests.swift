@@ -85,4 +85,47 @@ final class GlimmerFootnoteTests: XCTestCase {
         let text = composed("See[^1].\n\n[^1]: Yes.", rendersNotes: false)
         XCTAssertEqual(text.string, "See1.")
     }
+
+    // MARK: - Streaming
+
+    private func waitForDocument(_ view: GlimmerView) {
+        let deadline = Date().addingTimeInterval(5)
+        while view.pendingDocument != nil, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.002)) }
+        view.layoutIfNeeded()
+    }
+
+    func testAMarkerKeepsItsNumberWhenItsDefinitionArrives() {
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil, reveal: .none))
+        let window = hostInWindow(view, width: 390, height: 800)
+        view.update(markdown: "A[^x] b[^y].", isStreaming: true, revealID: "notes")
+        waitForDocument(view)
+        XCTAssertEqual(markers(in: view.textView.textStorage).map(\.number), ["1", "2"])
+        view.update(markdown: "A[^x] b[^y].\n\n[^y]: Why.\n[^x]: Ex.", isStreaming: true, revealID: "notes")
+        waitForDocument(view)
+        XCTAssertEqual(markers(in: view.textView.textStorage).map(\.number), ["1", "2"])
+        XCTAssertFalse(view.textView.textStorage.string.contains("Ex."), "notes wait for the answer to settle")
+        view.update(markdown: "A[^x] b[^y].\n\n[^y]: Why.\n[^x]: Ex.", isStreaming: false, revealID: "notes")
+        waitForDocument(view)
+        let string = view.textView.textStorage.string
+        XCTAssertEqual(markers(in: view.textView.textStorage).map(\.number), ["1", "2"])
+        let ex = try? XCTUnwrap(string.range(of: "Ex."))
+        let why = try? XCTUnwrap(string.range(of: "Why."))
+        XCTAssertNotNil(ex)
+        XCTAssertNotNil(why)
+        if let ex, let why { XCTAssertLessThan(ex.lowerBound, why.lowerBound, "note 1 (x) first") }
+        _ = window
+    }
+
+    func testFootnotesStreamWithoutMovingShownText() {
+        assertStreamingKeepsShownTextInPlace("""
+        Glimmer renders footnotes[^fn] the way the web does. A marker whose note comes later[^late] is a number \
+        right away.
+
+        [^fn]: Numbered by first reference.
+
+        More text after a definition keeps streaming, and a third marker[^fn] reuses its number.
+
+        [^late]: This note arrived last.
+        """)
+    }
 }

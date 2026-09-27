@@ -53,7 +53,8 @@ final class GlimmerStreamingDocument: @unchecked Sendable {
     private var fenceScan = GlimmerTailHealer.FenceScan()
     /// Whether `rawMarkdown` defines link references; once one appears, every update re-parses in full.
     private var usesReferenceDefinitions = false
-    private let composer: GlimmerComposer
+    /// Its footnote numbering lives as long as the document, so recomposed blocks keep the numbers they showed.
+    private var composer: GlimmerComposer
 
     init(composer: GlimmerComposer) {
         self.composer = composer
@@ -67,13 +68,17 @@ final class GlimmerStreamingDocument: @unchecked Sendable {
         if !isAppend || !isStreaming { fenceScan = GlimmerTailHealer.FenceScan() }
         rawMarkdown = markdown
         let newSource = isStreaming ? GlimmerTailHealer.heal(markdown, fenceScan: &fenceScan) : markdown
-        guard newSource != source else { return nil }
+        // Footnote notes render only once the answer settles: body text keeps arriving after a definition.
+        let notesModeChanged = composer.rendersFootnoteDefinitions != !isStreaming
+        composer.rendersFootnoteDefinitions = !isStreaming
+        guard newSource != source || notesModeChanged else { return nil }
         let parsed = parse(newSource)
         source = newSource
         tailOffset = parsed.tailOffset
 
         var firstChanged = parsed.searchFrom
-        while firstChanged < min(blocks.count, parsed.blocks.count), blocks[firstChanged] == parsed.blocks[firstChanged] {
+        while firstChanged < min(blocks.count, parsed.blocks.count), blocks[firstChanged] == parsed.blocks[firstChanged],
+              !(notesModeChanged && Self.isFootnoteDefinitions(blocks[firstChanged])) {
             firstChanged += 1
         }
         guard firstChanged < max(blocks.count, parsed.blocks.count) else {
@@ -125,6 +130,11 @@ final class GlimmerStreamingDocument: @unchecked Sendable {
         blockOffsets = newOffsets
         blockAttachments = newAttachments
         return edit
+    }
+
+    private static func isFootnoteDefinitions(_ block: GlimmerBlock) -> Bool {
+        if case .footnoteDefinitions = block { return true }
+        return false
     }
 
     /// Drops the leading paragraphs of `edit` that already match `text`. A block re-composes whole — a long list

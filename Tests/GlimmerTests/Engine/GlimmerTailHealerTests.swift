@@ -8,6 +8,12 @@ final class GlimmerTailHealerTests: XCTestCase {
         ("a _b", "a _b_"),
         ("snake_case_name", "snake_case_name"),
         ("Title\n-", "Title\n"),
+        // Footnotes: a marker still being typed waits; a complete one shows; a line that may start a definition waits.
+        ("see [^1", "see "),
+        ("see [^", "see "),
+        ("see [^1]", "see [^1]"),
+        ("text\n\n[^1]", "text\n\n"),
+        ("text\n\n[^1]:", "text\n\n"),
         // A body row that is only its opening pipe would parse as a paragraph "|" below the table.
         ("| A |\n|---|\n| ", "| A |\n|---|\n"),
         ("| A |\n|---|\n| x |\n|", "| A |\n|---|\n| x |\n"),

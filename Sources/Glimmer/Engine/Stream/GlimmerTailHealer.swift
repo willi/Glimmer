@@ -33,6 +33,7 @@ enum GlimmerTailHealer {
         tail = holdBackTableHeader(tail)
         tail = holdBackOpeningPipe(tail)
         tail = holdBackSetextUnderline(tail)
+        tail = holdBackFootnoteStarts(tail)
         tail = healLinks(tail)
         tail = closeInlineDelimiters(tail)
         return String(markdown[..<tailStart]) + tail
@@ -186,6 +187,18 @@ enum GlimmerTailHealer {
 
     // MARK: - Links and images
 
+    /// A footnote marker still being typed (`[^`, `[^lab`) waits until it closes, and so does a last line that is only a
+    /// marker (`[^1]`, `[^1]:`): it may be a definition starting, which would take the line away again.
+    private static func holdBackFootnoteStarts(_ tail: String) -> String {
+        if let match = tail.firstMatch(of: #/(?m)^[ ]{0,3}\[\^[^\]\s]+\]:?[ \t]*$/#), match.range.upperBound == tail.endIndex {
+            return String(tail[..<match.range.lowerBound])
+        }
+        if let match = tail.firstMatch(of: #/\[\^[^\]\s]*$/#) {
+            return String(tail[..<match.range.lowerBound])
+        }
+        return tail
+    }
+
     private static func healLinks(_ tail: String) -> String {
         // `![alt` or `![alt](partial` — hold the whole image back until it is complete.
         if let match = tail.firstMatch(of: #/!\[[^\]]*(\]\([^)\s]*)?$/#) {
@@ -195,8 +208,9 @@ enum GlimmerTailHealer {
         if tail.firstMatch(of: #/\[[^\]]*\]\([^)\s]*$/#) != nil {
             return tail + ")"
         }
-        // `[text]` — may still become a link (or an extension token); hold it back for a moment.
-        if let match = tail.firstMatch(of: #/\[[^\]]*\]$/#) {
+        // `[text]` — may still become a link (or an extension token); hold it back for a moment. A complete footnote
+        // marker `[^label]` shows at once.
+        if let match = tail.firstMatch(of: #/\[[^\]]*\]$/#), !tail[match.range].hasPrefix("[^") {
             return String(tail[..<match.range.lowerBound])
         }
         // `[partial` — drop the bracket and keep the text.
