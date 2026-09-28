@@ -52,7 +52,9 @@ extension GlimmerComposer {
                 output.append(NSAttributedString(string: "\u{2028}", attributes: attributes))
             case .html(let html) where isBreakTag:
                 // The one tag with a plain meaning, and a common way to break a line in a table cell. Copies as itself.
-                while output.length > 0, (output.string as NSString).character(at: output.length - 1) == 0x20 {
+                // Spaces before it go, but not a code span's own.
+                while output.length > 0, (output.string as NSString).character(at: output.length - 1) == 0x20,
+                      output.attribute(.glimmerInlineCode, at: output.length - 1, effectiveRange: nil) == nil {
                     output.deleteCharacters(in: NSRange(location: output.length - 1, length: 1))
                 }
                 var lineBreak = attributes

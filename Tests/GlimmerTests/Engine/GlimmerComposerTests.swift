@@ -287,6 +287,11 @@ final class GlimmerComposerTests: XCTestCase {
                        "Use HTML\u{2028}tag\u{2028}to create\u{2028}lines")
     }
 
+    /// Collapsing the space before a `<br>` stops at code: a code span keeps its own trailing space.
+    func testABreakTagLeavesACodeSpansSpace() {
+        XCTAssertEqual(compose("`a `<br>b").string, "a \u{2028}b")
+    }
+
     func testABreakTagBreaksATableCell() throws {
         let text = compose("| Items |\n|---|\n| • one<br>• two |")
         let attachment = try XCTUnwrap(text.attribute(.attachment, at: 0, effectiveRange: nil) as? GlimmerBlockAttachment)
