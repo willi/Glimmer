@@ -396,10 +396,13 @@ final class GlimmerTextView: UITextView {
 
     /// Viewport passes run so far: diagnostics for tests and the benchmark.
     private(set) var viewportPasses = 0
+    /// Every Glimmer text view's viewport passes so far, for `GlimmerDiagnostics`.
+    private(set) static var allViewportPasses = 0
 
     @available(iOS 27.0, *)
     override func textViewportLayoutControllerWillLayout(_ controller: NSTextViewportLayoutController) {
         viewportPasses += 1
+        Self.allViewportPasses += 1
         super.textViewportLayoutControllerWillLayout(controller)
     }
 

@@ -1,4 +1,4 @@
-import Glimmer
+@_spi(Diagnostics) import Glimmer
 import SwiftUI
 
 /// Streams about 1,000 words below a settled 5,000-word answer at Gemini's cadence, with a frame monitor. The
@@ -67,6 +67,7 @@ struct BenchmarkDemo: View {
         shown = ""
         isStreaming = true
         summary = "running"
+        let passesBefore = GlimmerDiagnostics.viewportPasses
         monitor.start()
         var generator = SeededGenerator(seed: 42)
         let chunks = StreamingLabDemo.chunks(of: Self.answer, cadence: .gemini, using: &generator)
@@ -96,8 +97,9 @@ struct BenchmarkDemo: View {
             try? await Task.sleep(for: .seconds(3))
             monitor.stop()
             let counter = monitor.counter
-            summary = String(format: "done frames=%d hitches=%d worst=%.1fms ratio=%.2fms/s", counter.frames, counter.hitches,
-                             counter.worstInterval * 1000, counter.hitchTimeRatio)
+            summary = String(format: "done frames=%d hitches=%d worst=%.1fms ratio=%.2fms/s passes=%d", counter.frames,
+                             counter.hitches, counter.worstInterval * 1000, counter.hitchTimeRatio,
+                             GlimmerDiagnostics.viewportPasses - passesBefore)
             print("BENCHMARK \(summary)")
             if ProcessInfo.processInfo.arguments.contains("--benchmark-exit") { exit(0) }
         }

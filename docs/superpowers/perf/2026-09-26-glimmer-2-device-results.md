@@ -42,14 +42,17 @@ What each change moved:
   hands over.
 - **Laying out ahead of the band in idle frames.** For up to 2 ms a frame, 1.5 screens ahead in the scroll direction
   and 0.5 behind, as Texture's preload range does. The flick's return no longer lays text out in the frame it
-  arrives: its hitch slices went from 16–18 ms to 3–6 ms.
+  arrives: its hitch slices went from 16–18 ms to 3–6 ms. The preload matters for an answer shown from the document
+  cache, which lays out only the screen and band at first. An uncached configure already lays out the whole answer,
+  so there the preload finds nothing left to do.
 - **A prepared code block view.** While an answer streams, one code block view is built and laid out once on an idle
   turn. The next fence takes it: 0.3–0.9 ms on the device, against 4.3–10 ms fresh.
 - **Two options were tried and rejected:**
   - half-screen band steps: 4.1–5.6 ms/s, against 2.2–3.5 interleaved;
   - `drawsAsynchronously` on the fragment views: 3.7–8.0 ms/s.
 - **iOS 26 floor.** The iOS 27 hooks are declared by Objective-C selector, so the package builds for iOS 26. iOS 26
-  never calls them.
+  never calls them. That is verified by compiling only: no iOS 26 simulator runtime or device was available to run
+  on.
 
 ### What's left
 
