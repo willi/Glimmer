@@ -8,8 +8,9 @@ final class GlimmerRevealStore {
     static let shared = GlimmerRevealStore()
 
     private let capacity: Int
-    /// `version` is the text view's text version when the entry was recorded, or -1 when unknown.
-    private var entries: [String: (length: Int, prefixHash: Int, version: Int)] = [:]
+    /// `version` is the text view's text version when the entry was recorded, or -1 when unknown; `owner` identifies that
+    /// text view, since a version identifies text only within its own view.
+    private var entries: [String: (length: Int, prefixHash: Int, version: Int, owner: ObjectIdentifier?)] = [:]
     private var recent: [String] = []
 
     init(capacity: Int = 256) {
@@ -29,16 +30,16 @@ final class GlimmerRevealStore {
 
     /// Records `length` for `id`. It only grows while `text` is the same answer; a regenerated answer starts over.
     func record(_ length: Int, text: NSString, for id: String) {
-        record(length, text: text, version: -1, for: id)
+        record(length, text: text, version: -1, owner: nil, for: id)
     }
 
     /// Records `length` for `id`, where `version` changes whenever `text` does. While it stays the same, the opening is
     /// hashed again only if the hashed part grew, so recording on every reveal step costs nothing on a long answer.
-    func record(_ length: Int, text: NSString, version: Int, for id: String) {
-        if version >= 0, let entry = entries[id], entry.version == version {
+    func record(_ length: Int, text: NSString, version: Int, owner: ObjectIdentifier?, for id: String) {
+        if version >= 0, let owner, let entry = entries[id], entry.version == version, entry.owner == owner {
             let stored = max(entry.length, length)
             let grew = min(stored, 1_024, text.length) != min(entry.length, 1_024, text.length)
-            entries[id] = (stored, grew ? Self.prefixHash(of: text, length: stored) : entry.prefixHash, version)
+            entries[id] = (stored, grew ? Self.prefixHash(of: text, length: stored) : entry.prefixHash, version, owner)
             touch(id)
             return
         }
@@ -46,7 +47,7 @@ final class GlimmerRevealStore {
         if let entry = entries[id], entry.prefixHash == Self.prefixHash(of: text, length: entry.length) {
             stored = max(entry.length, length)
         }
-        entries[id] = (stored, Self.prefixHash(of: text, length: stored), version)
+        entries[id] = (stored, Self.prefixHash(of: text, length: stored), version, owner)
         touch(id)
     }
 

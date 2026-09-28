@@ -259,7 +259,8 @@ public final class GlimmerView: UIView {
         current.advance(to: now)
         if let revealID {
             GlimmerRevealStore.shared.record(
-                current.revealedLength, text: textView.textStorage.string as NSString, version: textView.textVersion, for: revealID
+                current.revealedLength, text: textView.textStorage.string as NSString, version: textView.textVersion,
+                owner: ObjectIdentifier(textView), for: revealID
             )
         }
         if current.isComplete {
