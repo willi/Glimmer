@@ -314,7 +314,7 @@ public final class GlimmerView: UIView {
         if let revealID {
             GlimmerRevealStore.shared.record(
                 current.revealedLength, text: textView.textStorage.string as NSString, version: textView.textVersion,
-                owner: ObjectIdentifier(textView), for: revealID
+                owner: textView.serial, for: revealID
             )
         }
         if current.isComplete {

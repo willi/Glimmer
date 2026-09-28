@@ -9,6 +9,14 @@ final class GlimmerTextView: UITextView {
     private(set) var theme: GlimmerTheme = .default
     /// Bumped on every change to the text or its styling; keys measurement caches.
     private(set) var textVersion = 0
+    /// Tells text views apart for good: unlike an address, never reused by a later view.
+    let serial = GlimmerTextView.nextSerial()
+    private static var serialsIssued = 0
+
+    private static func nextSerial() -> Int {
+        serialsIssued += 1
+        return serialsIssued
+    }
     private var lastLayoutWidth: CGFloat = 0
     private var fittedSize: (version: Int, width: CGFloat, height: CGFloat)?
     /// Strongly held: the text layout manager's delegate is weak.

@@ -222,7 +222,7 @@ The gallery gains a section for each item, in light and dark.
 | Risk | Mitigation |
 |---|---|
 | A very tall text view upsets UIKit: VoiceOver frames, the selection loupe, scroll-to-visible | A1's checks run first. Geometric growth is the fallback. |
-| Holding back an unclosed `:shortcode` or `[^…` makes the reveal wait on ordinary text with colons | Hold back only a candidate that is still at the very end of the stream and at most 40 characters long. Anything longer, or containing a space, is released. |
+| Holding back an unclosed `:shortcode` or `[^…` makes the reveal wait on ordinary text with colons | Hold back only a candidate that is still at the very end of the stream and at most 64 characters long (GitHub's longest mention, 39 characters, with its `@` and a period fits). Anything longer, or containing a space, is released. |
 | Rendering footnote definitions only at settle surprises a host that shows a stream with no end | Definitions still appear when the host passes `isStreaming: false`. The README says so. |
 | Inline images in a line-height square look too small for some content | The square matches 1.x's emoji-sized inline images. A standalone image line is the way to show a large image. |
 

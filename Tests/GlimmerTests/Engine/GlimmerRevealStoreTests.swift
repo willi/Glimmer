@@ -30,23 +30,28 @@ final class GlimmerRevealStoreTests: XCTestCase {
     func testRecordingTheSameTextVersionAgainKeepsTheLongestLength() {
         let store = GlimmerRevealStore(capacity: 4)
         let text = NSString(string: String(repeating: "word ", count: 400))
-        store.record(100, text: text, version: 7, owner: ObjectIdentifier(store), for: "m")
-        store.record(300, text: text, version: 7, owner: ObjectIdentifier(store), for: "m")
-        store.record(200, text: text, version: 7, owner: ObjectIdentifier(store), for: "m")
+        store.record(100, text: text, version: 7, owner: 1, for: "m")
+        store.record(300, text: text, version: 7, owner: 1, for: "m")
+        store.record(200, text: text, version: 7, owner: 1, for: "m")
         XCTAssertEqual(store.revealedLength(for: "m", text: text), 300)
         let other = NSString(string: "different " + (text as String))
-        store.record(50, text: other, version: 8, owner: ObjectIdentifier(store), for: "m")
+        store.record(50, text: other, version: 8, owner: 1, for: "m")
         XCTAssertEqual(store.revealedLength(for: "m", text: other), 50, "a new text starts over")
     }
 
     /// A text version identifies text only within its own text view: another view's equal number is another text.
+    /// Views are told apart by a serial number, never reused (a freed view's address can be).
+    func testTextViewSerialsAreNeverReused() {
+        let serials = (0..<3).map { _ in GlimmerTextView().serial }
+        XCTAssertEqual(Set(serials).count, 3)
+    }
+
     func testAnotherViewsEqualVersionIsAnotherText() {
         let store = GlimmerRevealStore(capacity: 4)
         let first = NSString(string: String(repeating: "first ", count: 100))
         let second = NSString(string: String(repeating: "second ", count: 100))
-        let viewA = NSObject(), viewB = NSObject()
-        store.record(120, text: first, version: 3, owner: ObjectIdentifier(viewA), for: "m")
-        store.record(40, text: second, version: 3, owner: ObjectIdentifier(viewB), for: "m")
+        store.record(120, text: first, version: 3, owner: 1, for: "m")
+        store.record(40, text: second, version: 3, owner: 2, for: "m")
         XCTAssertEqual(store.revealedLength(for: "m", text: second), 40)
         XCTAssertNil(store.revealedLength(for: "m", text: first), "the first answer's fingerprint is gone")
     }
