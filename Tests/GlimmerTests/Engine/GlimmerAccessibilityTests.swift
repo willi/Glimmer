@@ -83,6 +83,48 @@ final class GlimmerAccessibilityTests: XCTestCase {
         _ = window
     }
 
+    /// A table's accessibility is safe to read off the main thread: its cells as the main thread last built them, each
+    /// cell's frame as the main thread last read it.
+    func testATablesAccessibilityCanBeReadOffTheMainThread() throws {
+        let cell = { (text: String) in NSAttributedString(string: text) }
+        let table = GlimmerTableView(header: [cell("Name"), cell("Value")], rows: [[cell("a"), cell("1")]],
+                                     alignments: [.none, .none], theme: theme)
+        let window = hostInWindow(table, width: 300, height: table.embedHeight(forWidth: 300))
+        table.layoutIfNeeded()
+        XCTAssertEqual(table.accessibilityElements?.count, 4)
+        let element = try XCTUnwrap(table.accessibilityDataTableCellElement(forRow: 1, column: 1) as? GlimmerTableCellElement)
+        let frameOnMain = element.accessibilityFrame
+        XCTAssertGreaterThan(frameOnMain.width, 0)
+        nonisolated(unsafe) let tableObject: NSObject = table
+        nonisolated(unsafe) let cellObject: NSObject = element
+        nonisolated(unsafe) var elements: Int?, rows: Int?, columns: Int?, headers: Int?
+        nonisolated(unsafe) var found: AnyObject?, frame: CGRect?, rowRange: NSRange?
+        let read = expectation(description: "read off the main thread")
+        DispatchQueue.global().async {
+            elements = (tableObject.value(forKey: "accessibilityElements") as? [Any])?.count
+            rows = (tableObject.value(forKey: "accessibilityRowCount") as? NSNumber)?.intValue
+            columns = (tableObject.value(forKey: "accessibilityColumnCount") as? NSNumber)?.intValue
+            typealias CellAt = @convention(c) (AnyObject, Selector, Int, Int) -> AnyObject?
+            let cellAt = NSSelectorFromString("accessibilityDataTableCellElementForRow:column:")
+            found = unsafeBitCast(tableObject.method(for: cellAt), to: CellAt.self)(tableObject, cellAt, 1, 1)
+            typealias HeadersFor = @convention(c) (AnyObject, Selector, Int) -> NSArray?
+            let headersFor = NSSelectorFromString("accessibilityHeaderElementsForColumn:")
+            headers = unsafeBitCast(tableObject.method(for: headersFor), to: HeadersFor.self)(tableObject, headersFor, 1)?.count
+            frame = (cellObject.value(forKey: "accessibilityFrame") as? NSValue)?.cgRectValue
+            rowRange = (cellObject.value(forKey: "accessibilityRowRange") as? NSValue)?.rangeValue
+            read.fulfill()
+        }
+        wait(for: [read], timeout: 5)
+        XCTAssertEqual(elements, 4)
+        XCTAssertEqual(rows, 2)
+        XCTAssertEqual(columns, 2)
+        XCTAssertTrue(found === element)
+        XCTAssertEqual(headers, 1)
+        XCTAssertEqual(frame, frameOnMain)
+        XCTAssertEqual(rowRange, NSRange(location: 1, length: 1))
+        _ = window
+    }
+
     func testReplacingTheTextStillForgetsWhatWasMeasured() {
         let textView = GlimmerTextView()
         textView.frame = CGRect(x: 0, y: 0, width: 320, height: 800)

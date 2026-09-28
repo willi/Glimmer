@@ -1,3 +1,4 @@
+import Synchronization
 import UIKit
 
 /// A GFM table. Columns size to their content, capped at `maxTableColumnWidth`, and expand to fill the width when
@@ -30,7 +31,12 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
     /// hold.
     private var measuredRows: (columnWidths: [CGFloat], heights: [CGFloat])?
     /// VoiceOver's cells, built when it first asks and again after a change.
-    private var cellElementsCache: [[GlimmerTableCellElement]]?
+    private var cellElementsCache: [[GlimmerTableCellElement]]? {
+        didSet { accessibilitySnapshot.withLock { $0 = cellElementsCache ?? [] } }
+    }
+    /// The cells as the main thread last built them, for readers off it: UIKit's accessibility may read a view from a
+    /// background queue, where a main-actor member traps, so the accessibility members are nonisolated and read this.
+    nonisolated private let accessibilitySnapshot = Mutex<[[GlimmerTableCellElement]]>([])
 
     /// VoiceOver's cells, one per label, header row first.
     private var cellElements: [[GlimmerTableCellElement]] {
@@ -142,9 +148,15 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
         return label
     }
 
-    override var accessibilityElements: [Any]? {
-        get { Array(cellElements.joined()) }
+    nonisolated override var accessibilityElements: [Any]? {
+        get { Array(accessibleCells().joined()) }
         set {}
+    }
+
+    /// The cells: built on the main thread when first asked; off it, as the main thread last built them.
+    nonisolated private func accessibleCells() -> [[GlimmerTableCellElement]] {
+        guard Thread.isMainThread else { return accessibilitySnapshot.withLock { $0 } }
+        return MainActor.assumeIsolated { cellElements }
     }
 
     /// Rows shown while a reveal runs (the header counts as one); nil shows all.
@@ -252,28 +264,31 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
 }
 
 extension GlimmerTableView: UIAccessibilityContainerDataTable {
-    func accessibilityRowCount() -> Int { cellElements.count }
-    func accessibilityColumnCount() -> Int { cellElements.first?.count ?? 0 }
+    nonisolated func accessibilityRowCount() -> Int { accessibleCells().count }
+    nonisolated func accessibilityColumnCount() -> Int { accessibleCells().first?.count ?? 0 }
 
-    func accessibilityDataTableCellElement(forRow row: Int, column: Int) -> (any UIAccessibilityContainerDataTableCell)? {
-        guard row < cellElements.count, column < cellElements[row].count else { return nil }
-        return cellElements[row][column]
+    nonisolated func accessibilityDataTableCellElement(forRow row: Int, column: Int) -> (any UIAccessibilityContainerDataTableCell)? {
+        let cells = accessibleCells()
+        guard row < cells.count, column < cells[row].count else { return nil }
+        return cells[row][column]
     }
 
-    func accessibilityHeaderElements(forColumn column: Int) -> [any UIAccessibilityContainerDataTableCell]? {
-        guard let header = cellElements.first, column < header.count else { return nil }
+    nonisolated func accessibilityHeaderElements(forColumn column: Int) -> [any UIAccessibilityContainerDataTableCell]? {
+        guard let header = accessibleCells().first, column < header.count else { return nil }
         return [header[column]]
     }
 
-    func accessibilityHeaderElements(forRow row: Int) -> [any UIAccessibilityContainerDataTableCell]? { nil }
+    nonisolated func accessibilityHeaderElements(forRow row: Int) -> [any UIAccessibilityContainerDataTableCell]? { nil }
 }
 
 /// One table cell for VoiceOver: its text, its position, and where its label is on screen. The frame is read when
-/// VoiceOver asks, so a table scrolled sideways still points at the right cell.
+/// VoiceOver asks, so a table scrolled sideways still points at the right cell; off the main thread, the frame as the
+/// main thread last read it.
 final class GlimmerTableCellElement: UIAccessibilityElement, UIAccessibilityContainerDataTableCell {
-    let row: Int
-    let column: Int
+    nonisolated let row: Int
+    nonisolated let column: Int
     private weak var label: UILabel?
+    nonisolated private let lastFrame = Mutex(CGRect.zero)
 
     init(container: GlimmerTableView, row: Int, column: Int, label: UILabel) {
         self.row = row
@@ -284,11 +299,16 @@ final class GlimmerTableCellElement: UIAccessibilityElement, UIAccessibilityCont
         accessibilityTraits = row == 0 ? .header : .staticText
     }
 
-    override var accessibilityFrame: CGRect {
-        get { label.map { UIAccessibility.convertToScreenCoordinates($0.bounds, in: $0) } ?? .zero }
+    nonisolated override var accessibilityFrame: CGRect {
+        get {
+            guard Thread.isMainThread else { return lastFrame.withLock { $0 } }
+            let frame = MainActor.assumeIsolated { label.map { UIAccessibility.convertToScreenCoordinates($0.bounds, in: $0) } ?? .zero }
+            lastFrame.withLock { $0 = frame }
+            return frame
+        }
         set {}
     }
 
-    func accessibilityRowRange() -> NSRange { NSRange(location: row, length: 1) }
-    func accessibilityColumnRange() -> NSRange { NSRange(location: column, length: 1) }
+    nonisolated func accessibilityRowRange() -> NSRange { NSRange(location: row, length: 1) }
+    nonisolated func accessibilityColumnRange() -> NSRange { NSRange(location: column, length: 1) }
 }
