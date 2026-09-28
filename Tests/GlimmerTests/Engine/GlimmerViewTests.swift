@@ -198,6 +198,37 @@ final class GlimmerViewTests: XCTestCase {
         _ = window
     }
 
+    /// A host that fixes the height gets no extra pass when the width changes: only a height that follows the content
+    /// needs one.
+    func testAFixedHeightHostGetsNoExtraPassOnAWidthChange() {
+        final class CountingHost: UIView {
+            var passes = 0
+            override func layoutSubviews() {
+                passes += 1
+                super.layoutSubviews()
+            }
+        }
+        let host = CountingHost(frame: CGRect(x: 0, y: 0, width: 390, height: 800))
+        let window = hostInWindow(host, width: 390, height: 800)
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil, reveal: .none))
+        view.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            view.topAnchor.constraint(equalTo: host.topAnchor),
+            view.heightAnchor.constraint(equalToConstant: 200),
+        ])
+        view.update(markdown: "An answer long enough to wrap onto a second line at a narrower width, and then some more.")
+        host.layoutIfNeeded()
+        host.passes = 0
+        host.frame.size.width = 300
+        host.layoutIfNeeded()
+        XCTAssertEqual(host.passes, 1, "no second pass for a fixed height")
+        XCTAssertEqual(view.frame.height, 200)
+        _ = window
+    }
+
     private func physicalFootprint() -> Int {
         var info = task_vm_info_data_t()
         var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
