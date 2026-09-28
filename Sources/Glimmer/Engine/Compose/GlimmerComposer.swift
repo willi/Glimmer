@@ -9,6 +9,8 @@ struct GlimmerComposer {
     var highlighter: any GlimmerHighlighter = GlimmerBasicHighlighter()
     var imageLoader: (any GlimmerImageLoader)? = nil
     var extensions: [any GlimmerExtension] = []
+    /// Whether the host takes image taps: an inline image's spoken alt text then links to the image for VoiceOver.
+    var linksImagesForTaps = false
     /// Footnote numbers by first reference. Shared by copies of this composer, so a streaming document's recomposed
     /// blocks keep the numbers earlier blocks gave.
     var footnotes = GlimmerFootnoteNumbers()

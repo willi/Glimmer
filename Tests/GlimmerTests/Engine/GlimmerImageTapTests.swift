@@ -44,28 +44,36 @@ final class GlimmerImageTapTests: XCTestCase {
         _ = window
     }
 
-    /// VoiceOver reaches an inline image as a button while the host takes image taps, and activating it taps it.
-    func testAnInlineImageWithAHandlerIsAButtonForVoiceOver() throws {
+    /// The spoken-only alt text after an inline image, as the text holds it.
+    private func altRun(of alt: String, in view: GlimmerView) -> NSRange {
+        (view.textView.textStorage.string as NSString).range(of: alt)
+    }
+
+    /// While the host takes image taps, VoiceOver reaches an inline image through its alt text, read once and in
+    /// reading order: the alt text is an internal link whose action taps the image. The image view stays hidden.
+    func testWithAHandlerAnInlineImagesAltTextIsALinkThatTapsIt() throws {
         var tapped: (URL, String)?
         let (view, window) = shown("An icon ![octocat](https://example.com/o.png) inline.") { tapped = ($0, $1) }
+        let run = altRun(of: "octocat", in: view)
+        let link = try XCTUnwrap(view.textView.textStorage.attribute(.link, at: run.location, effectiveRange: nil) as? URL)
+        XCTAssertTrue(GlimmerTokenBox.isInternalLink(link))
         let image = try XCTUnwrap(findSubview(GlimmerInlineImageView.self, in: view))
-        XCTAssertTrue(image.isAccessibilityElement)
-        XCTAssertFalse(image.accessibilityElementsHidden)
-        XCTAssertEqual(image.accessibilityTraits, [.image, .button])
-        XCTAssertEqual(image.accessibilityLabel, "octocat")
-        XCTAssertTrue(image.accessibilityActivate())
+        XCTAssertTrue(image.accessibilityElementsHidden, "no second announcement")
+        view.tapImageLink(atCharacter: run.location)
+        XCTAssertEqual(tapped?.0, URL(string: "https://example.com/o.png"))
         XCTAssertEqual(tapped?.1, "octocat")
+        XCTAssertEqual(view.markdownSource(for: NSRange(location: 0, length: view.textView.textStorage.length)),
+                       "An icon ![octocat](https://example.com/o.png) inline.", "the internal link is not copied")
         _ = window
     }
 
-    /// Without a handler the spoken-only alt text reads the image; the view stays out of the way until one is set.
-    func testAnInlineImageBecomesAButtonWhenTheHostSetsAHandler() throws {
+    /// Without a handler the alt text is plain spoken text; setting one later recomposes, and the link appears.
+    func testWithoutAHandlerAnInlineImagesAltTextIsText() {
         let (view, window) = shown("An icon ![octocat](https://example.com/o.png) inline.", handler: nil)
-        let image = try XCTUnwrap(findSubview(GlimmerInlineImageView.self, in: view))
-        XCTAssertFalse(image.isAccessibilityElement)
-        XCTAssertTrue(image.accessibilityElementsHidden)
+        XCTAssertNil(view.textView.textStorage.attribute(.link, at: altRun(of: "octocat", in: view).location, effectiveRange: nil))
         view.onImageTap = { _, _ in }
-        XCTAssertTrue(image.isAccessibilityElement)
+        settle(view)
+        XCTAssertNotNil(view.textView.textStorage.attribute(.link, at: altRun(of: "octocat", in: view).location, effectiveRange: nil))
         _ = window
     }
 

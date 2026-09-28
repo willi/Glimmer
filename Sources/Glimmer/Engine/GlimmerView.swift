@@ -248,21 +248,38 @@ public final class GlimmerView: UIView {
     public var onImageTap: ((URL, String) -> Void)? {
         didSet {
             guard (oldValue == nil) != (onImageTap == nil) else { return }
+            // Inline images' alt text links to them for VoiceOver only while the host takes image taps: recompose.
+            rebuildDocument()
             Self.updateImageAccessibility(in: textView)
         }
     }
 
-    /// Images are buttons only while the host takes image taps.
+    /// Standalone images are buttons only while the host takes image taps.
     private static func updateImageAccessibility(in view: UIView) {
         for subview in view.subviews {
-            if let inline = subview as? GlimmerInlineImageView {
-                inline.updateAccessibility()
-            } else if let embed = subview as? GlimmerImageEmbedView {
+            if let embed = subview as? GlimmerImageEmbedView {
                 embed.updateAccessibility()
             } else {
                 updateImageAccessibility(in: subview)
             }
         }
+    }
+
+    /// The inline image whose spoken alt text starts at `index`: it follows the image's attachment character.
+    private func inlineImage(beforeCharacter index: Int) -> GlimmerInlineImageAttachment? {
+        guard index > 0, index <= textView.textStorage.length else { return nil }
+        return textView.textStorage.attribute(.attachment, at: index - 1, effectiveRange: nil) as? GlimmerInlineImageAttachment
+    }
+
+    /// What activating an inline image's alt text does: tap the image, while the host takes image taps.
+    func imageLinkAction(atCharacter index: Int) -> UIAction? {
+        guard onImageTap != nil, inlineImage(beforeCharacter: index) != nil else { return nil }
+        return UIAction { [weak self] _ in self?.tapImageLink(atCharacter: index) }
+    }
+
+    func tapImageLink(atCharacter index: Int) {
+        guard let image = inlineImage(beforeCharacter: index) else { return }
+        onImageTap?(image.source, image.alt)
     }
 
     /// The token shown at `index` as text or an image, or nil.
@@ -387,7 +404,8 @@ public final class GlimmerView: UIView {
             theme: configuration.theme.scaled(for: traitCollection),
             highlighter: configuration.highlighter,
             imageLoader: configuration.imageLoader,
-            extensions: configuration.extensions
+            extensions: configuration.extensions,
+            linksImagesForTaps: onImageTap != nil
         ))
     }
 
@@ -400,7 +418,8 @@ public final class GlimmerView: UIView {
             source: source, theme: theme,
             extensions: configuration.extensions.map { String(reflecting: type(of: $0)) },
             highlighter: String(reflecting: type(of: configuration.highlighter)),
-            imageLoader: configuration.imageLoader.map { String(reflecting: type(of: $0)) }
+            imageLoader: configuration.imageLoader.map { String(reflecting: type(of: $0)) },
+            linksImagesForTaps: onImageTap != nil
         )
         // An empty answer (every new view starts with one) costs nothing to compose; keep it out of the cache.
         let cacheable = !isStreaming && !source.isEmpty
@@ -573,6 +592,8 @@ extension GlimmerView: UITextViewDelegate {
         switch textItem.content {
         case .link(let url) where GlimmerTokenBox.isTokenLink(url):
             return tokenAction(atCharacter: textItem.range.location)
+        case .link(let url) where GlimmerTokenBox.isImageLink(url):
+            return imageLinkAction(atCharacter: textItem.range.location)
         case .link(let url):
             return linkAction(for: url) ?? defaultAction
         default:
@@ -589,7 +610,7 @@ extension GlimmerView: UITextViewDelegate {
 
     func menuConfiguration(forLink url: URL, defaultMenu: UIMenu) -> UITextItem.MenuConfiguration? {
         // A token is no web link: no menu, and no preview of its internal URL.
-        guard !GlimmerTokenBox.isTokenLink(url), linkMenuActions != nil else { return nil }
+        guard !GlimmerTokenBox.isInternalLink(url), linkMenuActions != nil else { return nil }
         return UITextItem.MenuConfiguration(menu: linkMenu(for: url, defaultMenu: defaultMenu))
     }
 

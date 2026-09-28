@@ -25,4 +25,16 @@ final class GlimmerTokenBox: NSObject, @unchecked Sendable {
     }
 
     static func isTokenLink(_ url: URL) -> Bool { url.scheme == "glimmer-token" }
+
+    /// The link an inline image's spoken alt text carries while the host takes image taps, so VoiceOver reaches the
+    /// image once, in reading order, and activating it taps the image. `position` keeps images side by side apart.
+    static func imageLink(at position: Int) -> URL {
+        guard let url = URL(string: "glimmer-image:\(position)") else { preconditionFailure("an invalid image link") }
+        return url
+    }
+
+    static func isImageLink(_ url: URL) -> Bool { url.scheme == "glimmer-image" }
+
+    /// A link Glimmer adds for UIKit's sake, not one the markdown has: never copied, never given a link menu.
+    static func isInternalLink(_ url: URL) -> Bool { isTokenLink(url) || isImageLink(url) }
 }

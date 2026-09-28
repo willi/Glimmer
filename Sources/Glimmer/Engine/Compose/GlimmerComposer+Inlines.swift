@@ -100,6 +100,8 @@ extension GlimmerComposer {
         spokenAttributes[.font] = (attributes[.font] as? UIFont ?? theme.bodyFont).withSize(0.01)
         spokenAttributes[.foregroundColor] = UIColor.clear
         spokenAttributes[.glimmerSpokenOnly] = true
+        // Inside a link the alt text reads as part of it, and the link takes the tap.
+        if linksImagesForTaps, !isLinked { spokenAttributes[.link] = GlimmerTokenBox.imageLink(at: output.length) }
         output.append(NSAttributedString(string: label, attributes: spokenAttributes))
     }
 

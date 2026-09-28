@@ -15,6 +15,8 @@ final class GlimmerDocumentCache {
         /// its own. (Two loaders of one type are assumed interchangeable.)
         let highlighter: String
         let imageLoader: String?
+        /// Whether inline images' alt text links to them (the host takes image taps).
+        var linksImagesForTaps = false
     }
 
     private struct Entry {
