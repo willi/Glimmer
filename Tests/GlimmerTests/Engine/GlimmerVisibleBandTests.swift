@@ -239,6 +239,18 @@ final class GlimmerVisibleBandTests: XCTestCase {
         _ = window
     }
 
+    /// The preload measures in the text container's coordinates, inset included (a code block's inner text view has
+    /// one): its reach is the band, in the view's coordinates, less the inset.
+    func testThePreloadReachIsInTheContainersCoordinates() {
+        let textView = GlimmerTextView()
+        textView.textContainerInset = UIEdgeInsets(top: 300, left: 0, bottom: 0, right: 0)
+        let reach = textView.preloadReach(band: CGRect(x: 0, y: 0, width: 390, height: 1_600), screen: 800)
+        XCTAssertEqual(reach.top, -300)
+        XCTAssertEqual(reach.bottom, 1_300)
+        XCTAssertEqual(reach.below, 1_300 + 800 * GlimmerTextView.preloadAhead)
+        XCTAssertEqual(reach.above, -300 - 800 * GlimmerTextView.preloadBehind)
+    }
+
     func testAPreloadStepStaysWithinItsBudget() {
         let (view, _, window) = scrolled()
         view.textView.layoutIfNeeded()

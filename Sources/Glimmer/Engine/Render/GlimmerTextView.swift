@@ -453,6 +453,17 @@ final class GlimmerTextView: UITextView {
         preloading?.isPaused = true
     }
 
+    /// How far the preload reaches, in the text container's coordinates (fragment frames are in them; the band is in
+    /// the view's, which differ by the container inset): the band's top and bottom, and the lines past them it lays out
+    /// to, ahead in the scroll direction and behind.
+    func preloadReach(band: CGRect, screen: CGFloat) -> (top: CGFloat, bottom: CGFloat, above: CGFloat, below: CGFloat) {
+        let top = band.minY - textContainerInset.top
+        let bottom = band.maxY - textContainerInset.top
+        let below = bottom + screen * (scrollDirection > 0 ? Self.preloadAhead : Self.preloadBehind)
+        let above = top - screen * (scrollDirection > 0 ? Self.preloadBehind : Self.preloadAhead)
+        return (top, bottom, above, below)
+    }
+
     /// Lays out fragments beyond the band for up to `preloadBudget`; stops the display link once the preload range
     /// covers `preloadAhead` screens ahead and `preloadBehind` behind.
     func preloadStep() {
@@ -460,17 +471,16 @@ final class GlimmerTextView: UITextView {
             stopPreloading()
             return
         }
-        let screen = window.bounds.height
-        let below = band.maxY + screen * (scrollDirection > 0 ? Self.preloadAhead : Self.preloadBehind)
-        let above = band.minY - screen * (scrollDirection > 0 ? Self.preloadBehind : Self.preloadAhead)
+        let reach = preloadReach(band: band, screen: window.bounds.height)
+        let (below, above) = (reach.below, reach.above)
         let clock = ContinuousClock()
         let deadline = clock.now + Self.preloadBudget
-        var lowest = band.maxY
-        var highest = band.minY
+        var lowest = reach.bottom
+        var highest = reach.top
         var done = true
         // Ahead first, then behind: each walks from the band's edge; laid-out fragments are passed over cheaply.
         for reverse in scrollDirection > 0 ? [false, true] : [true, false] {
-            let edge = CGPoint(x: 0, y: reverse ? max(band.minY, 0) : max(band.maxY - 1, 0))
+            let edge = CGPoint(x: 0, y: reverse ? max(reach.top, 0) : max(reach.bottom - 1, 0))
             guard let start = manager.textLayoutFragment(for: edge)?.rangeInElement.location else { continue }
             var options: NSTextLayoutFragment.EnumerationOptions = [.ensuresLayout]
             if reverse { options.insert(.reverse) }
@@ -489,7 +499,8 @@ final class GlimmerTextView: UITextView {
             if !finished { done = false }
             if clock.now >= deadline { done = false; break }
         }
-        preloadedRange = min(highest, band.minY)...max(lowest, band.maxY)
+        let inset = textContainerInset.top
+        preloadedRange = (min(highest, reach.top) + inset)...(max(lowest, reach.bottom) + inset)
         if done { stopPreloading() }
     }
 
