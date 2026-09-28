@@ -851,7 +851,10 @@ static cmark_node *handle_backslash(cmark_parser *parser, subject *subj) {
   if ((parser->backslash_ispunct ? parser->backslash_ispunct : cmark_ispunct)(nextchar)) {
     // only ascii symbols and newline can be escaped
     advance(subj);
-    return make_str(subj, subj->pos - 2, subj->pos - 1, cmark_chunk_dup(&subj->input, subj->pos - 1, 1));
+    cmark_node *escaped = make_str(subj, subj->pos - 2, subj->pos - 1, cmark_chunk_dup(&subj->input, subj->pos - 1, 1));
+    // Glimmer: flag the escape, so it stays its own node (`cmark_consolidate_text_nodes`).
+    escaped->flags |= CMARK_NODE__ESCAPED;
+    return escaped;
   } else if (!is_eof(subj) && skip_line_end(subj)) {
     return make_linebreak(subj->mem);
   } else {

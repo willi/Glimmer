@@ -6,7 +6,6 @@
 #include "node.h"
 #include "cmark-gfm.h"
 #include "iterator.h"
-#include "cmark_ctype.h"
 
 cmark_iter *cmark_iter_new(cmark_node *root) {
   if (root == NULL) {
@@ -94,11 +93,10 @@ cmark_event_type cmark_iter_get_event_type(cmark_iter *iter) {
 
 cmark_node *cmark_iter_get_root(cmark_iter *iter) { return iter->root; }
 
-// Glimmer: a backslash escape (one punctuation character spanning two source columns) stays its own text node, so a
-// renderer can tell `\@ada` from `@ada`.
+// Glimmer: a backslash escape (flagged where it is parsed) stays its own text node, so a renderer can tell `\@ada`
+// from `@ada`.
 static bool S_is_escape(cmark_node *node) {
-  return node->type == CMARK_NODE_TEXT && node->as.literal.len == 1 &&
-         cmark_ispunct(node->as.literal.data[0]) && node->end_column - node->start_column == 1;
+  return node->type == CMARK_NODE_TEXT && (node->flags & CMARK_NODE__ESCAPED) != 0;
 }
 
 void cmark_consolidate_text_nodes(cmark_node *root) {

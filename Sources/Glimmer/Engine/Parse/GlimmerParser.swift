@@ -145,11 +145,9 @@ public enum GlimmerParser {
         return result.flatMap(splittingFootnoteReferences)
     }
 
-    /// cmark gives a backslash escape its own text node: one punctuation character spanning two source columns.
+    /// A backslash escape: cmark flags it where it is parsed and keeps it its own text node (see `VENDORED.md`).
     private static func isEscapedCharacter(_ node: Node) -> Bool {
-        guard cmark_node_get_type(node) == CMARK_NODE_TEXT, let literal = cmark_node_get_literal(node),
-              strlen(literal) == 1, ispunct(Int32(literal.pointee)) != 0 else { return false }
-        return cmark_node_get_end_column(node) - cmark_node_get_start_column(node) == 1
+        cmark_node_is_escaped_text(node) != 0
     }
 
     /// cmark leaves a reference whose definition hasn't arrived (or never does) as the text `[^label]`: a marker too.

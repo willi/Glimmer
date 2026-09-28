@@ -5,11 +5,10 @@
 - Version: 0.29.0.gfm.13
 - Copied: `src/` → `Sources/cmark-gfm/`, `extensions/` → `Sources/cmark-gfm-extensions/`, `COPYING` into both.
 - Local changes:
-  - `iterator.c`, `cmark_consolidate_text_nodes`: a backslash-escaped character stays its own text node instead of
-    merging into its neighbours, so `\@ada` is not a mention and `\:rocket:` not a shortcode (`GlimmerParser`).
-    An escape is recognised as one punctuation character spanning two source columns. A punctuation character at the
-    end of a line followed by trimmed spaces (`*foo*. `) matches too; it follows a non-text inline and precedes a break,
-    so it has no text neighbour to merge with and nothing changes.
+  - Backslash escapes: `inlines.c` (`handle_backslash`) flags the text node it makes with `CMARK_NODE__ESCAPED`, a
+    new flag in `include/node.h` (custom flags now start one bit higher); `iterator.c` (`cmark_consolidate_text_nodes`)
+    doesn't merge a flagged node into its neighbours; and `node.c` / `include/cmark-gfm.h` add
+    `cmark_node_is_escaped_text`. So `\@ada` is not a mention and `\:rocket:` not a shortcode (`GlimmerParser`).
   - `cmark-gfm-extensions/tasklist.c`, `open_tasklist_item`: scans from the item's own marker, so tasks inside a
     block quote are tasks, and reads the checked state from the item's own brackets instead of anywhere on the line.
 - To update, re-run the copy at a new commit, re-apply the local changes, and bump this file.

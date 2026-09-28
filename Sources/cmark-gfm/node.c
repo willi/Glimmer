@@ -407,6 +407,10 @@ int cmark_node_set_user_data_free_func(cmark_node *node,
   return 1;
 }
 
+int cmark_node_is_escaped_text(cmark_node *node) {
+  return node != NULL && node->type == CMARK_NODE_TEXT && (node->flags & CMARK_NODE__ESCAPED) != 0;
+}
+
 const char *cmark_node_get_literal(cmark_node *node) {
   if (node == NULL) {
     return NULL;
