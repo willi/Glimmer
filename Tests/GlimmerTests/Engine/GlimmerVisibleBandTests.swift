@@ -211,6 +211,22 @@ final class GlimmerVisibleBandTests: XCTestCase {
         _ = window
     }
 
+    /// A canvas that left the window (UIKit replaced it) no longer takes the band's passes: the band still follows the
+    /// screen, through a direct viewport pass until the next surface names the new canvas.
+    func testAStaleCanvasStillMovesTheBand() throws {
+        let (view, scrollView, window) = scrolled()
+        XCTAssertNotNil(view.textView.canvasView, "captured from a drawn surface")
+        let stale = UIView()
+        view.textView.canvasView = stale
+        scrollView.contentOffset.y = 6_000
+        settle(scrollView)
+        let screen = view.textView.convert(window.bounds, from: window)
+        let band = try XCTUnwrap(view.textView.renderedBand)
+        XCTAssertTrue(band.contains(CGRect(x: 0, y: screen.minY, width: 1, height: screen.height)), "band \(band), screen \(screen)")
+        XCTAssertNotNil(view.textView.canvasView?.window, "the real canvas again")
+        _ = (window, stale)
+    }
+
     /// One display link serves a view's preloads: paused when a preload is done, resumed by the next band move.
     func testScrollingReusesOnePreloadLink() {
         let (view, scrollView, window) = scrolled()

@@ -356,7 +356,8 @@ final class GlimmerTextView: UITextView {
 
     @objc(textViewportLayoutController:cacheRenderingSurface:forKey:)
     func cacheDrawnSurface(_ controller: NSTextViewportLayoutController, surface: AnyObject, key: AnyObject) {
-        if canvasView == nil { canvasView = (surface as? UIView)?.superview }
+        // Every surface names the canvas, so one UIKit replaces is picked up at its first surface.
+        if let canvas = (surface as? UIView)?.superview { canvasView = canvas }
         if reusesDrawnText, let fragment = key as? NSTextLayoutFragment, let view = surface as? UIView {
             drawnSurfaces.setObject(view, forKey: fragment)
             drawnStates[ObjectIdentifier(fragment)] = drawnState(of: fragment)
@@ -380,13 +381,15 @@ final class GlimmerTextView: UITextView {
 
     /// The view UIKit renders fragments into: the superview of the surfaces it hands over. Marking it for layout runs
     /// exactly one viewport pass, in the commit; calling `layoutViewport()` runs one now and UIKit another then.
-    private weak var canvasView: UIView?
+    weak var canvasView: UIView?
 
     /// Re-renders the band: one pass in the next commit through the canvas, or now before the canvas is known.
     private func relayoutViewport() {
-        if let canvasView {
+        if let canvasView, canvasView.window != nil, canvasView.isDescendant(of: self) {
             canvasView.setNeedsLayout()
         } else {
+            // No canvas yet, or one UIKit has taken out: run the pass directly; its surfaces name the current canvas.
+            canvasView = nil
             textLayoutManager?.textViewportLayoutController.layoutViewport()
         }
     }
