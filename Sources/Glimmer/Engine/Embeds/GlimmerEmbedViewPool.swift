@@ -12,6 +12,15 @@ final class GlimmerEmbedViewPool {
     /// The view that last asked for a prepared view: the window a replacement is laid out in.
     private weak var host: UIView?
 
+    init() {
+        // Under memory pressure the prepared views go; the next stream prepares again.
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.removeAll() }
+        }
+    }
+
     func hasCodeBlockView(for theme: GlimmerTheme) -> Bool { codeBlocks[theme] != nil }
 
     func peekCodeBlockView(for theme: GlimmerTheme) -> GlimmerCodeBlockView? { codeBlocks[theme] }
@@ -26,7 +35,10 @@ final class GlimmerEmbedViewPool {
         guard let view = codeBlocks.removeValue(forKey: theme) else { return nil }
         view.highlighter = highlighter
         view.update(to: embed)
-        if let host { prepareCodeBlockView(theme: theme, highlighter: highlighter, in: host) }
+        // Only a stream waits for its next fence; a settled answer that took the view needs no replacement.
+        if let host = host as? GlimmerView, host.isStreaming {
+            prepareCodeBlockView(theme: theme, highlighter: highlighter, in: host)
+        }
         return view
     }
 

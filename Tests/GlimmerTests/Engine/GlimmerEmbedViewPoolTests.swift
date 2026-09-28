@@ -41,6 +41,35 @@ final class GlimmerEmbedViewPoolTests: XCTestCase {
         _ = window
     }
 
+    /// A settled answer that takes the prepared view (it composes a code block) prepares no replacement: only a stream
+    /// is waiting for the next fence.
+    func testTakingOutsideAStreamPreparesNoReplacement() async {
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil, reveal: .none))
+        let window = hostInWindow(view, width: 390, height: 800)
+        let theme = GlimmerTheme.default.scaled(for: view.traitCollection)
+        view.update(markdown: "An answer begins", isStreaming: true, revealID: "settle")
+        _ = await waitUntil { GlimmerEmbedViewPool.shared.hasCodeBlockView(for: theme) }
+        view.update(markdown: "An answer ends \(UUID())\n\n```swift\nlet x = 1\n```", isStreaming: false, revealID: "settle")
+        await view.pendingDocument?.value
+        settle(view)
+        try? await Task.sleep(for: .milliseconds(150))
+        XCTAssertFalse(GlimmerEmbedViewPool.shared.hasCodeBlockView(for: theme), "no replacement for a settled answer")
+        _ = window
+    }
+
+    /// Under memory pressure the pool lets its prepared views go.
+    func testAMemoryWarningEmptiesThePool() async {
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
+        let window = hostInWindow(view, width: 390, height: 800)
+        let theme = GlimmerTheme.default.scaled(for: view.traitCollection)
+        view.update(markdown: "An answer begins", isStreaming: true, revealID: "memory")
+        let prepared = await waitUntil { GlimmerEmbedViewPool.shared.hasCodeBlockView(for: theme) }
+        XCTAssertTrue(prepared)
+        NotificationCenter.default.post(name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
+        XCTAssertFalse(GlimmerEmbedViewPool.shared.hasCodeBlockView(for: theme))
+        _ = window
+    }
+
     func testAPooledViewTakesTheBlocksLanguage() {
         let theme = GlimmerTheme.default
         let view = GlimmerCodeBlockView(code: "", language: nil, theme: theme, highlighter: GlimmerBasicHighlighter())
