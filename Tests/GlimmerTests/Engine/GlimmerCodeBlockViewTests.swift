@@ -174,4 +174,25 @@ final class GlimmerCodeBlockViewTests: XCTestCase {
         XCTAssertEqual(runs.map(\.range.length).reduce(0, +), text.length)
         XCTAssertTrue(runs.contains { $0.color == theme.syntaxCommentColor })
     }
+
+    /// The colour-run diff also handles code that shrinks (a healed fence dropped) and a language that changes (the info
+    /// string completing): the text and colours match a fresh block at each step.
+    func testStreamedCodeThatShrinksOrChangesLanguageMatchesAFreshHighlight() {
+        let theme = GlimmerTheme.default
+        let highlighter = GlimmerBasicHighlighter()
+        let view = GlimmerCodeBlockView(code: "", language: "sw", theme: theme, highlighter: highlighter)
+        let steps: [(String?, String)] = [
+            ("sw", "let a = 1\nlet b = \"two\" // three"),
+            ("swift", "let a = 1\nlet b = \"two\" // three"),
+            ("swift", "let a = 1"),
+            ("python", "let a = 1\ndef b(): return 2"),
+            (nil, "plain"),
+        ]
+        for (language, code) in steps {
+            let fresh = GlimmerCodeHighlighting.highlightedCode(code, language: language, theme: theme, highlighter: highlighter)
+            view.update(to: .codeBlock(language: language, code: code, highlighted: fresh))
+            XCTAssertTrue(view.textView.textStorage.isEqual(to: fresh), "\(language ?? "plain"): \(code)")
+            XCTAssertEqual(view.languageLabel.text, language ?? "code", "the header follows the language")
+        }
+    }
 }

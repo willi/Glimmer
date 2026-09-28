@@ -158,6 +158,46 @@ final class GlimmerViewTests: XCTestCase {
         _ = window
     }
 
+    /// While revealing, the mask layers cover what is shown, not the tall text view.
+    func testATallTextViewCostsNoMemoryWhileRevealing() async {
+        let before = physicalFootprint()
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
+        let clock = ManualRevealClock()
+        view.clock = clock
+        let window = hostInWindow(view, width: 390, height: 800)
+        view.update(markdown: longStream, isStreaming: true)
+        await view.pendingDocument?.value
+        clock.advance(to: 2)
+        settle(view)
+        XCTAssertNotNil(view.engine, "still revealing")
+        XCTAssertLessThan(physicalFootprint() - before, 150 * 1_024 * 1_024)
+        _ = window
+    }
+
+    /// An Auto Layout host: width from constraints, height from the intrinsic size, which follows the content. Like a
+    /// multi-line label, one layout pass gives the right height, though the height depends on the width that pass sets.
+    func testAnAutoLayoutHostSizesTheViewToItsContent() {
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 800))
+        let window = hostInWindow(host, width: 390, height: 800)
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil, reveal: .none))
+        view.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            view.topAnchor.constraint(equalTo: host.topAnchor),
+        ])
+        view.update(markdown: "A short answer.")
+        host.layoutIfNeeded()
+        let short = view.frame.height
+        XCTAssertEqual(short, view.textView.laidOutHeight(), accuracy: 1)
+        view.update(markdown: "A short answer.\n\nNow with a second paragraph that wraps onto another line or two.")
+        host.layoutIfNeeded()
+        XCTAssertGreaterThan(view.frame.height, short + 20, "the height follows the content")
+        XCTAssertEqual(view.frame.height, view.textView.laidOutHeight(), accuracy: 1)
+        _ = window
+    }
+
     private func physicalFootprint() -> Int {
         var info = task_vm_info_data_t()
         var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)

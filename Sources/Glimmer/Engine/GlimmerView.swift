@@ -134,6 +134,12 @@ public final class GlimmerView: UIView {
         guard bounds.width != lastWidth else { return }
         lastWidth = bounds.width
         reportHeightIfChanged()
+        // Under Auto Layout the height is the intrinsic size, which depends on the width this pass just set. Lay the
+        // superview out again now, as UIKit does for a multi-line label, instead of showing a frame at the old height.
+        // Frame-based and SwiftUI hosts ask `sizeThatFits` with the width and need no second pass.
+        if !translatesAutoresizingMaskIntoConstraints, abs(bounds.height - intrinsicContentSize.height) > 0.5 {
+            superview?.layoutIfNeeded()
+        }
     }
 
     public override func didMoveToWindow() {
