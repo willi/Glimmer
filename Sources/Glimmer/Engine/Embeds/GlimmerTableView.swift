@@ -32,7 +32,8 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
     private var measuredRows: (columnWidths: [CGFloat], heights: [CGFloat])?
     /// VoiceOver's cells, built when it first asks and again after a change.
     private var cellElementsCache: [[GlimmerTableCellElement]]? {
-        didSet { accessibilitySnapshot.withLock { $0 = cellElementsCache ?? [] } }
+        // Cleared when the table changes; readers off the main thread keep the last cells until new ones are built.
+        didSet { if let cellElementsCache { accessibilitySnapshot.withLock { $0 = cellElementsCache } } }
     }
     /// The cells as the main thread last built them, for readers off it: UIKit's accessibility may read a view from a
     /// background queue, where a main-actor member traps, so the accessibility members are nonisolated and read this.
@@ -245,6 +246,8 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
             }
         }
         grid.path = path.cgPath
+        // Readers off the main thread get the cells' frames as laid out, not as last asked for.
+        cellElementsCache?.joined().forEach { $0.refreshFrame() }
     }
 
     private func updateColors() {
@@ -302,11 +305,17 @@ final class GlimmerTableCellElement: UIAccessibilityElement, UIAccessibilityCont
     nonisolated override var accessibilityFrame: CGRect {
         get {
             guard Thread.isMainThread else { return lastFrame.withLock { $0 } }
-            let frame = MainActor.assumeIsolated { label.map { UIAccessibility.convertToScreenCoordinates($0.bounds, in: $0) } ?? .zero }
-            lastFrame.withLock { $0 = frame }
-            return frame
+            return MainActor.assumeIsolated { refreshFrame() }
         }
         set {}
+    }
+
+    /// The cell's frame on screen, recorded for readers off the main thread; the table records it on layout too.
+    @discardableResult
+    func refreshFrame() -> CGRect {
+        let frame = label.map { UIAccessibility.convertToScreenCoordinates($0.bounds, in: $0) } ?? .zero
+        lastFrame.withLock { $0 = frame }
+        return frame
     }
 
     nonisolated func accessibilityRowRange() -> NSRange { NSRange(location: row, length: 1) }

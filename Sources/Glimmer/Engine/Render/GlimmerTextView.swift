@@ -14,21 +14,28 @@ final class GlimmerTextView: UITextView {
     /// Strongly held: the text layout manager's delegate is weak.
     private let fragmentProvider = GlimmerLayoutFragmentProvider(theme: .default)
     /// The laid-out text's height, set by `GlimmerView`; the frame is much taller (see `GlimmerView.textViewHeight`).
-    var contentHeight: CGFloat = 0
+    var contentHeight: CGFloat = 0 {
+        didSet { if contentHeight != oldValue { refreshAccessibilityFrame() } }
+    }
 
     /// VoiceOver frames the text, not the tall frame it is laid out in. Nonisolated, because UIKit's accessibility may
     /// read it off the main thread, where a main-actor member traps; there it is the frame the main thread last read.
     nonisolated override var accessibilityFrame: CGRect {
         get {
             guard Thread.isMainThread else { return lastAccessibilityFrame.withLock { $0 } }
-            let frame = MainActor.assumeIsolated {
-                let height = contentHeight > 0 ? min(contentHeight, bounds.height) : bounds.height
-                return UIAccessibility.convertToScreenCoordinates(CGRect(x: 0, y: 0, width: bounds.width, height: height), in: self)
-            }
-            lastAccessibilityFrame.withLock { $0 = frame }
-            return frame
+            return MainActor.assumeIsolated { refreshAccessibilityFrame() }
         }
         set {}
+    }
+
+    /// The text's frame on screen, recorded for readers off the main thread. Also recorded on layout, so they have it
+    /// before the main thread first asks.
+    @discardableResult
+    private func refreshAccessibilityFrame() -> CGRect {
+        let height = contentHeight > 0 ? min(contentHeight, bounds.height) : bounds.height
+        let frame = UIAccessibility.convertToScreenCoordinates(CGRect(x: 0, y: 0, width: bounds.width, height: height), in: self)
+        lastAccessibilityFrame.withLock { $0 = frame }
+        return frame
     }
 
     nonisolated private let lastAccessibilityFrame = Mutex(CGRect.zero)
@@ -185,6 +192,7 @@ final class GlimmerTextView: UITextView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        refreshAccessibilityFrame()
         guard bounds.width != lastLayoutWidth else { return }
         lastLayoutWidth = bounds.width
         invalidateIntrinsicContentSize()

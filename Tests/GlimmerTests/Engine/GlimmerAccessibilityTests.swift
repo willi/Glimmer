@@ -125,6 +125,35 @@ final class GlimmerAccessibilityTests: XCTestCase {
         _ = window
     }
 
+    /// Off the main thread, the snapshots hold something useful even before the main thread reads them: the text
+    /// view's frame once laid out, and a changing table's last cells rather than none.
+    func testSnapshotsAreFreshWithoutAMainThreadRead() throws {
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil, reveal: .none))
+        let window = hostInWindow(view, width: 320, height: 800)
+        view.update(markdown: "A short answer.")
+        settle(view)
+        let cell = { (text: String) in NSAttributedString(string: text) }
+        let table = GlimmerTableView(header: [cell("Name")], rows: [[cell("a")]], alignments: [.none], theme: theme)
+        table.frame = CGRect(x: 0, y: 0, width: 300, height: table.embedHeight(forWidth: 300))
+        window.addSubview(table)
+        table.layoutIfNeeded()
+        XCTAssertEqual(table.accessibilityRowCount(), 2, "built on the main thread")
+        table.update(to: .table(header: [cell("Name")], rows: [[cell("a")], [cell("b")]], alignments: [.none]))
+        nonisolated(unsafe) let textView: NSObject = view.textView
+        nonisolated(unsafe) let tableObject: NSObject = table
+        nonisolated(unsafe) var frame: CGRect?, rows: Int?
+        let read = expectation(description: "read off the main thread")
+        DispatchQueue.global().async {
+            frame = (textView.value(forKey: "accessibilityFrame") as? NSValue)?.cgRectValue
+            rows = (tableObject.value(forKey: "accessibilityRowCount") as? NSNumber)?.intValue
+            read.fulfill()
+        }
+        wait(for: [read], timeout: 5)
+        XCTAssertGreaterThan(frame?.height ?? 0, 0, "the laid-out text's frame")
+        XCTAssertEqual(rows, 2, "the last cells built, not none")
+        _ = window
+    }
+
     func testReplacingTheTextStillForgetsWhatWasMeasured() {
         let textView = GlimmerTextView()
         textView.frame = CGRect(x: 0, y: 0, width: 320, height: 800)
