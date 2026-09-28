@@ -60,6 +60,35 @@ final class GlimmerVisibleBandTests: XCTestCase {
         try assertLinesOnScreenRendered("scrolled 2,000 pt")
     }
 
+    /// Every whole-text swap renders the screen first, including the one taking the worker's text over a cached one.
+    func testSwappingInTheWorkersTextRendersTheScreenFirst() async {
+        let markdown = "Cached answer \(UUID()).\n\nMore text."
+        let configuration = GlimmerConfiguration(imageLoader: nil, reveal: .none)
+        GlimmerView(configuration: configuration).update(markdown: markdown)
+        let view = GlimmerView(configuration: configuration)
+        let window = hostInWindow(view, width: 390, height: 800)
+        view.update(markdown: markdown)
+        let before = view.textView.screenFirstRenders
+        view.update(markdown: markdown + " And more.", isStreaming: true)
+        await view.pendingDocument?.value
+        XCTAssertEqual(view.textView.screenFirstRenders, before + 1, "the swap renders the screen first")
+        _ = window
+    }
+
+    /// The one-shot link that widens the band after the first frame doesn't keep a dropped text view alive.
+    func testWideningTheBandDoesNotKeepTheTextViewAlive() {
+        weak var dropped: GlimmerTextView?
+        autoreleasepool {
+            let textView = GlimmerTextView()
+            let window = hostInWindow(textView, width: 390, height: 800)
+            textView.renderScreenFirst()
+            dropped = textView
+            textView.removeFromSuperview()
+            _ = window
+        }
+        XCTAssertNil(dropped)
+    }
+
     func testRendersOnlyTheTextNearTheScreen() throws {
         let (view, _, window) = scrolled()
         XCTAssertLessThan(renderedViewCount(view.textView), 300, "a 5,000-word answer rendered every paragraph")

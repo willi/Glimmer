@@ -4,9 +4,11 @@ import UIKit
 @MainActor
 final class GlimmerWeakTarget: NSObject {
     private weak var textView: GlimmerTextView?
+    private let step: (GlimmerTextView) -> Void
 
-    init(_ textView: GlimmerTextView) {
+    init(_ textView: GlimmerTextView, step: @escaping (GlimmerTextView) -> Void) {
         self.textView = textView
+        self.step = step
     }
 
     @objc func tick(_ link: CADisplayLink) {
@@ -14,6 +16,6 @@ final class GlimmerWeakTarget: NSObject {
             link.invalidate()
             return
         }
-        textView.preloadStep()
+        step(textView)
     }
 }

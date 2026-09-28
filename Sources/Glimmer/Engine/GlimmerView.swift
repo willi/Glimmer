@@ -404,6 +404,7 @@ public final class GlimmerView: UIView {
                 // The view shows a cached text the worker never composed: take its whole text instead of an edit.
                 let full = await worker.text().text
                 guard worker === self.worker else { continue }
+                textView.renderScreenFirst()
                 textView.replaceText(with: full)
                 viewHoldsWorkerText = true
                 cacheKey = nil

@@ -425,7 +425,7 @@ final class GlimmerTextView: UITextView {
     /// Starts laying text out ahead in idle frames, if the band's surroundings aren't laid out yet.
     private func schedulePreload() {
         guard preloading == nil, window != nil, !rendersScreenOnly, renderedBand != nil else { return }
-        let link = CADisplayLink(target: GlimmerWeakTarget(self), selector: #selector(GlimmerWeakTarget.tick(_:)))
+        let link = CADisplayLink(target: GlimmerWeakTarget(self) { $0.preloadStep() }, selector: #selector(GlimmerWeakTarget.tick(_:)))
         link.add(to: .main, forMode: .common)
         preloading = link
     }
@@ -496,16 +496,20 @@ final class GlimmerTextView: UITextView {
     private(set) var rendersScreenOnly = false
     private var bandWidening: CADisplayLink?
 
+    /// How many times a whole-text swap asked for the screen first; tests count it.
+    private(set) var screenFirstRenders = 0
+
     /// Renders only the screen until the next frame has been presented, then the whole band.
     func renderScreenFirst() {
+        screenFirstRenders += 1
         rendersScreenOnly = true
         guard bandWidening == nil else { return }
-        let link = CADisplayLink(target: self, selector: #selector(widenBand))
+        let link = CADisplayLink(target: GlimmerWeakTarget(self) { $0.widenBand() }, selector: #selector(GlimmerWeakTarget.tick(_:)))
         link.add(to: .main, forMode: .common)
         bandWidening = link
     }
 
-    @objc private func widenBand() {
+    private func widenBand() {
         bandWidening?.invalidate()
         bandWidening = nil
         guard rendersScreenOnly else { return }
