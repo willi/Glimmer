@@ -57,6 +57,18 @@ final class GlimmerEmojiShortcodesTests: XCTestCase {
         XCTAssertEqual(GlimmerMarkdownSerializer.plainText(from: text, range: all), "Ship it 🚀!")
     }
 
+    /// A missing or broken table says why, instead of leaving every shortcode as text without a word.
+    func testAMissingTableSaysWhy() throws {
+        XCTAssertThrowsError(try GlimmerEmojiShortcodes.loadTable(from: nil)) { error in
+            XCTAssertEqual(error as? GlimmerEmojiShortcodes.TableError, .missingResource)
+        }
+        let broken = FileManager.default.temporaryDirectory.appendingPathComponent("broken-emoji.json")
+        try Data("[1, 2]".utf8).write(to: broken)
+        XCTAssertThrowsError(try GlimmerEmojiShortcodes.loadTable(from: broken)) { error in
+            XCTAssertEqual(error as? GlimmerEmojiShortcodes.TableError, .notAnObject)
+        }
+    }
+
     func testTheTableHasTheGitHubSet() {
         XCTAssertGreaterThanOrEqual(GlimmerEmojiShortcodes.table.count, 1_900)
         guard case .image = GlimmerEmojiShortcodes.table["octocat"] else { return XCTFail("octocat is a custom image") }

@@ -14,9 +14,25 @@ public struct GlimmerEmojiShortcodes: GlimmerExtension {
 
     /// Shortcode name → emoji, loaded once from the package's `github-emoji.json`.
     static let table: [String: Entry] = {
-        guard let url = Bundle.module.url(forResource: "github-emoji", withExtension: "json"),
-              let data = try? Data(contentsOf: url),
-              let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        do {
+            return try loadTable(from: Bundle.module.url(forResource: "github-emoji", withExtension: "json"))
+        } catch {
+            // Every shortcode would stay text without a word: say why in debug builds.
+            assertionFailure("GlimmerEmojiShortcodes can't load github-emoji.json: \(error)")
+            return [:]
+        }
+    }()
+
+    enum TableError: Error, Equatable {
+        case missingResource
+        case unreadable
+        case notAnObject
+    }
+
+    static func loadTable(from url: URL?) throws -> [String: Entry] {
+        guard let url else { throw TableError.missingResource }
+        guard let data = try? Data(contentsOf: url) else { throw TableError.unreadable }
+        guard let raw = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { throw TableError.notAnObject }
         var table: [String: Entry] = [:]
         table.reserveCapacity(raw.count)
         for (name, value) in raw {
@@ -27,7 +43,7 @@ public struct GlimmerEmojiShortcodes: GlimmerExtension {
             }
         }
         return table
-    }()
+    }
 
     public func scan(_ text: String) -> [GlimmerInlineToken] {
         guard text.contains(":") else { return [] }
