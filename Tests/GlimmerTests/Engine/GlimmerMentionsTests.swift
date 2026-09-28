@@ -40,6 +40,28 @@ final class GlimmerMentionsTests: XCTestCase {
         }
     }
 
+    /// Tappable tokens side by side stay separate links, so a tap on the second reports the second.
+    func testAdjacentTappableTokensAreSeparateLinks() throws {
+        struct Citations: GlimmerExtension {
+            func scan(_ text: String) -> [GlimmerInlineToken] {
+                text.ranges(of: #/\[\d+\]/#).map { range in
+                    GlimmerInlineToken(range: range, kind: "citation", displayText: String(text[range]), source: String(text[range]),
+                                       presentation: .text(tappable: true))
+                }
+            }
+        }
+        let text = composed("See [1][2] and **[3]**[4].", extensions: [Citations()])
+        let string = text.string as NSString
+        for label in ["[2]", "[4]"] {
+            let location = string.range(of: label).location
+            // UIKit reads a link as the longest run of an equal link value.
+            var range = NSRange()
+            _ = try XCTUnwrap(text.attribute(.link, at: location, longestEffectiveRange: &range,
+                                             in: NSRange(location: 0, length: text.length)))
+            XCTAssertEqual(range.location, location, "\(label)'s link starts at \(label)")
+        }
+    }
+
     /// The text view styles only data-detector links, so a mention is drawn in a colour of its own. Checked on the
     /// drawn pixels: the text view's link attributes restyle links when drawing, not in the text storage. With data
     /// detectors on, they restyle mentions too (the README says so), which also shows the check sees a restyle.

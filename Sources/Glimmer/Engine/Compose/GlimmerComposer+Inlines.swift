@@ -149,7 +149,7 @@ extension GlimmerComposer {
             run[.glimmerToken] = GlimmerTokenBox(token)
             if tappable {
                 run[.foregroundColor] = theme.mentionColor
-                run[.link] = GlimmerTokenBox.link(kind: token.kind)
+                run[.link] = GlimmerTokenBox.link(kind: token.kind, at: output.length)
             }
             output.append(NSAttributedString(string: token.displayText, attributes: run))
         case .image(let url):
