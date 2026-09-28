@@ -1149,30 +1149,30 @@ function example() {
 
 ## Code Block in Lists
 
-1. First, install the package:
-   ```bash
-   npm install glimmer
+1. First, add the Swift package:
+   ```swift
+   .package(url: "https://github.com/willi/Glimmer", from: "2.0.0")
    ```
 
 2. Then import it:
-   ```javascript
-   import { MarkdownParser } from 'glimmer';
+   ```swift
+   import Glimmer
    ```
 
-3. Finally, use it:
-   ```javascript
-   const parser = new MarkdownParser();
-   const result = parser.parse(markdown);
+3. Finally, render markdown in SwiftUI:
+   ```swift
+   GlimmerText("# Hello, **Glimmer**!")
    ```
 
 ## Code in Blockquotes
 
-> Here's how to use it:
+> In UIKit, update a Glimmer view with your markdown:
 > ```swift
-> let parser = MarkdownParser()
-> let blocks = parser.parse(markdown)
+> import Glimmer
+>
+> let view = GlimmerView()
+> view.update(markdown: "# Hello, **Glimmer**!")
 > ```
-> Simple as that!
 
 ## Inline Code vs Code Blocks
 
