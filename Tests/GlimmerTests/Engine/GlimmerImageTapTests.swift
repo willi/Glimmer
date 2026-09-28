@@ -98,8 +98,13 @@ final class GlimmerImageTapTests: XCTestCase {
     /// and they follow a handler set after the image is shown.
     func testAStandaloneImagesTraitsAreSafeOffTheMainThread() throws {
         let (view, window) = shown("![Chart](https://example.com/chart.png)", handler: nil)
-        let image = try XCTUnwrap(findSubview(GlimmerImageEmbedView.self, in: view))
+        XCTAssertEqual(try XCTUnwrap(findSubview(GlimmerImageEmbedView.self, in: view)).accessibilityTraits, .image)
         view.onImageTap = { _, _ in }
+        // Changing image interaction rebuilds the document; read the displayed attachment, not its retired view.
+        settle(view)
+        let image = try XCTUnwrap(findSubview(GlimmerImageEmbedView.self, in: view))
+        XCTAssertTrue(image.isDescendant(of: view))
+        XCTAssertNotNil(image.window)
         nonisolated(unsafe) let object: NSObject = image
         nonisolated(unsafe) var traits: UInt64?
         let read = expectation(description: "read off the main thread")

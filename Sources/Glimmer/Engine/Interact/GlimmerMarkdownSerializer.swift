@@ -125,6 +125,7 @@ enum GlimmerMarkdownSerializer {
         let string = text.string as NSString
         var marker = ""
         var body = ""
+        var hasBlockSource = false
         var segments: [Segment] = []
         func flush() {
             body += asMarkdown ? inlineMarkdown(segments) : segments.map(\.text).joined()
@@ -144,6 +145,7 @@ enum GlimmerMarkdownSerializer {
                     }
                 } else if let attachment = attributes[.attachment] as? GlimmerBlockAttachment {
                     flush()
+                    hasBlockSource = true
                     body += asMarkdown ? attributes[.glimmerSource] as? String ?? "" : plainText(of: attachment.embed)
                 } else if let image = attributes[.attachment] as? GlimmerInlineImageAttachment {
                     // Markdown writes the image inside its styles and link; plain text its alt text. VoiceOver reads
@@ -163,8 +165,16 @@ enum GlimmerMarkdownSerializer {
                 } else if let source = attributes[.glimmerSource] as? String {
                     // A token shown as text, a footnote marker, an image's fallback alt text: its source, verbatim,
                     // inside the run's styles and link (`**Thanks @ada!**`), once per run (`:tada::tada:`).
-                    segments.append(Segment(text: asMarkdown ? source : string.substring(with: run),
-                                            style: Style(attributes), isVerbatim: true))
+                    // Text tokens remain selectable as text. Only a complete token copies its original syntax;
+                    // a selection through its edge copies and escapes exactly the displayed characters selected.
+                    var partialToken = false
+                    if asMarkdown, attributes[.glimmerToken] is GlimmerTokenBox {
+                        var tokenRange = NSRange()
+                        _ = text.attribute(.glimmerToken, at: run.location, longestEffectiveRange: &tokenRange, in: paragraph.content)
+                        partialToken = NSIntersectionRange(tokenRange, selected) != tokenRange
+                    }
+                    segments.append(Segment(text: asMarkdown && !partialToken ? source : string.substring(with: run),
+                                            style: Style(attributes), isVerbatim: !partialToken))
                 } else {
                     segments.append(Segment(text: string.substring(with: run), style: Style(attributes)))
                 }
@@ -185,7 +195,7 @@ enum GlimmerMarkdownSerializer {
         if paragraph.isMarkerOnly { while marker.last == " " { marker.removeLast() } }
         guard includesStart else { return body }
         let heading = paragraph.headingLevel.map { String(repeating: "#", count: $0) + " " } ?? ""
-        return paragraph.prefix + marker + heading + escapingBlockStart(body)
+        return paragraph.prefix + marker + heading + (hasBlockSource ? body : escapingBlockStart(body))
     }
 
     /// What a list item's later lines start with: spaces to its content column, where a task checkbox counts as
@@ -312,8 +322,21 @@ enum GlimmerMarkdownSerializer {
     }
 
     private static func destination(_ url: URL) -> String {
-        let string = url.absoluteString
-        return string.contains { $0 == " " || $0 == "(" || $0 == ")" } ? "<\(string)>" : string
+        destination(url.absoluteString)
+    }
+
+    private static func destination(_ string: String) -> String {
+        // The parser has already decoded escapes and entities. Protect them from a second interpretation on paste.
+        let escaped = string.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "\\<")
+            .replacingOccurrences(of: ">", with: "\\>")
+        return string.contains { $0.isWhitespace || "()<>".contains($0) } ? "<\(escaped)>" : escaped
+    }
+
+    /// Both image presentations copy the same escaped label and destination, after parsing decoded their syntax.
+    static func imageSource(source: String, alt: String) -> String {
+        "![\(escaped(alt, inLink: true))](\(destination(source)))"
     }
 
     /// Backslash-escapes characters that could start inline syntax. An underscore between two letters or digits
@@ -360,6 +383,9 @@ enum GlimmerMarkdownSerializer {
 
     /// Escapes a paragraph start that would read as block syntax: a heading, a quote, a bullet or a numbered item.
     private static func escapingBlockStart(_ body: String) -> String {
+        if let match = body.wholeMatch(of: #/( {0,3})-(?:[ \t]*-){2,}[ \t]*/#) {
+            return String(match.1) + "\\" + body[match.1.endIndex...]
+        }
         if body.hasPrefix("#") || body.hasPrefix(">") { return "\\" + body }
         if body == "-" || body == "+" || body.hasPrefix("- ") || body.hasPrefix("+ ") { return "\\" + body }
         if let match = body.prefixMatch(of: #/(\d{1,9})[.)](?: |$)/#) {

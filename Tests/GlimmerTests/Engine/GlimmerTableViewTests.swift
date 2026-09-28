@@ -60,6 +60,115 @@ final class GlimmerTableViewTests: XCTestCase {
         XCTAssertEqual(table.cellLabels[1].map(\.textAlignment), [.left, .center, .right])
     }
 
+    func testLinksInTableCellsHaveAnInteractiveTextView() throws {
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil, reveal: .none))
+        let window = hostInWindow(view, width: 390, height: 800)
+        view.update(markdown: "| Site |\n| --- |\n| [Open](https://example.com) |")
+        settle(view)
+        let table = try XCTUnwrap(findSubview(GlimmerTableView.self, in: view))
+        let cell = try XCTUnwrap(findSubview(UITextView.self, in: table), "a native text item must receive the link tap")
+        XCTAssertTrue(cell.isSelectable)
+        XCTAssertFalse(cell.isEditable)
+        XCTAssertNotNil(cell.delegate)
+        XCTAssertEqual(cell.textStorage.attribute(.link, at: 0, effectiveRange: nil) as? URL,
+                       URL(string: "https://example.com"))
+        _ = window
+    }
+
+    func testTableLinkActionsReachTheHostAndKeepNativeFallback() throws {
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil, reveal: .none))
+        let window = hostInWindow(view, width: 390, height: 800)
+        view.update(markdown: "| Site |\n| --- |\n| [Open](https://example.com) |")
+        settle(view)
+        let table = try XCTUnwrap(findSubview(GlimmerTableView.self, in: view))
+        let cell = try XCTUnwrap(findSubview(GlimmerTableCellTextView.self, in: table))
+        let url = try XCTUnwrap(URL(string: "https://example.com"))
+        var tapped: URL?
+        var openedNatively = false
+        view.onLinkTap = { tapped = $0 }
+        let native = UIAction { _ in openedNatively = true }
+        let button = UIButton()
+        button.addAction(try XCTUnwrap(cell.linkAction(for: url, atCharacter: 0, defaultAction: native)), for: .primaryActionTriggered)
+        button.sendActions(for: .primaryActionTriggered)
+        XCTAssertEqual(tapped, url)
+        XCTAssertFalse(openedNatively)
+
+        let element = try XCTUnwrap(table.accessibilityDataTableCellElement(forRow: 1, column: 0) as? GlimmerTableCellElement)
+        XCTAssertTrue(element.accessibilityTraits.contains(.link))
+        XCTAssertFalse(element.accessibilityTraits.contains(.staticText), "a link must expose its interactive role to VoiceOver")
+        tapped = nil
+        XCTAssertTrue(element.accessibilityActivate())
+        XCTAssertEqual(tapped, url, "VoiceOver uses the same host callback")
+        XCTAssertEqual(table.accessibilityContainerType, .dataTable)
+        XCTAssertEqual(table.accessibilityHeaderElements(forColumn: 0)?.count, 1)
+
+        view.onLinkTap = nil
+        XCTAssertTrue(cell.linkAction(for: url, atCharacter: 0, defaultAction: native) === native)
+        let image = UIGraphicsImageRenderer(bounds: table.bounds).image { table.layer.render(in: $0.cgContext) }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "Table with a native link cell"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        _ = window
+    }
+
+    func testTableTokenActionsUseTheCellLocalRange() throws {
+        let view = GlimmerView(configuration: GlimmerConfiguration(extensions: [GlimmerMentions()], imageLoader: nil, reveal: .none))
+        let window = hostInWindow(view, width: 390, height: 800)
+        view.update(markdown: "Text before the table.\n\n| Person |\n| --- |\n| Meet @ada |")
+        settle(view)
+        let table = try XCTUnwrap(findSubview(GlimmerTableView.self, in: view))
+        let cell = try XCTUnwrap(findSubview(GlimmerTableCellTextView.self, in: table))
+        let range = try XCTUnwrap(cell.linkRanges.first)
+        let url = try XCTUnwrap(cell.textStorage.attribute(.link, at: range.location, effectiveRange: nil) as? URL)
+        var tapped: GlimmerInlineToken?
+        view.onTokenTap = { tapped = $0 }
+        let native = UIAction { _ in XCTFail("internal token URLs must never open externally") }
+        let button = UIButton()
+        button.addAction(try XCTUnwrap(cell.linkAction(for: url, atCharacter: range.location, defaultAction: native)),
+                         for: .primaryActionTriggered)
+        button.sendActions(for: .primaryActionTriggered)
+        XCTAssertEqual(tapped?.payload["username"], "ada")
+        view.onTokenTap = nil
+        XCTAssertNil(cell.linkAction(for: url, atCharacter: range.location, defaultAction: native))
+        _ = window
+    }
+
+    func testTableLinkAccessibilityFrameHitsTheLinkInAWideCell() throws {
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil, reveal: .none))
+        let window = hostInWindow(view, width: 390, height: 800)
+        view.update(markdown: "| Site |\n| --- |\n| [GitHub](https://github.com) |")
+        settle(view)
+        let table = try XCTUnwrap(findSubview(GlimmerTableView.self, in: view))
+        let cell = try XCTUnwrap(findSubview(GlimmerTableCellTextView.self, in: table))
+        let element = try XCTUnwrap(table.accessibilityDataTableCellElement(forRow: 1, column: 0) as? GlimmerTableCellElement)
+        let frame = element.accessibilityFrame
+        let cellFrame = UIAccessibility.convertToScreenCoordinates(cell.bounds, in: cell)
+        XCTAssertLessThan(frame.width, cellFrame.width / 2, "the link occupies only the leading part of its cell")
+        let point = CGPoint(x: frame.midX - cellFrame.minX, y: frame.midY - cellFrame.minY)
+        XCTAssertTrue(cell.hitTest(point, with: nil)?.isDescendant(of: cell) == true)
+        let position = try XCTUnwrap(cell.closestPosition(to: point))
+        let index = cell.offset(from: cell.beginningOfDocument, to: position)
+        let linkRange = try XCTUnwrap(cell.linkRanges.first)
+        XCTAssertTrue(NSLocationInRange(index, linkRange), "accessibility's center tap must land on a link glyph")
+        _ = window
+    }
+
+    func testPlainTableCellsKeepTheLabelPathAndCanBecomeLinks() throws {
+        let table = GlimmerTableView(header: [cell("Site")], rows: [[cell("plain")]], alignments: [.right], theme: theme)
+        XCTAssertNil(findSubview(UITextView.self, in: table))
+        let label = table.cellLabels[1][0]
+        let linked = NSAttributedString(string: "Open", attributes: [.font: theme.tableFont, .link: URL(string: "https://example.com")!])
+        table.update(to: .table(header: [cell("Site")], rows: [[linked]], alignments: [.right]))
+        let textView = try XCTUnwrap(findSubview(GlimmerTableCellTextView.self, in: table))
+        XCTAssertTrue(table.cellLabels[1][0] === label)
+        XCTAssertTrue(label.isHidden)
+        XCTAssertEqual(textView.textAlignment, .right)
+        table.update(to: .table(header: [cell("Site")], rows: [[cell("plain")]], alignments: [.right]))
+        XCTAssertFalse(label.isHidden)
+        XCTAssertNil(findSubview(UITextView.self, in: table))
+    }
+
     func testRaggedRowsArePadded() {
         let table = GlimmerTableView(
             header: [cell("a", header: true), cell("b", header: true)],

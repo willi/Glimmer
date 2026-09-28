@@ -90,6 +90,35 @@ final class GlimmerStreamingDocumentTests: XCTestCase {
         XCTAssertEqual(document.text.string, "One\nTwo")
     }
 
+    func testAppendingAfterAnEmptyBlockQuoteReinsertsTheSeparator() {
+        let document = GlimmerStreamingDocument(composer: composer)
+        _ = document.update(markdown: "A\n\n>", isStreaming: true)
+        _ = document.update(markdown: "A\n\n>\n\nB", isStreaming: true)
+        XCTAssertEqual(document.text.string, "A\nB")
+        assertEquivalent(document.text, freshCompose("A\n\n>\n\nB", isStreaming: true), "empty quote")
+    }
+
+    func testNestedAndMultilineReferenceDefinitionsUpdateCommittedLinks() {
+        let prefix = "See [label].\n\nSecond paragraph.\n\nThird paragraph."
+        for definition in [
+            "> [label]: https://example.com",
+            "- [label]: https://example.com",
+            "[label\n]: https://example.com",
+        ] {
+            let document = GlimmerStreamingDocument(composer: composer)
+            _ = document.update(markdown: prefix, isStreaming: true)
+            var source = prefix + "\n\n"
+            // The definition's closing bracket and colon may arrive separately, after a multiline label.
+            for character in definition {
+                source.append(character)
+                _ = document.update(markdown: source, isStreaming: true)
+            }
+            _ = document.update(markdown: source, isStreaming: false)
+            assertEquivalent(document.text, freshCompose(source, isStreaming: false), definition)
+            XCTAssertNotNil(document.text.attribute(.link, at: 4, effectiveRange: nil), definition)
+        }
+    }
+
     func testUnchangedMarkdownReturnsNil() {
         let document = GlimmerStreamingDocument(composer: composer)
         _ = document.update(markdown: "Same", isStreaming: true)

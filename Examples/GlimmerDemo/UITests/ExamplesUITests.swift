@@ -66,6 +66,27 @@ final class ExamplesUITests: XCTestCase {
         app.buttons["Basic"].tap()
     }
 
+    /// Linked table cells retain their native tap target and accessible link after wrapping or changing appearance.
+    @MainActor
+    func testTableLinksReachTheHostInEachAppearance() {
+        for arguments in [[], ["--dark"], ["--large-text"]] {
+            let app = launch("gfm", ["--section=3"] + arguments)
+            XCTAssertTrue(app.navigationBars["GitHub Flavored Markdown"].waitForExistence(timeout: 15))
+            let link = app.links["GitHub"].firstMatch
+            for _ in 0..<15 where !link.isHittable { app.swipeUp() }
+            XCTAssertTrue(link.isHittable, "table link is exposed to accessibility and touch")
+            link.tap()
+            let banner = app.staticTexts["demo.lastTap"]
+            XCTAssertTrue(banner.waitForExistence(timeout: 5))
+            XCTAssertEqual(banner.label, "Link https://github.com")
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = "table-link-\(arguments.first ?? "light")"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            app.terminate()
+        }
+    }
+
     /// Tappable Images: a standalone image and an inline one report their URLs.
     @MainActor
     func testTappingAnImageShowsItsURL() {

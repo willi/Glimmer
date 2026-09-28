@@ -162,6 +162,54 @@ final class GlimmerMarkdownSerializerTests: XCTestCase {
         XCTAssertEqual(markdown(original), "see [![logo](https://x.io/a.png)](https://x.io) here")
     }
 
+    func testImageEscapingRoundTrips() {
+        for source in [
+            #"![a \] b](https://x.io/a.png)"#,
+            #"See ![a \] b](https://x.io/a.png) here"#,
+            #"![chart](https://x.io/a\).png)"#,
+            #"See ![chart](https://x.io/a\).png) here"#,
+            #"![literal \*stars\*, \[brackets\] and &amp;copy;](https://x.io/a.png?label=&amp;copy;)"#,
+            #"[![a \] b](https://x.io/a\).png)](https://x.io)"#,
+        ] {
+            let original = compose(source)
+            let copied = markdown(original)
+            assertEquivalent(compose(copied), original, "source: \(source); copied: \(copied)")
+        }
+    }
+
+    func testLiteralThematicBreaksRoundTrip() {
+        for source in [#"\---"#, #"\----"#, #"\- - -"#, "line\\\n\\---", "> \\---"] {
+            let original = compose(source)
+            let copied = markdown(original)
+            assertEquivalent(compose(copied), original, "source: \(source); copied: \(copied)")
+        }
+        XCTAssertEqual(markdown(compose("---")), "---", "an actual rule keeps its block syntax")
+    }
+
+    func testPartialTextTokenSelectionCopiesOnlySelectedText() {
+        let composer = GlimmerComposer(theme: .default, extensions: [GlimmerMentions()])
+        let original = composer.compose(GlimmerParser.parse("Thanks **@adalovelace**!"))
+        for (selected, expected) in [("ada", "**ada**"), ("@ada", "**\\@ada**"), ("@adalovelace", "**@adalovelace**")] {
+            let range = (original.string as NSString).range(of: selected)
+            XCTAssertEqual(markdown(original, range), expected)
+        }
+        XCTAssertEqual(markdown(original), "Thanks **@adalovelace**!")
+    }
+
+    func testTextTokensWithDifferentDisplayTextKeepCompleteSources() {
+        struct Reference: GlimmerExtension {
+            func scan(_ text: String) -> [GlimmerInlineToken] {
+                text.ranges(of: "[ref]").map {
+                    GlimmerInlineToken(range: $0, kind: "reference", displayText: "Reference", source: "[ref]",
+                                       presentation: .text(tappable: false))
+                }
+            }
+        }
+        let text = GlimmerComposer(theme: .default, extensions: [Reference()]).compose(GlimmerParser.parse("See [ref]."))
+        XCTAssertEqual(markdown(text, (text.string as NSString).range(of: "Reference")), "[ref]")
+        XCTAssertEqual(markdown(text, (text.string as NSString).range(of: "Ref")), "Ref")
+    }
+
     func testEntitiesAndIntrawordUnderscoresStayLiteral() {
         let original = compose("AT&amp;T and &amp;copy; in snake_case")
         let copied = markdown(original)

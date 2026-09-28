@@ -66,8 +66,6 @@ final class GlimmerStreamingDocument: @unchecked Sendable {
     /// `text` into the new one, or nil when nothing changed.
     func update(markdown: String, isStreaming: Bool) -> GlimmerDocumentEdit? {
         let isAppend = Self.utf8(of: markdown, startsWith: rawMarkdown, count: rawMarkdown.utf8.count)
-        // A new answer (not an append) numbers its footnotes from one.
-        if !isAppend { composer.footnotes = GlimmerFootnoteNumbers() }
         noteReferenceDefinitions(in: markdown, isAppend: isAppend)
         if !isAppend || !isStreaming { fenceScan = GlimmerTailHealer.FenceScan() }
         rawMarkdown = markdown
@@ -76,12 +74,15 @@ final class GlimmerStreamingDocument: @unchecked Sendable {
         let notesModeChanged = composer.rendersFootnoteDefinitions != !isStreaming
         composer.rendersFootnoteDefinitions = !isStreaming
         guard newSource != source || notesModeChanged else { return nil }
-        let parsed = parse(newSource)
+        // A replacement can change first-reference order. Recompose its prefix too, so retained markers cannot
+        // keep numbers from the previous registry. Equivalent healed input keeps both its fragments and registry.
+        if !isAppend { composer.footnotes = GlimmerFootnoteNumbers() }
+        let parsed = parse(newSource, isAppend: isAppend)
         source = newSource
         tailOffset = parsed.tailOffset
 
         var firstChanged = parsed.searchFrom
-        while firstChanged < min(blocks.count, parsed.blocks.count), blocks[firstChanged] == parsed.blocks[firstChanged],
+        while isAppend, firstChanged < min(blocks.count, parsed.blocks.count), blocks[firstChanged] == parsed.blocks[firstChanged],
               !(notesModeChanged && Self.isFootnoteDefinitions(blocks[firstChanged])) {
             firstChanged += 1
         }
@@ -114,8 +115,8 @@ final class GlimmerStreamingDocument: @unchecked Sendable {
 
         // The new text from `editStart` to its end: the tail of the last kept block's newline, then the new blocks.
         let replacement = NSMutableAttributedString()
-        if editStart < prefixLength, firstChanged > 0 {
-            let previous = newFragments[firstChanged - 1]
+        if editStart < prefixLength, let previous = newFragments[..<firstChanged].last(where: { $0.length > 0 }) {
+            // Empty quotes and hidden footnotes emit no text; the separator belongs to the last nonempty fragment.
             let keep = prefixLength - editStart
             replacement.append(previous.attributedSubstring(from: NSRange(location: previous.length - keep, length: keep)))
         }
@@ -180,9 +181,9 @@ final class GlimmerStreamingDocument: @unchecked Sendable {
 
     /// Blocks and start lines for `newSource`, the first block index that could differ from the current blocks, and
     /// where the next update's tail re-parse starts.
-    private func parse(_ newSource: String) -> (blocks: [GlimmerBlock], startLines: [Int], searchFrom: Int, tailOffset: Int?) {
+    private func parse(_ newSource: String, isAppend: Bool) -> (blocks: [GlimmerBlock], startLines: [Int], searchFrom: Int, tailOffset: Int?) {
         let tailIndex = max(0, startLines.count - 2)
-        if tailIndex < startLines.count, !usesReferenceDefinitions, let tailOffset,
+        if isAppend, tailIndex < startLines.count, !usesReferenceDefinitions, let tailOffset,
            Self.utf8(of: newSource, startsWith: source, count: tailOffset) {
             let tailLine = startLines[tailIndex]
             let newTailStart = newSource.utf8.index(newSource.startIndex, offsetBy: tailOffset)
@@ -239,8 +240,9 @@ final class GlimmerStreamingDocument: @unchecked Sendable {
     }
 
     /// Also true for a footnote definition (`[^label]:`), on purpose: a definition renumbers markers and moves its note
-    /// below the last block, so it needs the full re-parse too.
+    /// below the last block, so it needs the full re-parse too. Conservatively look for the terminator: definitions
+    /// can occur inside containers, and a multiline label's opening bracket may precede this update's scanned line.
     static func hasLinkReferenceDefinition(_ markdown: Substring) -> Bool {
-        markdown.contains(#/(?m)^ {0,3}\[[^\]]+\]:/#)
+        markdown.contains("]:")
     }
 }

@@ -103,6 +103,36 @@ final class GlimmerCodeBlockViewTests: XCTestCase {
         XCTAssertEqual(view.copyButton.accessibilityLabel, "Copy code")
     }
 
+    func testCodeCopyAndSelectionStopAtTheRevealedLine() throws {
+        let view = GlimmerCodeBlockView(code: "one\ntwo\nthree", language: nil, theme: theme, highlighter: GlimmerBasicHighlighter())
+        let pasteboard = try XCTUnwrap(UIPasteboard(name: UIPasteboard.Name("glimmer.tests.revealed-code"), create: true))
+        view.pasteboard = pasteboard
+        view.visibleUnitCount = 1
+        view.copyButton.sendActions(for: .primaryActionTriggered)
+        XCTAssertEqual(pasteboard.string, "one\n")
+        view.textView.selectedRange = NSRange(location: 0, length: view.textView.textStorage.length)
+        view.textView.delegate?.textViewDidChangeSelection?(view.textView)
+        XCTAssertEqual(view.textView.selectedRange, NSRange(location: 0, length: 4))
+        view.textView.copy(nil)
+        XCTAssertEqual(pasteboard.string, "one\n")
+        view.visibleUnitCount = nil
+        view.copyButton.sendActions(for: .primaryActionTriggered)
+        XCTAssertEqual(pasteboard.string, "one\ntwo\nthree")
+    }
+
+    func testCodeSelectionUsesUTF16AndClampsWhenVisibleLinesShrink() {
+        let view = GlimmerCodeBlockView(code: "🌟 one\ntwo\nthree", language: nil, theme: theme,
+                                        highlighter: GlimmerBasicHighlighter())
+        view.textView.selectedRange = NSRange(location: 0, length: view.textView.textStorage.length)
+        view.visibleUnitCount = 1
+        XCTAssertEqual(view.textView.selectedRange, NSRange(location: 0, length: 7))
+        view.textView.selectedRange = NSRange(location: 11, length: 2)
+        view.textView.delegate?.textViewDidChangeSelection?(view.textView)
+        XCTAssertEqual(view.textView.selectedRange, NSRange(location: 7, length: 0))
+        view.visibleUnitCount = 0
+        XCTAssertEqual(view.textView.selectedRange, NSRange(location: 0, length: 0))
+    }
+
     func testHeaderShowsLanguage() {
         let view = GlimmerCodeBlockView(code: "x", language: "Swift", theme: theme, highlighter: GlimmerBasicHighlighter())
         XCTAssertEqual(view.languageLabel.text, "swift")

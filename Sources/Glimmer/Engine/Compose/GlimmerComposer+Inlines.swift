@@ -45,7 +45,8 @@ extension GlimmerComposer {
                 }
                 appendInlines(children, attributes: linked, reuse: reuse, to: output)
             case .image(let source, _, let alt):
-                appendInlineImage(source: source, alt: alt, markdown: "![\(alt)](\(source))", attributes: attributes, reuse: reuse, to: output)
+                appendInlineImage(source: source, alt: alt, markdown: GlimmerMarkdownSerializer.imageSource(source: source, alt: alt),
+                                  attributes: attributes, reuse: reuse, to: output)
             case .softBreak:
                 output.append(NSAttributedString(string: " ", attributes: attributes))
             case .lineBreak:

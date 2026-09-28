@@ -93,6 +93,24 @@ final class GlimmerTailHealerTests: XCTestCase {
         XCTAssertEqual(GlimmerTailHealer.heal("One<bold"), "One<bold", "not a break tag")
         XCTAssertEqual(GlimmerTailHealer.heal("Use `a <b"), "Use `a <b`", "inside code a tag is text")
     }
+
+    func testLinkAndFootnoteSyntaxInsideCodeStaysLiteralWhileStreaming() {
+        for code in ["array[0", "array[0]", "[label](url", "![alt", "[^note", "[^note]"] {
+            for delimiter in ["`", "``", "```"] {
+                let source = "Use " + delimiter + code
+                let healed = GlimmerTailHealer.heal(source)
+                XCTAssertEqual(GlimmerComposerTestHelper.plainText(healed), "Use " + code, source)
+            }
+        }
+    }
+
+    func testCodeSpansMatchTheWholeBacktickRun() {
+        XCTAssertEqual(GlimmerTailHealer.heal("Use ``a`[0]"), "Use ``a`[0]``")
+        XCTAssertEqual(GlimmerTailHealer.heal("Use ``a`[0]`` then [docs](url"), "Use ``a`[0]`` then [docs](url)")
+        XCTAssertEqual(GlimmerTailHealer.heal("Use `array[0` then [docs](url"), "Use `array[0` then [docs](url)")
+        XCTAssertEqual(GlimmerTailHealer.heal("Use ``a <b"), "Use ``a <b``")
+        XCTAssertEqual(GlimmerTailHealer.heal(#"An escaped \` then [docs](url"#), #"An escaped \` then [docs](url)"#)
+    }
 }
 
 /// Plain rendered text of markdown, for assertions that care only about visible characters.

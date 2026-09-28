@@ -78,7 +78,8 @@ struct GlimmerComposer {
         switch block {
         case .paragraph(let inlines):
             if let image = standaloneImage(inlines) {
-                appendEmbed(.image(source: image.url, alt: image.alt), source: "![\(image.alt)](\(image.url.absoluteString))",
+                appendEmbed(.image(source: image.url, alt: image.alt),
+                            source: GlimmerMarkdownSerializer.imageSource(source: image.url.absoluteString, alt: image.alt),
                             context: context, marker: marker, to: output)
             } else {
                 appendTextParagraph(inlines, font: theme.bodyFont, context: context, marker: marker, to: output)

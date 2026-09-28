@@ -31,6 +31,18 @@ final class GlimmerRevealEngineTests: XCTestCase {
         XCTAssertTrue(engine.phrases.isEmpty)
     }
 
+    func testChineseParagraphRevealsBeforeStreamEnds() {
+        var engine = GlimmerRevealEngine(options: options)
+        let text = "这是一个正在流式生成的中文回答。它包含多个完整句子，但是没有使用空格分隔单词。" as NSString
+        engine.textChanged(text, isStreaming: true, now: 0)
+        engine.advance(to: 0)
+        XCTAssertGreaterThan(engine.revealedLength, 0)
+        XCTAssertLessThan(engine.revealedLength, text.length)
+        engine.textChanged(text, isStreaming: false, now: 0.1)
+        engine.advance(to: 10)
+        XCTAssertTrue(engine.isComplete)
+    }
+
     func testFlushesAndCompletesWhenStreamingEnds() {
         var engine = GlimmerRevealEngine(options: options)
         engine.textChanged("one two", isStreaming: false, now: 0)

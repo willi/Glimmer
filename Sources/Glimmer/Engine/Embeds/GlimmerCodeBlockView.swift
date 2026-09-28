@@ -3,7 +3,7 @@ import UIKit
 /// A fenced code block: a header (language + Copy) above selectable, syntax-colored code that scrolls
 /// horizontally instead of wrapping. Its height does not depend on width.
 @MainActor
-final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
+final class GlimmerCodeBlockView: UIView, GlimmerEmbedView, UITextViewDelegate {
     static let headerHeight: CGFloat = 44
 
     private(set) var code: String
@@ -39,7 +39,11 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
     private var lineWidths: [CGFloat] = []
 
     var visibleUnitCount: Int? {
-        didSet { if visibleUnitCount != oldValue { setNeedsLayout() } }
+        didSet {
+            guard visibleUnitCount != oldValue else { return }
+            textViewDidChangeSelection(textView)
+            setNeedsLayout()
+        }
     }
 
     /// `highlighted` is the code as the composer styled it on the worker; nil highlights it here.
@@ -65,6 +69,7 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
         textView.textContainerInset = UIEdgeInsets(top: padding, left: padding, bottom: padding, right: padding)
         textView.setText(self.highlighted)
         textView.copiesMarkdown = false
+        textView.delegate = self
         let container = NSTextContainer(size: CGSize(width: CGFloat.greatestFiniteMagnitude, height: 0))
         container.lineFragmentPadding = 0
         metricsManager.textContainer = container
@@ -86,7 +91,7 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
         copyButton.accessibilityLabel = GlimmerStrings.copyCode
         copyButton.addAction(UIAction { [weak self] _ in
             guard let self else { return }
-            pasteboard.string = self.code
+            pasteboard.string = (self.code as NSString).substring(to: self.revealedCodeLength)
         }, for: .primaryActionTriggered)
         if theme.showsCodeBlockHeader {
             addSubview(languageLabel)
@@ -99,6 +104,27 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// The clipped lines remain in TextKit for layout, but selection and Copy must not expose them yet.
+    private var revealedCodeLength: Int {
+        guard let visibleUnitCount else { return (code as NSString).length }
+        guard visibleUnitCount > 0 else { return 0 }
+        var lines = 0
+        for (offset, unit) in code.utf16.enumerated() where unit == 0x0A {
+            lines += 1
+            if lines == visibleUnitCount { return offset + 1 }
+        }
+        return (code as NSString).length
+    }
+
+    func textViewDidChangeSelection(_ textView: UITextView) {
+        let selected = textView.selectedRange
+        guard visibleUnitCount != nil, NSMaxRange(selected) > 0 else { return }
+        let limit = revealedCodeLength
+        guard NSMaxRange(selected) > limit else { return }
+        let start = min(selected.location, limit)
+        textView.selectedRange = NSRange(location: start, length: limit - start)
+    }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()

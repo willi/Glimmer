@@ -193,10 +193,11 @@ enum GlimmerTailHealer {
     /// marker (`[^1]`, `[^1]:`): it may be a definition starting, which would take the line away again.
     private static func holdBackFootnoteStarts(_ tail: String) -> String {
         // The last such line: an earlier complete marker line (`[^1]` then `[^2]`) doesn't hide the one being typed.
-        if let match = tail.matches(of: #/(?m)^[ ]{0,3}\[\^[^\]\s]+\]:?[ \t]*$/#).last, match.range.upperBound == tail.endIndex {
+        if let match = tail.matches(of: #/(?m)^[ ]{0,3}\[\^[^\]\s]+\]:?[ \t]*$/#).last, match.range.upperBound == tail.endIndex,
+           !isInOpenCodeSpan(tail[..<match.range.lowerBound]) {
             return String(tail[..<match.range.lowerBound])
         }
-        if let match = tail.firstMatch(of: #/\[\^[^\]\s]*$/#) {
+        if let match = tail.firstMatch(of: #/\[\^[^\]\s]*$/#), !isInOpenCodeSpan(tail[..<match.range.lowerBound]) {
             return String(tail[..<match.range.lowerBound])
         }
         return tail
@@ -218,25 +219,28 @@ enum GlimmerTailHealer {
 
     /// Whether text after `prefix` is inside a code span still open: there, `<` and `\\` are just text.
     private static func isInOpenCodeSpan(_ prefix: Substring) -> Bool {
-        prefix.reduce(0) { $1 == "`" ? $0 + 1 : $0 } % 2 == 1
+        openDelimiters(in: String(prefix)).last?.hasPrefix("`") == true
     }
 
     private static func healLinks(_ tail: String) -> String {
         // `![alt` or `![alt](partial` — hold the whole image back until it is complete.
-        if let match = tail.firstMatch(of: #/!\[[^\]]*(\]\([^)\s]*)?$/#) {
+        if let match = tail.firstMatch(of: #/!\[[^\[\]]*(\]\([^)\s]*)?$/#),
+           !isInOpenCodeSpan(tail[..<match.range.lowerBound]) {
             return String(tail[..<match.range.lowerBound])
         }
         // `[text](partial` — close the destination so the text already renders as a link.
-        if tail.firstMatch(of: #/\[[^\]]*\]\([^)\s]*$/#) != nil {
+        if let match = tail.firstMatch(of: #/\[[^\[\]]*\]\([^)\s]*$/#),
+           !isInOpenCodeSpan(tail[..<match.range.lowerBound]) {
             return tail + ")"
         }
         // `[text]` — may still become a link (or an extension token); hold it back for a moment. A complete footnote
         // marker `[^label]` shows at once.
-        if let match = tail.firstMatch(of: #/\[[^\]]*\]$/#), !tail[match.range].hasPrefix("[^") {
+        if let match = tail.firstMatch(of: #/\[[^\[\]]*\]$/#), !tail[match.range].hasPrefix("[^"),
+           !isInOpenCodeSpan(tail[..<match.range.lowerBound]) {
             return String(tail[..<match.range.lowerBound])
         }
         // `[partial` — drop the bracket and keep the text.
-        if let match = tail.firstMatch(of: #/\[[^\]]*$/#) {
+        if let match = tail.firstMatch(of: #/\[[^\[\]]*$/#), !isInOpenCodeSpan(tail[..<match.range.lowerBound]) {
             var healed = tail
             healed.remove(at: match.range.lowerBound)
             return healed
@@ -278,6 +282,11 @@ enum GlimmerTailHealer {
         func next(_ offset: Int) -> Character? {
             index + offset < characters.count ? characters[index + offset] : nil
         }
+        func backtickRunLength() -> Int {
+            var count = 1
+            while next(count) == "`" { count += 1 }
+            return count
+        }
         /// Underscores between letters or digits never open or close emphasis (`snake_case` stays literal).
         func isIntraword(at position: Int, length: Int) -> Bool {
             let before = position > 0 ? characters[position - 1] : " "
@@ -286,9 +295,14 @@ enum GlimmerTailHealer {
         }
         while index < characters.count {
             let character = characters[index]
-            if open.last == "`" {
-                if character == "`" { open.removeLast() }
-                index += 1
+            if let delimiter = open.last, delimiter.hasPrefix("`") {
+                if character == "`" {
+                    let count = backtickRunLength()
+                    if count == delimiter.count { open.removeLast() }
+                    index += count
+                } else {
+                    index += 1
+                }
                 atLineStart = false
                 continue
             }
@@ -300,8 +314,17 @@ enum GlimmerTailHealer {
             case " ", "\t":
                 index += 1
                 continue
+            case "\\":
+                // A backslash escapes punctuation outside code, including a potential code-span opener.
+                atLineStart = next(1) == "\n"
+                index += next(1) == nil ? 1 : 2
+                continue
             case "`":
-                open.append("`")
+                let count = backtickRunLength()
+                open.append(String(repeating: "`", count: count))
+                index += count
+                atLineStart = false
+                continue
             case "*" where next(1) == "*":
                 toggle("**")
                 index += 2

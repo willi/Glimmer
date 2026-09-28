@@ -13,12 +13,60 @@ private final class RecordingImageLoader: GlimmerImageLoader, @unchecked Sendabl
     }
 }
 
+private struct ConfiguredCacheExtension: GlimmerExtension {
+    let label: String
+    func scan(_ text: String) -> [GlimmerInlineToken] {
+        guard let range = text.range(of: "@person") else { return [] }
+        return [GlimmerInlineToken(range: range, kind: "person", displayText: label,
+                                  source: "@person", presentation: .text(tappable: false))]
+    }
+}
+
+private struct ConfiguredCacheHighlighter: GlimmerHighlighter {
+    let kind: GlimmerHighlightSpan.Kind
+    func highlight(_ code: String, language: String?) -> [GlimmerHighlightSpan] {
+        [GlimmerHighlightSpan(range: NSRange(location: 0, length: (code as NSString).length), kind: kind)]
+    }
+}
+
 @MainActor
 final class GlimmerDocumentCacheTests: XCTestCase {
     private let answer = "# Title\n\nSome **text**.\n\n```swift\nlet x = 1\n```"
 
     override func setUp() async throws {
         GlimmerDocumentCache.shared.removeAll()
+    }
+
+    func testConfiguredExtensionsDoNotShareCachedOutput() {
+        let first = GlimmerView(configuration: .init(extensions: [ConfiguredCacheExtension(label: "Alice")], imageLoader: nil))
+        first.update(markdown: "Hello @person")
+        let second = GlimmerView(configuration: .init(extensions: [ConfiguredCacheExtension(label: "Bob")], imageLoader: nil))
+        second.update(markdown: "Hello @person")
+        XCTAssertEqual(second.plainText(), "Hello Bob")
+        first.configuration.extensions = [ConfiguredCacheExtension(label: "Carol")]
+        XCTAssertEqual(first.plainText(), "Hello Carol")
+    }
+
+    func testCachedAttachmentsUseTheCurrentLoaderInstance() throws {
+        let firstLoader = RecordingImageLoader()
+        let secondLoader = RecordingImageLoader()
+        let first = GlimmerView(configuration: .init(imageLoader: firstLoader))
+        first.update(markdown: "![Photo](https://example.com/photo.png)")
+        let second = GlimmerView(configuration: .init(imageLoader: secondLoader))
+        second.update(markdown: "![Photo](https://example.com/photo.png)")
+        let attachment = try XCTUnwrap(blockAttachments(in: second.textView.textStorage).first)
+        XCTAssertTrue((attachment.imageLoader as? RecordingImageLoader) === secondLoader)
+    }
+
+    func testConfiguredHighlightersDoNotShareCachedOutput() throws {
+        let first = GlimmerView(configuration: .init(imageLoader: nil, highlighter: ConfiguredCacheHighlighter(kind: .keyword)))
+        first.update(markdown: "```swift\nvalue\n```")
+        let second = GlimmerView(configuration: .init(imageLoader: nil, highlighter: ConfiguredCacheHighlighter(kind: .string)))
+        second.update(markdown: "```swift\nvalue\n```")
+        let attachment = try XCTUnwrap(blockAttachments(in: second.textView.textStorage).first)
+        guard case .codeBlock(_, _, let highlighted) = attachment.embed else { return XCTFail("expected code") }
+        XCTAssertEqual(highlighted?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor,
+                       second.configuration.theme.syntaxStringColor)
     }
 
     func testSecondConfigureOfTheSameAnswerComesFromTheCache() {

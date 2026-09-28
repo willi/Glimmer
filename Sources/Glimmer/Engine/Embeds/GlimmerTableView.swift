@@ -17,6 +17,8 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
 
     let scrollView = UIScrollView()
     private(set) var cellLabels: [[UILabel]] = []
+    /// Plain cells keep UILabel's inexpensive path; linked cells need native text-item interaction.
+    private var linkedCells: [ObjectIdentifier: GlimmerTableCellTextView] = [:]
 
     private let content = UIView()
     private let headerBackground = UIView()
@@ -44,7 +46,8 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
         if let cellElementsCache { return cellElementsCache }
         let elements = cellLabels.enumerated().map { row, labels in
             labels.enumerated().map { column, label in
-                GlimmerTableCellElement(container: self, row: row, column: column, label: label)
+                GlimmerTableCellElement(container: self, row: row, column: column, label: label,
+                                        linkedText: linkedCells[ObjectIdentifier(label)])
             }
         }
         cellElementsCache = elements
@@ -107,13 +110,13 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
         for row in firstChanged..<incoming.count {
             if row < cellLabels.count {
                 for (column, text) in incoming[row].enumerated() where !text.isEqual(to: cells[row][column]) {
-                    cellLabels[row][column].attributedText = text
+                    updateLabel(cellLabels[row][column], text: text, column: column)
                 }
             } else {
                 cellLabels.append(incoming[row].enumerated().map { column, text in makeLabel(text, column: column) })
             }
         }
-        for label in cellLabels.dropFirst(incoming.count).joined() { label.removeFromSuperview() }
+        for label in cellLabels.dropFirst(incoming.count).joined() { removeLabel(label) }
         cellLabels.removeSubrange(min(incoming.count, cellLabels.count)...)
         cells = incoming
         naturalRowWidths.removeSubrange(min(firstChanged, naturalRowWidths.count)...)
@@ -127,7 +130,7 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
 
     /// Replaces every cell label: rows padded to the widest row, aligned per column.
     private func rebuildCells(header: [NSAttributedString], rows: [[NSAttributedString]]) {
-        for label in cellLabels.joined() { label.removeFromSuperview() }
+        for label in cellLabels.joined() { removeLabel(label) }
         let columns = max(header.count, rows.map(\.count).max() ?? 0, alignments.count)
         func padded(_ row: [NSAttributedString]) -> [NSAttributedString] {
             row + Array(repeating: NSAttributedString(), count: max(0, columns - row.count))
@@ -143,10 +146,32 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
     private func makeLabel(_ text: NSAttributedString, column: Int) -> UILabel {
         let label = UILabel()
         label.numberOfLines = 0
-        label.attributedText = text
-        label.textAlignment = Self.textAlignment(column < alignments.count ? alignments[column] : .none)
         content.addSubview(label)
+        updateLabel(label, text: text, column: column)
         return label
+    }
+
+    private func updateLabel(_ label: UILabel, text: NSAttributedString, column: Int) {
+        let alignment = Self.textAlignment(column < alignments.count ? alignments[column] : .none)
+        label.attributedText = text
+        label.textAlignment = alignment
+        let key = ObjectIdentifier(label)
+        if GlimmerTableCellTextView.hasLinks(in: text) {
+            let linked = linkedCells[key] ?? GlimmerTableCellTextView()
+            linked.attributedText = text
+            linked.textAlignment = alignment
+            if linked.superview == nil { content.addSubview(linked) }
+            linkedCells[key] = linked
+            label.isHidden = true
+        } else {
+            linkedCells.removeValue(forKey: key)?.removeFromSuperview()
+            label.isHidden = false
+        }
+    }
+
+    private func removeLabel(_ label: UILabel) {
+        linkedCells.removeValue(forKey: ObjectIdentifier(label))?.removeFromSuperview()
+        label.removeFromSuperview()
     }
 
     nonisolated override var accessibilityElements: [Any]? {
@@ -233,6 +258,7 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
                     width: max(0, layout.columnWidths[column] - padding * 2),
                     height: max(0, layout.rowHeights[rowIndex] - padding * 2)
                 )
+                linkedCells[ObjectIdentifier(label)]?.frame = label.frame
                 x += layout.columnWidths[column]
                 if column < labels.count - 1 {
                     path.move(to: CGPoint(x: x, y: y))
@@ -293,13 +319,32 @@ final class GlimmerTableCellElement: UIAccessibilityElement, UIAccessibilityCont
     private weak var label: UILabel?
     nonisolated private let lastFrame = Mutex(CGRect.zero)
 
-    init(container: GlimmerTableView, row: Int, column: Int, label: UILabel) {
+    private weak var linkedText: GlimmerTableCellTextView?
+
+    init(container: GlimmerTableView, row: Int, column: Int, label: UILabel, linkedText: GlimmerTableCellTextView?) {
         self.row = row
         self.column = column
         self.label = label
+        self.linkedText = linkedText
         super.init(accessibilityContainer: container)
         accessibilityLabel = label.attributedText?.string
         accessibilityTraits = row == 0 ? .header : .staticText
+        if let linkedText {
+            let links = linkedText.linkRanges
+            // Expose the interactive role to accessibility's links rotor. A linked header keeps its heading role.
+            if links.count == 1 { accessibilityTraits = row == 0 ? [.header, .link] : .link }
+            accessibilityCustomActions = links.map { range in
+                let name = linkedText.textStorage.attributedSubstring(from: range).string
+                return UIAccessibilityCustomAction(name: name) { [weak linkedText] _ in
+                    linkedText?.activateLink(atCharacter: range.location) ?? false
+                }
+            }
+        }
+    }
+
+    override func accessibilityActivate() -> Bool {
+        guard let linkedText, linkedText.linkRanges.count == 1, let range = linkedText.linkRanges.first else { return false }
+        return linkedText.activateLink(atCharacter: range.location)
     }
 
     nonisolated override var accessibilityFrame: CGRect {
@@ -313,7 +358,13 @@ final class GlimmerTableCellElement: UIAccessibilityElement, UIAccessibilityCont
     /// The cell's frame on screen, recorded for readers off the main thread; the table records it on layout too.
     @discardableResult
     func refreshFrame() -> CGRect {
-        let frame = label.map { UIAccessibility.convertToScreenCoordinates($0.bounds, in: $0) } ?? .zero
+        let frame: CGRect
+        if let linkedText, linkedText.linkRanges.count == 1, let range = linkedText.linkRanges.first,
+           let linkFrame = linkedText.frameForLink(range) {
+            frame = UIAccessibility.convertToScreenCoordinates(linkFrame, in: linkedText)
+        } else {
+            frame = label.map { UIAccessibility.convertToScreenCoordinates($0.bounds, in: $0) } ?? .zero
+        }
         lastFrame.withLock { $0 = frame }
         return frame
     }

@@ -172,6 +172,22 @@ final class GlimmerFootnoteTests: XCTestCase {
         _ = window
     }
 
+    func testReplacingTheTailKeepsFootnoteNumbersDistinct() {
+        let document = GlimmerStreamingDocument(composer: GlimmerComposer(theme: theme))
+        _ = document.update(markdown: "A[^a].\n\nB[^b].", isStreaming: true)
+        _ = document.update(markdown: "A[^a].\n\nC[^c].", isStreaming: true)
+        _ = document.update(markdown: "A[^a].\n\nC[^c].", isStreaming: false)
+        XCTAssertEqual(document.text.string, "A1.\nC2.")
+    }
+
+    func testAReplacementWithTheSameHealedTextKeepsItsFootnoteNumbers() {
+        let document = GlimmerStreamingDocument(composer: GlimmerComposer(theme: theme))
+        _ = document.update(markdown: "A[^a].\n\n**Bold**", isStreaming: true)
+        _ = document.update(markdown: "A[^a].\n\n**Bold", isStreaming: true)
+        _ = document.update(markdown: "A[^a].\n\n**Bold**\n\nC[^c].", isStreaming: true)
+        XCTAssertEqual(document.text.string, "A1.\nBold\nC2.")
+    }
+
     func testVoiceOverReadsANotesNumber() {
         let text = composed("See[^1].\n\n[^1]: Yes.")
         let spoken = GlimmerMarkdownSerializer.plainText(from: text, range: NSRange(location: 0, length: text.length), forAccessibility: true)

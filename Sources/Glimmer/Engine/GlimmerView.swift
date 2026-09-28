@@ -422,7 +422,7 @@ public final class GlimmerView: UIView {
             linksImagesForTaps: onImageTap != nil
         )
         // An empty answer (every new view starts with one) costs nothing to compose; keep it out of the cache.
-        let cacheable = !isStreaming && !source.isEmpty
+        let cacheable = !isStreaming && !source.isEmpty && GlimmerDocumentCache.supports(configuration)
         if cacheable, let cached = GlimmerDocumentCache.shared.text(for: key) {
             // The worker starts empty; its first result replaces the whole text (see `drainDocumentUpdates`).
             worker = GlimmerDocumentWorker(document: makeDocument(), extensions: configuration.extensions)

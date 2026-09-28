@@ -9,14 +9,20 @@ final class GlimmerDocumentCache {
     struct Key: Hashable {
         let source: String
         let theme: GlimmerTheme
-        /// Extension type names: a different extension set composes differently.
+        /// Only stateless built-in dependencies are shared, so their type names identify their behavior.
         let extensions: [String]
-        /// The highlighter's and image loader's types: the cached text's embeds carry them, and every view must get
-        /// its own. (Two loaders of one type are assumed interchangeable.)
         let highlighter: String
         let imageLoader: String?
         /// Whether inline images' alt text links to them (the host takes image taps).
         var linksImagesForTaps = false
+    }
+
+    /// Custom dependencies may carry configuration or mutable state, and cached attachments retain their instances.
+    /// Without an explicit equivalence contract, composing them afresh is the only safe way to use the current ones.
+    static func supports(_ configuration: GlimmerConfiguration) -> Bool {
+        configuration.extensions.allSatisfy { $0 is GlimmerMentions || $0 is GlimmerEmojiShortcodes }
+            && configuration.highlighter is GlimmerBasicHighlighter
+            && (configuration.imageLoader == nil || configuration.imageLoader is GlimmerURLSessionImageLoader)
     }
 
     private struct Entry {
