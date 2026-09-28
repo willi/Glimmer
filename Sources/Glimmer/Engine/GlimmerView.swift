@@ -28,7 +28,9 @@ public final class GlimmerView: UIView {
     private(set) var markdown = ""
     private(set) var isStreaming = false
     private(set) var revealID: String?
-    private(set) var engine: GlimmerRevealEngine?
+    private(set) var engine: GlimmerRevealEngine? {
+        didSet { isRevealingForAccessibility = engine != nil }
+    }
     /// The worker update in flight, if any. Tests await it.
     private(set) var pendingDocument: Task<Void, Never>?
     /// Main-thread time spent applying the last document change: the spec's "applying one network update" metric.
@@ -57,6 +59,7 @@ public final class GlimmerView: UIView {
     private var embedUnits: [Int: [Int]] = [:]
 
     public init(configuration: GlimmerConfiguration = .default) {
+        _ = Self.accessibilityOverridesInstalled
         self.configuration = configuration
         worker = GlimmerDocumentWorker(
             document: GlimmerStreamingDocument(composer: GlimmerComposer(theme: configuration.theme)),
@@ -175,38 +178,70 @@ public final class GlimmerView: UIView {
 
     /// While a reveal runs the view is one element that reads what is revealed so far. The text view underneath is
     /// hidden, because its unrevealed text is laid out but invisible. At settle the text view takes over, with
-    /// line and word navigation and the links rotor. A host may group a settled answer into one element too.
-    public override var isAccessibilityElement: Bool {
-        get { engine != nil || hostGroupsAnswer == true }
-        set { hostGroupsAnswer = newValue }
-    }
+    /// line and word navigation and the links rotor. A host may group a settled answer into one element too, by setting
+    /// `isAccessibilityElement`.
+    ///
+    /// UIKit's accessibility may read a view off the main thread, where a Swift override traps: its Objective-C entry
+    /// point checks it runs on the main actor. So `isAccessibilityElement` (and its setter), `accessibilityLabel` and
+    /// `accessibilityTraits` are Objective-C methods installed once, reading state kept safe to read from any thread.
+    /// The label is the revealed text, computed fresh on the main thread; off it, the label as the main thread last
+    /// computed it, since the text storage can only be read there.
+    private static let accessibilityOverridesInstalled: Void = installAccessibilityOverrides()
 
+    /// Mirrors `engine != nil` for readers on any thread.
+    nonisolated(unsafe) private var isRevealingForAccessibility = false
     /// A host's own choice to group the answer into one element; nil lets the view decide.
-    private var hostGroupsAnswer: Bool?
+    nonisolated(unsafe) private var hostGroupsAnswer: Bool?
+    /// The label the main thread last computed, for readers off it.
+    nonisolated(unsafe) private var lastAccessibilityLabel: String?
 
     /// While revealing, the revealed text; for a host-grouped answer without a label of its own, the whole text.
-    public override var accessibilityLabel: String? {
-        get {
-            if let engine {
-                let revealed = min(engine.revealedLength, textView.textStorage.length)
-                return GlimmerMarkdownSerializer.plainText(
-                    from: textView.textStorage, range: NSRange(location: 0, length: revealed), forAccessibility: true
-                )
-            }
-            if hostGroupsAnswer == true, super.accessibilityLabel == nil {
-                return GlimmerMarkdownSerializer.plainText(
-                    from: textView.textStorage, range: NSRange(location: 0, length: textView.textStorage.length),
-                    forAccessibility: true
-                )
-            }
-            return super.accessibilityLabel
-        }
-        set { super.accessibilityLabel = newValue }
+    private func freshAccessibilityLabel() -> String? {
+        let length = textView.textStorage.length
+        let revealed = engine.map { min($0.revealedLength, length) } ?? length
+        return GlimmerMarkdownSerializer.plainText(
+            from: textView.textStorage, range: NSRange(location: 0, length: revealed), forAccessibility: true
+        )
     }
 
-    public override var accessibilityTraits: UIAccessibilityTraits {
-        get { engine != nil ? [.staticText, .updatesFrequently] : super.accessibilityTraits }
-        set { super.accessibilityTraits = newValue }
+    nonisolated private static func installAccessibilityOverrides() {
+        let base: AnyClass = UIView.self
+        let isElement = NSSelectorFromString("isAccessibilityElement")
+        let setIsElement = NSSelectorFromString("setIsAccessibilityElement:")
+        let label = NSSelectorFromString("accessibilityLabel")
+        let traits = NSSelectorFromString("accessibilityTraits")
+        typealias LabelGetter = @convention(c) (AnyObject, Selector) -> NSString?
+        typealias TraitsGetter = @convention(c) (AnyObject, Selector) -> UInt64
+        let isElementBlock: @convention(block) (AnyObject) -> Bool = { object in
+            guard let view = object as? GlimmerView else { return false }
+            return view.isRevealingForAccessibility || view.hostGroupsAnswer == true
+        }
+        let setIsElementBlock: @convention(block) (AnyObject, Bool) -> Void = { object, value in
+            (object as? GlimmerView)?.hostGroupsAnswer = value
+        }
+        let labelBlock: @convention(block) (AnyObject) -> NSString? = { object in
+            // The superclass's implementation is looked up per call: UIKit's accessibility may replace it once it loads.
+            let own = unsafeBitCast(class_getMethodImplementation(base, label), to: LabelGetter.self)(object, label)
+            guard let view = object as? GlimmerView,
+                  view.isRevealingForAccessibility || (view.hostGroupsAnswer == true && own == nil) else { return own }
+            guard Thread.isMainThread else { return view.lastAccessibilityLabel as NSString? }
+            let fresh = MainActor.assumeIsolated { view.freshAccessibilityLabel() }
+            view.lastAccessibilityLabel = fresh
+            return fresh as NSString?
+        }
+        let traitsBlock: @convention(block) (AnyObject) -> UInt64 = { object in
+            if let view = object as? GlimmerView, view.isRevealingForAccessibility {
+                return UIAccessibilityTraits([.staticText, .updatesFrequently]).rawValue
+            }
+            return unsafeBitCast(class_getMethodImplementation(base, traits), to: TraitsGetter.self)(object, traits)
+        }
+        let overrides: [(Selector, Any)] = [
+            (isElement, isElementBlock), (setIsElement, setIsElementBlock), (label, labelBlock), (traits, traitsBlock),
+        ]
+        for (selector, block) in overrides {
+            guard let method = class_getInstanceMethod(base, selector) else { continue }
+            class_replaceMethod(GlimmerView.self, selector, imp_implementationWithBlock(block), method_getTypeEncoding(method))
+        }
     }
 
     // MARK: - Taps and menus

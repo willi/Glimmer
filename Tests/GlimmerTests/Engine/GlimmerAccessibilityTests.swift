@@ -56,6 +56,33 @@ final class GlimmerAccessibilityTests: XCTestCase {
         _ = window
     }
 
+    /// The view's own accessibility is safe to read off the main thread too: whether it is one element and its traits
+    /// exactly, and its label as the main thread last read it (the text storage can't be read from there).
+    func testTheViewsAccessibilityCanBeReadOffTheMainThread() async {
+        let (view, clock, window) = revealingView()
+        view.update(markdown: answer, isStreaming: true)
+        await view.pendingDocument?.value
+        clock.advance(to: 0.5)
+        let onMain = view.accessibilityLabel
+        XCTAssertNotNil(onMain)
+        nonisolated(unsafe) let object: NSObject = view
+        nonisolated(unsafe) var element: Bool?
+        nonisolated(unsafe) var traits: UInt64?
+        nonisolated(unsafe) var label: String?
+        let read = expectation(description: "read off the main thread")
+        DispatchQueue.global().async {
+            element = (object.value(forKey: "isAccessibilityElement") as? NSNumber)?.boolValue
+            traits = (object.value(forKey: "accessibilityTraits") as? NSNumber)?.uint64Value
+            label = object.value(forKey: "accessibilityLabel") as? String
+            read.fulfill()
+        }
+        await fulfillment(of: [read], timeout: 5)
+        XCTAssertEqual(element, true)
+        XCTAssertEqual(traits.map { UIAccessibilityTraits(rawValue: $0) }, [.staticText, .updatesFrequently])
+        XCTAssertEqual(label, onMain)
+        _ = window
+    }
+
     func testReplacingTheTextStillForgetsWhatWasMeasured() {
         let textView = GlimmerTextView()
         textView.frame = CGRect(x: 0, y: 0, width: 320, height: 800)
@@ -155,6 +182,10 @@ final class GlimmerAccessibilityTests: XCTestCase {
         view.isAccessibilityElement = true
         XCTAssertTrue(view.isAccessibilityElement)
         XCTAssertEqual(view.accessibilityLabel, "Grouped answer.")
+        view.accessibilityLabel = "The host's own label"
+        XCTAssertEqual(view.accessibilityLabel, "The host's own label", "a host's label wins")
+        view.isAccessibilityElement = false
+        XCTAssertFalse(view.isAccessibilityElement)
         _ = window
     }
 
