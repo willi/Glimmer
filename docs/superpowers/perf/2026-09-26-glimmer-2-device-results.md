@@ -3,6 +3,18 @@
 Measured on "WW 16", an iPhone 16 Pro Max on iOS 27.0 (24A435), in Release. The newest results come first: Plan 6b,
 then Plan 6, then Plan 5.
 
+## Plan 8
+
+Plan 8 gave each code block its own scroll tracking, so a block taller than the screen renders the lines on screen as
+it scrolls. The flick benchmark on WW 16 (iPhone 16 Pro Max, Release, 120 Hz, Sept 27) stays inside Plan 6b's range:
+
+| Run | Frames | Hitches (frame monitor) | Worst interval | Ratio (frame monitor) | XCTHitchMetric |
+|---|---|---|---|---|---|
+| 1 | 2,109 | 5 | 19.2 ms | 2.46 ms/s | 6.86 ms/s |
+| 2 | 2,137 | 6 | 26.0 ms | 3.31 ms/s | 2.60 ms/s |
+
+A first run at 1,066 frames was at 60 Hz (Low Power Mode) and is left out.
+
 ## Plan 6b
 
 Measured on 2026-09-26. Every run is the flick benchmark launched hands-off, alternating builds.
