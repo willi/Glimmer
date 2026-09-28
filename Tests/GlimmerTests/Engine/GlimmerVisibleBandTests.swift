@@ -211,6 +211,18 @@ final class GlimmerVisibleBandTests: XCTestCase {
         _ = window
     }
 
+    /// One display link serves a view's preloads: paused when a preload is done, resumed by the next band move.
+    func testScrollingReusesOnePreloadLink() {
+        let (view, scrollView, window) = scrolled()
+        for step in 1...5 {
+            scrollView.contentOffset.y = CGFloat(step) * 700
+            settle(scrollView)
+        }
+        XCTAssertGreaterThan(view.textView.viewportPasses, 3, "the band moved")
+        XCTAssertEqual(view.textView.preloadLinksCreated, 1)
+        _ = window
+    }
+
     func testAPreloadStepStaysWithinItsBudget() {
         let (view, _, window) = scrolled()
         view.textView.layoutIfNeeded()

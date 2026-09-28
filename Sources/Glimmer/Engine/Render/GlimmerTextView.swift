@@ -423,8 +423,17 @@ final class GlimmerTextView: UITextView {
     private var lastScreenMidY: CGFloat?
 
     /// Starts laying text out ahead in idle frames, if the band's surroundings aren't laid out yet.
+    /// How many preload display links this view has made; tests count it.
+    private(set) var preloadLinksCreated = 0
+
+    /// Resumes the view's one preload link, made on first use and paused whenever a preload is done.
     private func schedulePreload() {
-        guard preloading == nil, window != nil, !rendersScreenOnly, renderedBand != nil else { return }
+        guard window != nil, !rendersScreenOnly, renderedBand != nil else { return }
+        if let preloading {
+            preloading.isPaused = false
+            return
+        }
+        preloadLinksCreated += 1
         let link = CADisplayLink(target: GlimmerWeakTarget(self) { $0.preloadStep() }, selector: #selector(GlimmerWeakTarget.tick(_:)))
         link.add(to: .main, forMode: .common)
         preloading = link
@@ -432,12 +441,13 @@ final class GlimmerTextView: UITextView {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window == nil { stopPreloading() }
+        guard window == nil else { return }
+        preloading?.invalidate()
+        preloading = nil
     }
 
     private func stopPreloading() {
-        preloading?.invalidate()
-        preloading = nil
+        preloading?.isPaused = true
     }
 
     /// Lays out fragments beyond the band for up to `preloadBudget`; stops the display link once the preload range
