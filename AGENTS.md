@@ -1,208 +1,100 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
-- `Sources/Glimmer/`: Main library code.
-  - `Parser/`, `Rendering/`, `Reveal/`, `Views/`, `Utilities/`, `Linter/`, `Export/` modules.
-- `Tests/GlimmerTests/`: XCTest suites (e.g., `GlimmerTests.swift`, `MarkdownParserTests.swift`).
-- `Examples/GlimmerDemo/`: SwiftUI demo app (Xcode project) showcasing features.
-- `Package.swift`: SwiftPM manifest (Swift tools 6.0, iOS 18 target).
+Glimmer is an iOS-only Swift package: a TextKit 2 markdown engine for streaming answers, with a vendored cmark-gfm
+parser. The design spec is `docs/superpowers/specs/2026-09-25-glimmer-2-engine-design.md`. The implementation plans
+and their results are in `docs/superpowers/plans/` and `docs/superpowers/perf/`.
 
-## Build, Test, and Development Commands
-- Xcode (recommended): Open `Package.swift` or `Examples/GlimmerDemo/GlimmerDemo.xcodeproj`, choose an iOS 18+ simulator, then run tests for the `GlimmerTests` target.
-- CLI with Xcode: `xcodebuild -scheme Glimmer -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test`
-  - The package scheme is `Glimmer`. Substitute any installed simulator (`xcrun simctl list devices available`).
-- Run a specific test: `xcodebuild -scheme Glimmer -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test -only-testing:GlimmerTests/MarkdownParserTests`.
-- Build the package (iOS-only): `xcodebuild -scheme Glimmer -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build`.
-- Run demo: `open Examples/GlimmerDemo/GlimmerDemo.xcodeproj` and run the `GlimmerDemo` target on a simulator. New demo `.swift` files must be added to the app target in `project.pbxproj` (explicit source list).
-Note: This package is iOS-only; `swift test` / `swift build` on macOS will fail due to UIKit.
+## Project structure
 
-## Coding Style & Naming Conventions
-- Follow Swift API Design Guidelines.
-- Indentation: 4 spaces; keep lines ~120 chars when practical.
-- Naming: Types `UpperCamelCase`; methods/properties `lowerCamelCase`.
-- Access control: Default to internal, mark public API explicitly.
-- Organization: Use `// MARK:` groups (as in existing files) and keep modules cohesive (`Parser`, `Views`, etc.).
-- Formatting/Linting: No enforced tools in-repo; prefer SwiftFormat/SwiftLint locally before PRs.
+- `Sources/cmark-gfm`, `Sources/cmark-gfm-extensions`: cmark-gfm, vendored unchanged (see `VENDORED.md`).
+- `Sources/Glimmer/Engine/`: the engine.
+  - `GlimmerView.swift`: the public `UIView`. It owns the text view, the reveal, the worker and height reporting.
+  - `GlimmerText.swift`: the SwiftUI wrapper. `GlimmerConfiguration.swift`: everything besides the markdown.
+  - `Parse/`: cmark → an immutable, `Sendable` block tree (`GlimmerBlock`, `GlimmerInline`).
+  - `Stream/`: the streaming document (committed blocks and an open tail), tail healing, the per-view
+    `GlimmerDocumentWorker` actor, and the settled-document cache.
+  - `Compose/`: blocks → one `NSAttributedString`, styled by the theme. It also records the markdown structure that
+    copy reads back.
+  - `Render/`: `GlimmerTextView` (TextKit 2 `UITextView`) and the layout fragments that draw quote bars and
+    inline-code pills.
+  - `Embeds/`: code blocks, tables, images and rules, shown as attachment views.
+  - `Reveal/`: the pacing engine, the phrase chunker, the clock and the Core Animation mask.
+  - `Interact/`: copy serialization (`GlimmerMarkdownSerializer`) and `GlimmerSelection`.
+  - `Extensions/`, `Highlight/`, `Theme/`, `Resources/` (localized strings).
+- `Tests/GlimmerTests/Engine/`: all tests. `EngineTestSupport.swift` has the helpers: `hostInWindow`, `settle`,
+  `ManualRevealClock`, `assertEquivalent`, `threadCPUTime`. `Fixtures/CommonMark` holds the spec examples.
+- `Examples/GlimmerDemo/`: the demo app. `project.yml` is its XcodeGen spec. `App/` holds the app, `UITests/` its UI
+  tests, and `Shared/` code compiled into both.
 
-Additional conventions for this project:
-- Modern SwiftUI (iOS 18+, Swift 6) across all UI components.
-- Prefer SwiftUI-native solutions over UIKit bridging; no external dependencies.
-- Concurrency: use `async`/`await`, apply `@MainActor` to UI mutations, and adopt Swift 6 strict concurrency where applicable.
-- Observation: prefer the `@Observable` macro for view models; use `@State` for view-local state and `@Binding` for two-way data.
-- Apple HIG compliance (typography, colors, spacing, touch targets, accessibility, safe areas, adaptive layouts).
+## Build, test and run
 
-## Testing Guidelines
-- Framework: XCTest.
-- Location: Place tests under `Tests/GlimmerTests/` with filenames ending in `Tests.swift`.
-- Conventions: Test methods start with `test...` (e.g., `test<Feature><Scenario>`) and assert behavior-focused outcomes (e.g., parsed block counts, attributed output non-empty). Group edge cases in dedicated test files.
-- Running: use `xcodebuild -scheme Glimmer ... test` against an iOS simulator (`swift test` does not work on macOS); use `-only-testing:` for focused runs.
+The package is iOS-only; `swift test` on macOS fails. Use a simulator destination with an explicit OS, because a bare
+device name is ambiguous when several runtimes are installed:
 
-## Commit & Pull Request Guidelines
-- Commits: Use clear, present-tense summaries (e.g., "Add streaming parser chunking"). Small, focused commits preferred.
-- Conventional Commits are welcome (e.g., `feat(parser): add lazy windowing`).
-- PRs must: describe changes and rationale, link issues, include tests for new behavior, update docs/examples when relevant, and pass the test suite on an iOS simulator.
-- Screenshots: Include when UI rendering changes (SwiftUI views, demos).
-
-Additional note: Keep the public API surface minimal and well-documented.
-
-## Security & Configuration Tips
-- Platform: iOS 18+ only. Ensure simulator/device targets match.
-- Performance-sensitive code (parsers/renderers): avoid regressions; measure with large inputs where possible.
-
-## Architecture Overview
-- Core flow: Markdown → `Parser` (AST) → `AttributedString` → SwiftUI `Views` or exporters.
-- Public surface: `Glimmer` entry points and `MarkdownView` convenience APIs; keep additions minimal and well-documented.
-
-### SwiftUI Components (Primary Interface)
-- `MarkdownView`: Primary SwiftUI view with tap handlers for links, mentions, issues.
-- `MarkdownTextWithAsyncImages`: SwiftUI view supporting inline async image loading.
-- `StreamingMarkdownView`: SwiftUI view for real-time markdown updates.
-- `GlimmerRevealView`: Animated per-token reveal of streaming markdown (11 `RevealStyle`s, adaptive catch-up, resume via `revealID`); lives in `Sources/Glimmer/Reveal/`.
-- `AttributedTextView`: SwiftUI wrapper for attributed text rendering.
-- `MarkdownText`: Pure SwiftUI text rendering without images.
-
-### Parser Pipeline
-- `MarkdownParser`: Main entry point, generates AST for rendering.
-- `BlockParser`: Handles block-level elements (headings, lists, code blocks, tables).
-- `InlineParser`: Processes inline elements (bold, italic, links, images, emojis).
-- `GFMExtensions`: GitHub-specific features (@mentions, issues, commit SHAs).
-- `StreamingMarkdownParser`: Incremental parsing for real-time updates.
-- `CachedMarkdownParser`: LRU cache with TTL for performance.
-- `ParallelParser`: Multi-threaded parsing for large documents.
-
-### Rendering
-- `MarkdownRenderer`: Converts AST to `AttributedString` for SwiftUI `Text`.
-- `CustomRenderer`: Protocol for alternative formats (HTML/PlainText).
-
-### Streaming Reveal (`Sources/Glimmer/Reveal/`)
-- Buffer → `RevealSession` for append-only reuse → parse/flatten changed tail with canonical parser fallback → `RevealDriver` (clock-paced) → `GlimmerRevealView`.
-- The reveal view is also the settled view (no engine swap); inline styling reuses `MarkdownRenderer.renderInlines` via `beginSession`.
-- `RevealSession` commits complete markdown through conservative blank-line boundaries and reparses only the current tail; replacements and unsafe edits rebuild through the canonical parser path.
-- Pure pacing/trail math in `RevealPacing.swift` is unit-tested without a clock; driver tests inject a fake `sleep`.
-
-### Configuration
-- `MarkdownConfiguration`: Configuration type with builder-style API.
-- Presets: `.default`, `.github`, `.minimal`, `.performance`.
-- GitHub-specific extensions (mentions, issue/PR/repo refs, commit SHAs, emoji shortcodes, bare-URL autolinks) are disabled by default; opt in via `.github` or `enableGitHubFeatures()`. Tests/demos exercising GFM must pass an opted-in configuration.
-
-### Key Design Patterns
-- AST-based parsing: parse once, render multiple formats.
-- Protocol-driven rendering via `MarkdownRendererProtocol`.
-- Lazy evaluation for large documents via windowing.
-- Parallel processing for documents above ~10KB.
-- Smart caching: size-limited LRU cache with TTL and memory pressure handling.
-
-## Performance Considerations
-- Parser and renderer performance are critical; avoid regressions.
-- Benchmark with large documents (100KB+) and measure memory.
-- Minimize `AttributedString` regeneration and leverage SwiftUI view diffing.
-- Use Instruments (SwiftUI template) to profile hot paths.
-- Consider fragment pools and caching for memory efficiency.
-- Benchmark harness: `ProfilingBenchmarkTests/testPhaseTimings` (per-phase timings on a complex corpus); `testProfilingLoop` with `GLIMMER_PROFILING=1` for Instruments attach. Benchmark in Release (`-configuration Release ENABLE_TESTABILITY=YES`).
-- `maxRenderCacheEntries` (default 4096) must exceed the re-rendered document's block count or the LRU thrashes to 0% hits.
-- Incremental reveal correctness is covered by `RevealSessionTests`, including full profiling corpus and growing GitHub-enabled corpus prefix comparisons against canonical full parse/flatten output.
-- Display profiling uses `MarkdownDisplayProfilingTests/testMarkdownDisplayScrollLoop` with `TEST_RUNNER_GLIMMER_DISPLAY_PROFILING=1` under Instruments or `xcrun xctrace`.
-
-## Common Development Tasks
-
-### Adding SwiftUI Interactivity
-1. Add tap handler to `MarkdownView` (e.g., `onCommitTap`).
-2. Update `AttributedTextView` for gesture recognition.
-3. Ensure UI updates occur on `@MainActor`.
-4. Test with SwiftUI previews.
-
-### Adding a New Inline Element
-1. Define a token type in `MarkdownParserTypes.swift`.
-2. Add parsing logic to `InlineParser.swift`.
-3. Update `MarkdownRenderer.swift` to generate `AttributedString`.
-4. Add SwiftUI rendering in `MarkdownView` if interactive.
-5. Add tests to `Tests/GlimmerTests/`.
-
-### Adding a New Block Element
-1. Define the block type in `MarkdownParserTypes.swift`.
-2. Add detection in `BlockParser.swift`.
-3. Create SwiftUI view component in `MarkdownView.swift`.
-4. Handle `AttributedString` generation in `MarkdownRenderer.swift`.
-5. Test with SwiftUI previews and edge cases.
-
-### Extending GitHub Features
-1. Add pattern matching in `GFMExtensions.swift`.
-2. Update `MarkdownView` for tap callbacks.
-3. Use `async`/`await` for network features if needed.
-4. Consider caching implications.
-
-### SwiftUI Performance Optimization
-1. Use `@State` for local state; `@Observable` for shared models.
-2. Leverage SwiftUI's automatic view diffing.
-3. Profile with Instruments.
-4. Minimize `AttributedString` regeneration.
-5. Use `AsyncStream` for streaming updates (prefer over Combine).
-6. Test with performance benchmarks where applicable.
-
-## Modern SwiftUI & Swift 6 Best Practices
-
-### State Management
-- Use `@State` for view-local state.
-- Use the `@Observable` macro for view models (replaces `ObservableObject`).
-- Use `@Binding` for two-way data flow.
-- Prefer `@Observable` over `@StateObject`/`@ObservedObject`.
-- Use `@Environment` for dependency injection.
-
-### Concurrency
-- Apply `@MainActor` to all UI-related code.
-- Prefer `async`/`await`; adopt strict concurrency checking.
-- Use `AsyncStream` for reactive streams (not Combine).
-- Use SwiftUI's `.task` modifier for async operations.
-- Implement `Sendable` for concurrently used types as needed.
-
-### SwiftUI Patterns
-- Prefer SwiftUI-native components over UIKit bridging.
-- Use view modifiers for reusable styling.
-- Leverage `ViewBuilder` for composable views.
-- Use `@Environment(.dismiss)` for navigation.
-- Prefer declarative navigation APIs (iOS 16+).
-
-### Apple Human Interface Guidelines (HIG)
-- Typography: Use Dynamic Type; prefer SF fonts.
-- Colors: Respect system colors and dark mode.
-- Spacing: Use standard iOS spacing (8pt grid).
-- Touch targets: Minimum 44x44pt for tappable elements.
-- Accessibility: Support VoiceOver, Dynamic Type, Reduce Motion.
-- Platform conventions: Follow iOS navigation patterns and gestures.
-- Semantic colors: Use `.primary`, `.secondary`, `.accentColor`.
-- Safe areas: Respect safe area insets.
-- Adaptive layouts: Support all device sizes and orientations.
-
-### Example: HIG-Compliant Modern View
-```swift
-@Observable
-final class MarkdownViewModel {
-    var markdown = ""
-    var isLoading = false
-
-    func loadContent() async {
-        isLoading = true
-        // Async work here
-        isLoading = false
-    }
-}
-
-struct ContentView: View {
-    @State private var viewModel = MarkdownViewModel()
-    @Environment(\.colorScheme) var colorScheme
-    @Environment(\.dynamicTypeSize) var dynamicTypeSize
-
-    var body: some View {
-        MarkdownView(markdown: viewModel.markdown)
-            .safeAreaInset(edge: .bottom) {
-                // Respect safe areas
-            }
-            .navigationBarTitleDisplayMode(.large)
-            .task {
-                await viewModel.loadContent()
-            }
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("Markdown content")
-    }
-}
+```bash
+DEST='platform=iOS Simulator,name=iPhone 17 Pro Max,OS=27.0'
+xcodebuild -scheme Glimmer -destination "$DEST" test
+xcodebuild -scheme Glimmer -destination "$DEST" test -only-testing:GlimmerTests/GlimmerComposerTests
 ```
+
+- xcodebuild sometimes hangs after printing results. Once the log shows `Test Suite 'Selected tests' passed` (or
+  `failed`), kill it.
+- The performance gates have Debug and Release budgets. For Release, run:
+  `xcodebuild -scheme Glimmer -destination "$DEST" -configuration Release test ENABLE_TESTABILITY=YES -only-testing:GlimmerTests/GlimmerStreamingPerformanceTests`.
+  They retry once, but heavy load from other processes can still fail them. Rerun when the machine is quieter before
+  believing a regression.
+- Demo:
+
+  ```bash
+  cd Examples/GlimmerDemo && xcodegen generate
+  open GlimmerDemo.xcodeproj
+  ```
+
+  After adding, moving or deleting a demo file, run `xcodegen generate` and commit the regenerated project. Launch
+  arguments: `--engine-gallery`, `--gallery-dark`, `--gallery-large-text`, `--streaming-lab`, `--benchmark`.
+- Demo UI tests: `xcodebuild -project Examples/GlimmerDemo/GlimmerDemo.xcodeproj -scheme GlimmerDemo -destination 'id=<simulator>' test`.
+- Device harness, in Release on a connected iPhone that is unlocked:
+  - `-scheme GlimmerDevicePerf` runs the package's performance tests, hosted by the demo app. A package test bundle
+    can't run on a device by itself.
+  - `-scheme GlimmerDemo -only-testing:GlimmerDemoUITests/BenchmarkHitchUITests` runs the benchmark under
+    `XCTHitchMetric`.
+  - Pass `-configuration Release -allowProvisioningUpdates`.
+
+## Engine rules
+
+- **TextKit 2 only.** Never read `layoutManager` on a text view; it silently switches the view to TextKit 1.
+- **The text container is unbounded.** `GlimmerTextView` keeps scrolling enabled but never scrolls (the pan never
+  begins, and the offset stays at zero). A finite container height makes late-text lookups linear, and TextKit lays
+  out nothing beyond it.
+- **Only a band renders.** On iOS 27, `viewportBounds(for:)` limits rendering to the text near the screen. Nothing
+  outside that band has a layout or an attachment view, so measure with `laidOutHeight(from:)` and
+  `frameForTextAttachment`, not views.
+- **Edits are small.** Updates are `GlimmerDocumentEdit`s applied in one editing transaction, trimmed to the
+  paragraphs that changed. Never set the whole text during streaming.
+- **Main-thread work is measured, not guessed.** With the worker, Core Animation lays out and draws while a test
+  awaits. Timers around the test's own calls under-measure, so measure main-thread CPU with `threadCPUTime()`.
+- **Accessibility needs the live runtime.** A unit test can't see what VoiceOver sees, because UIKit's accessibility
+  runtime isn't active in the test host. Check it with an XCUITest query (see `LaunchUITests`).
+
+## Coding style
+
+- Swift 6 language mode, strict concurrency. Four-space indentation. Types `UpperCamelCase`, members
+  `lowerCamelCase`.
+- No force unwraps or force casts in library code.
+- One type per file where practical, named after the type.
+- Keep the public API small and documented: every public declaration has a doc comment.
+- Comments say why, not what.
+
+## Testing
+
+- XCTest, with tests in `Tests/GlimmerTests/Engine/<Area>Tests.swift`.
+- Write the failing test first and watch it fail.
+- Copy changes round-trip: markdown → compose → serialize → compose must give an equivalent text
+  (`assertEquivalent`).
+- Reading `UIPasteboard.general` in the test runner fails. Use a named pasteboard.
+
+## Commits
+
+- Present-tense summaries ("Engine: stream table rows without rebuilding the table"), with a body that says why.
+- Small, focused commits, each leaving the package building and its tests green.
+- Include screenshots in PRs when rendering changes.

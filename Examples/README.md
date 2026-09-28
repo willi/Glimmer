@@ -1,235 +1,78 @@
-# Glimmer Examples
+# Glimmer demo
 
-This directory contains example projects demonstrating how to use Glimmer.
-
-## GlimmerDemo
-
-A comprehensive SwiftUI app showcasing Glimmer's markdown parsing and rendering capabilities.
-
-### Demo Structure
-
-The demo app is organized into three main categories:
-
-#### Core Demos
-- **Basic Features**: Comprehensive demonstration of markdown basics, interactive elements, and syntax highlighting
-- **Advanced Features**: Configuration builder, streaming, performance testing, and export capabilities
-- **Markdown Linter**: Real-time markdown validation and best practices checking
-
-#### Advanced Demos
-- **GitHub Flavored Markdown**: Complete GFM specification with all GitHub-specific features across 10 categories
-- **Edge Cases**: Comprehensive test suite for challenging markdown scenarios and parser edge cases
-- **Inline Images**: Async loading of inline images with loading/error states and SF Symbol indicators
-- **Tappable Images**: Custom image tap handling and interactive image URLs
-- **GitHub Emojis**: Custom GitHub emojis (octocat, atom, etc.) rendered as properly-sized inline images
-- **Live Preview (Demo)**: Diff-based markdown updates with editor/preview split view
-
-#### Performance Demos
-- **Parallel Parsing**: Multi-threaded parsing with performance metrics and comparisons
-- **Performance Benchmarks**: Compare Sequential, Parallel, and Streaming with configurable runs
-
-#### Quick Examples
-- **README Example**: Shows a typical README with all common markdown elements
-- **GitHub Features**: Demonstrates GitHub-specific markdown extensions
-
-## How to Run the Examples
-
-### Option 1: Open in Xcode (Recommended)
-
-1. **Open the project**:
-   ```bash
-   cd Examples
-   open GlimmerDemo.xcodeproj
-   ```
-
-2. **Select a target**: Choose iPhone or iPad
-3. **Run**: Press ⌘R or click the Run button
-
-### Option 2: Create a New App
-
-1. **Create a new SwiftUI project** in Xcode
-2. **Add Glimmer as a package dependency**:
-   - File → Add Package Dependencies
-   - Add local path to the Glimmer root directory
-3. **Import and use**:
-   ```swift
-   import SwiftUI
-   import Glimmer
-   
-   @main
-   struct MyApp: App {
-       var body: some Scene {
-           WindowGroup {
-               ContentView() // From GlimmerDemo
-           }
-       }
-   }
-   ```
-
-### Option 3: Command Line (xcodebuild)
+`GlimmerDemo` shows the Glimmer 2.0 engine, and every example screen of Glimmer 1.x rebuilt on 2.0. Open it with:
 
 ```bash
-# From repo root, list schemes
-xcodebuild -list -project Examples/GlimmerDemo.xcodeproj
-
-# Build the demo app for iOS Simulator
-xcodebuild -project Examples/GlimmerDemo.xcodeproj -scheme GlimmerDemo -destination 'generic/platform=iOS Simulator' build
+open Examples/GlimmerDemo/GlimmerDemo.xcodeproj
 ```
 
-## Features Demonstrated
+## Screens
 
-### Basic Markdown
-- Headers (H1-H6)
-- Bold, italic, strikethrough text
-- Ordered and unordered lists
-- Blockquotes (including nested)
-- Horizontal rules
-- Tables with alignment
-- Task lists
+| Screen | What it shows | Launch arguments |
+|---|---|---|
+| Gallery | Every element, in light and dark, at the default and an accessibility text size. Select text and choose **Show Markdown** to see what copy writes. | `--engine-gallery`, plus `--gallery-dark`, `--gallery-large-text` or `--engine-gallery-bottom` |
+| Streaming Lab | A canned answer streamed at Gemini-like, bursty or slow cadences, with pause and resume, and light and dark. | `--streaming-lab` (starts streaming at once) |
+| Long Answer | About 5,000 words in one view, for scrolling by eye. | — |
+| Benchmark | About 1,000 words streamed at a seeded Gemini cadence below a settled 5,000-word answer, while the screen flicks back, returns, and scrolls through the earlier answer and back. A 120 Hz display link counts late frames; the summary also shows how many viewport passes Glimmer ran. Tap **Start**. | `--benchmark`, plus `--benchmark-autostart` and `--benchmark-exit` |
 
-### Code & Syntax
-- Inline code
-- Code blocks with syntax highlighting
-- Support for 18+ languages
-- Theme customization (light/dark)
+### Glimmer 1.x's examples, on 2.0
 
-### Interactive Elements
-- Clickable links with custom handlers
-- GitHub @mentions
-- Issue/PR references (#123)
-- Auto-linking URLs and emails
-- Footnotes with popover support
-- Inline images with async loading
-- GitHub custom emojis as images
+Open one directly with `--example=<id>`. Screens with tabs or sections open on one with `--section=<n>`, counting from 0. `--dark` and `--large-text` apply to every screen. `--large-text` sets SwiftUI's Dynamic Type size, which reaches
+Glimmer's views through their trait collection, so the rendered markdown scales as well as the screen around it.
 
-### Advanced Features
-- **Streaming**: Real-time progressive rendering
-- **Parallel Parsing**: Multi-threaded for large documents
-- **Custom Renderers**: Export to HTML, plain text, or markdown
-- **Configuration Builder**: Fluent API for customization
-- **Markdown Linting**: Validate and improve markdown quality
+| Screen | id | What it shows |
+|---|---|---|
+| Basic Features | `basic-features` | Three tabs: the basics, links with `@mentions` and `#123` references (a tap shows what was tapped), and highlighted code. |
+| Advanced Features | `advanced` | Three tabs. **Config** changes the configuration live: extensions, underlined links, the code block header, image loading, a larger theme and the image height. **Streaming** streams a long document. **Export** shows what copy writes, as plain text or markdown, for the whole answer or a selection in the preview. |
+| GitHub Flavored Markdown | `gfm` | 1.x's GFM tour in ten sections. |
+| Edge Cases | `edge-cases` | 1.x's stress corpus in ten sections. |
+| Inline Images | `inline-images` | Images inside a paragraph. A bare name such as `dog` comes from the demo's image loader. |
+| Tappable Images | `tappable-images` | `onImageTap`: tap any image to see its URL. |
+| GitHub Emojis | `github-emojis` | `GlimmerEmojiShortcodes`, on and off. |
+| Live Preview | `live-preview` | Type markdown and see it render. |
+| Streaming Reveal | `streaming-reveal` | The reveal in a SwiftUI or a UIKit host, smooth or off, with three fade durations. `--reveal-autoplay` starts streaming; `--reveal-host=uikit` picks the UIKit host. |
+| Performance | `performance` | Parse, settled render and streamed render times for a document of the chosen size. |
+| README Example, GitHub Features | `readme`, `github-features` | 1.x's two quick examples. |
 
-## Example Usage
+1.x's Markdown Linter screen is gone, with the linter. HTML export, parallel parsing and the twelve reveal styles are gone too; their screens show 2.0's equivalents.
 
-### Basic Integration
+## The project
 
-```swift
-import Glimmer
+The project is generated by [XcodeGen](https://github.com/yonaskolb/XcodeGen) from `GlimmerDemo/project.yml`:
 
-struct ContentView: View {
-    let markdown = """
-    # Welcome to Glimmer!
-    
-    This is **bold** and this is *italic*.
-    
-    - List item 1
-    - List item 2
-    
-    [Visit GitHub](https://github.com)
-    """
-    
-    var body: some View {
-        MarkdownView(markdown: markdown)
-    }
-}
+- `App/` holds the app.
+- `UITests/` holds its UI tests.
+- `Shared/` holds code compiled into both.
+
+After adding, moving or deleting a file:
+
+```bash
+cd Examples/GlimmerDemo && xcodegen generate
 ```
 
-### Interactive Features
+Then commit the regenerated `GlimmerDemo.xcodeproj`.
 
-```swift
-MarkdownView(
-    markdown: content,
-    configuration: .default,
-    onLinkTap: { url in
-        print("Link tapped: \(url)")
-    },
-    onMentionTap: { username in
-        print("Mention: @\(username)")
-    },
-    onIssueTap: { issue in
-        print("Issue: #\(issue)")
-    }
-)
+## Tests
+
+UI tests on a simulator:
+
+```bash
+xcodebuild -project Examples/GlimmerDemo/GlimmerDemo.xcodeproj -scheme GlimmerDemo \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max,OS=27.0' test
 ```
 
-### Streaming Content
+On a connected, unlocked iPhone, in Release:
 
-```swift
-StreamingMarkdownView(markdown: streamingContent)
+```bash
+# The package's performance tests, hosted by the demo app.
+xcodebuild test -project Examples/GlimmerDemo/GlimmerDemo.xcodeproj -scheme GlimmerDevicePerf \
+  -configuration Release -destination 'id=<device UDID>' -allowProvisioningUpdates ENABLE_TESTABILITY=YES
+
+# The benchmark under XCTHitchMetric. On a device it fails at a hitch-time ratio of 4.5 ms/s or more.
+xcodebuild test -project Examples/GlimmerDemo/GlimmerDemo.xcodeproj -scheme GlimmerDemo \
+  -configuration Release -destination 'id=<device UDID>' -allowProvisioningUpdates \
+  -only-testing:GlimmerDemoUITests/BenchmarkHitchUITests
 ```
 
-### Custom Configuration
-
-```swift
-let config = MarkdownConfiguration.builder()
-    .enableGitHubFeatures()
-    .setTheme(.dark)
-    .setImageSize(maxWidth: 300)
-    .setCacheSettings(maxSizeMB: 50, timeToLiveSeconds: 300)
-    .build()
-
-MarkdownView(markdown: content, configuration: config)
-```
-
-### Inline Images
-
-```swift
-// Markdown with inline images and custom emojis
-let markdown = """
-Here's an inline image: ![Logo](https://example.com/logo.png)
-GitHub emojis: :rocket: :octocat: :atom: :basecamp:
-"""
-
-// Use MarkdownTextWithAsyncImages for inline image support
-MarkdownTextWithAsyncImages(markdown)
-```
-
-## Project Structure
-
-```
-Examples/
-├── README.md                     # This file
-├── Package.swift                 # SPM configuration
-├── GlimmerDemo.xcodeproj/       # Xcode project
-└── GlimmerDemo/
-    ├── ContentView.swift         # Main navigation
-    ├── EdgeCasesDemo.swift       # Edge cases and parser stress demos
-    ├── EditorTextView.swift      # UITextView wrapper for live preview editor
-    ├── GFMDemo.swift             # GitHub Flavored Markdown demo
-    ├── GitHubEmojiDemo.swift     # GitHub custom emoji demo
-    ├── GlimmerDemo.swift         # Shared demo content
-    ├── GlimmerDemoApp.swift      # App entry point
-    ├── InlineImageDemo.swift     # Inline image loading demo
-    ├── LinterDemoView.swift      # Linter demo
-    ├── LivePreviewDemo.swift     # Diff-based live preview demo
-    ├── MainDemos.swift           # Basic/advanced demo tabs
-    ├── ParallelParsingDemo.swift # Parallel parsing demo
-    ├── QuickExampleView.swift    # Simple example viewer
-    └── TappableImageExample.swift # Image tap callbacks demo
-```
-
-## Requirements
-
-- iOS 18.0+
-- Xcode 16.0+
-- Swift 6.0+
-
-## Troubleshooting
-
-### Build Errors
-
-If you encounter build errors:
-1. Clean build folder: Product → Clean Build Folder (⌘⇧K)
-2. Reset package caches: File → Packages → Reset Package Caches
-3. Delete derived data and restart Xcode
-4. Use `xcodebuild` (not `swift build`/`swift test`) for this iOS-only package
-
-### Import Errors
-
-If "No such module 'Glimmer'" appears:
-1. Ensure Glimmer is properly added as a dependency
-2. Check that minimum deployment targets match
-3. Verify the package path is correct
-
-## License
-
-See the main project LICENSE file for details.
+Signing uses automatic provisioning with the team in `project.yml`. Change `DEVELOPMENT_TEAM` there for your own
+account.
