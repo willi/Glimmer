@@ -204,6 +204,15 @@ struct ShownText {
     let text: NSString
     let stableLength: Int
     let rects: [CGRect]
+    /// The stable text's styles: colour, font and attachment kind per run.
+    let styles: [Style]
+
+    struct Style: Equatable {
+        let range: NSRange
+        let color: UIColor?
+        let font: UIFont?
+        let attachment: String?
+    }
 
     init(_ textView: GlimmerTextView) {
         // A copy: the text storage's string is mutable and changes with the next update.
@@ -211,6 +220,18 @@ struct ShownText {
         let newline = text.range(of: "\n", options: .backwards)
         stableLength = newline.location == NSNotFound ? 0 : NSMaxRange(newline)
         rects = Self.glyphRects(in: textView, length: stableLength)
+        styles = Self.styles(of: textView.textStorage, length: stableLength)
+    }
+
+    static func styles(of text: NSAttributedString, length: Int) -> [Style] {
+        var styles: [Style] = []
+        text.enumerateAttributes(in: NSRange(location: 0, length: min(length, text.length))) { attributes, range, _ in
+            styles.append(Style(
+                range: range, color: attributes[.foregroundColor] as? UIColor, font: attributes[.font] as? UIFont,
+                attachment: attributes[.attachment].map { String(describing: type(of: $0)) }
+            ))
+        }
+        return styles
     }
 
     static func glyphRects(in textView: GlimmerTextView, length: Int) -> [CGRect] {
@@ -223,6 +244,12 @@ struct ShownText {
         guard text.length >= stable, text.substring(to: stable) == previous.text.substring(to: stable) else {
             return "text before offset \(stable) changed: \(previous.text.substring(to: stable).debugDescription) became " +
                 "\(text.substring(to: min(stable, text.length)).debugDescription)"
+        }
+        for before in previous.styles where before.range.location < stable {
+            guard let after = styles.first(where: { NSLocationInRange(before.range.location, $0.range) }) else { continue }
+            if before.color != after.color || before.font != after.font || before.attachment != after.attachment {
+                return "text at \(before.range.location) was restyled: \(before) → \(after)"
+            }
         }
         let now = Array(rects.prefix(previous.rects.count))
         guard now.count == previous.rects.count else { return "\(previous.rects.count) glyph rects became \(now.count)" }
