@@ -78,6 +78,12 @@ final class ExamplesUITests: XCTestCase {
         XCTAssertTrue(alert.waitForExistence(timeout: 5))
         XCTAssertTrue(alert.staticTexts["URL: https://developer.apple.com/assets/elements/icons/swiftui/swiftui-96x96_2x.png"].exists)
         alert.buttons["OK"].tap()
+        // VoiceOver reaches an inline image once, through its alt text as a link, and activating it taps the image.
+        let inline = app.links["icon"]
+        XCTAssertTrue(inline.waitForExistence(timeout: 5), "the inline image's alt text is a link")
+        let announced = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'icon' AND elementType != %d",
+                                                                                 XCUIElement.ElementType.textView.rawValue))
+        XCTAssertEqual(announced.count, 1, "announced once, not also as a separate image")
     }
 
     /// Streaming Reveal: a simulated stream and a one-shot play reach the end of the sample, in both hosts.

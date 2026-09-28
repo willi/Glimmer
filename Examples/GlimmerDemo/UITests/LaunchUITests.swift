@@ -36,4 +36,20 @@ final class LaunchUITests: XCTestCase {
         XCTAssertLessThan(answer.frame.height, 20_000, "\(answer.frame)")
         XCTAssertGreaterThan(answer.frame.height, 500)
     }
+
+    /// The gallery's own Dark toggle darkens the screen (an app-wide appearance must not override it).
+    @MainActor
+    func testTheGallerysDarkToggleDarkensTheScreen() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--engine-gallery", "--gallery-dark"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Engine Gallery"].waitForExistence(timeout: 15))
+        let image = try XCTUnwrap(app.screenshot().image.cgImage)
+        let data = try XCTUnwrap(image.dataProvider?.data)
+        let bytes = try XCTUnwrap(CFDataGetBytePtr(data))
+        // A pixel of background at the left edge, below the navigation bar.
+        let x = 4 * Int(image.width) / 390, y = Int(image.height) * 7 / 10
+        let pixel = bytes + y * image.bytesPerRow + x * image.bitsPerPixel / 8
+        XCTAssertLessThan(Int(pixel[0]) + Int(pixel[1]) + Int(pixel[2]), 150, "a dark background")
+    }
 }
