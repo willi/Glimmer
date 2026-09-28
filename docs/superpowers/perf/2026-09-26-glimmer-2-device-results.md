@@ -12,8 +12,12 @@ it scrolls. The flick benchmark on WW 16 (iPhone 16 Pro Max, Release, 120 Hz, Se
 |---|---|---|---|---|---|
 | 1 | 2,109 | 5 | 19.2 ms | 2.46 ms/s | 6.86 ms/s |
 | 2 | 2,137 | 6 | 26.0 ms | 3.31 ms/s | 2.60 ms/s |
+| 3, after the accessibility and review fixes | 2,123 | 7 | 18.7 ms | 3.35 ms/s | — |
+| 4, same | 2,140 | 4 | 25.5 ms | 2.34 ms/s | — |
 
-A first run at 1,066 frames was at 60 Hz (Low Power Mode) and is left out.
+A first run at 1,066 frames was at 60 Hz (Low Power Mode) and is left out. Runs 3 and 4 ran about 510 viewport passes each
+(the benchmark summary now shows them). The package's performance tests (`GlimmerDevicePerf`) pass on the device in
+Release, 10 of 10.
 
 ## Plan 6b
 
