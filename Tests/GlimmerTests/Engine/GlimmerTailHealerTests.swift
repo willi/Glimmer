@@ -14,6 +14,7 @@ final class GlimmerTailHealerTests: XCTestCase {
         ("see [^1]", "see [^1]"),
         ("text\n\n[^1]", "text\n\n"),
         ("text\n\n[^1]:", "text\n\n"),
+        ("text\n\n[^1]\n[^2]", "text\n\n[^1]\n"),
         // A body row that is only its opening pipe would parse as a paragraph "|" below the table.
         ("| A |\n|---|\n| ", "| A |\n|---|\n"),
         ("| A |\n|---|\n| x |\n|", "| A |\n|---|\n| x |\n"),

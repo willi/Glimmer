@@ -192,7 +192,8 @@ enum GlimmerTailHealer {
     /// A footnote marker still being typed (`[^`, `[^lab`) waits until it closes, and so does a last line that is only a
     /// marker (`[^1]`, `[^1]:`): it may be a definition starting, which would take the line away again.
     private static func holdBackFootnoteStarts(_ tail: String) -> String {
-        if let match = tail.firstMatch(of: #/(?m)^[ ]{0,3}\[\^[^\]\s]+\]:?[ \t]*$/#), match.range.upperBound == tail.endIndex {
+        // The last such line: an earlier complete marker line (`[^1]` then `[^2]`) doesn't hide the one being typed.
+        if let match = tail.matches(of: #/(?m)^[ ]{0,3}\[\^[^\]\s]+\]:?[ \t]*$/#).last, match.range.upperBound == tail.endIndex {
             return String(tail[..<match.range.lowerBound])
         }
         if let match = tail.firstMatch(of: #/\[\^[^\]\s]*$/#) {
