@@ -429,7 +429,7 @@ final class GlimmerTextView: UITextView {
 
     /// What TextKit has laid out around the band, in this view's coordinates, or nil before any preload.
     private(set) var preloadedRange: ClosedRange<CGFloat>?
-    private var preloading: CADisplayLink?
+    private(set) var preloading: CADisplayLink?
     /// +1 while the text moves up the screen (reading down), -1 the other way.
     private var scrollDirection: CGFloat = 1
     private var lastScreenMidY: CGFloat?

@@ -240,6 +240,19 @@ final class GlimmerVisibleBandTests: XCTestCase {
         _ = (window, stale)
     }
 
+    /// A view dropped with its window, without leaving it first, takes its paused preload link with it.
+    func testADroppedViewInvalidatesItsPreloadLink() {
+        weak var link: CADisplayLink?
+        autoreleasepool {
+            let (view, _, window) = scrolled()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+            link = view.textView.preloading
+            XCTAssertNotNil(link, "a preload ran")
+            _ = window
+        }
+        XCTAssertNil(link, "invalidated, so the run loop let it go")
+    }
+
     /// One display link serves a view's preloads: paused when a preload is done, resumed by the next band move.
     func testScrollingReusesOnePreloadLink() {
         let (view, scrollView, window) = scrolled()
