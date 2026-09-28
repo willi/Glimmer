@@ -1,6 +1,6 @@
 # Glimmer 2.0 — device performance results
 
-Measured on "WW 16", an iPhone 16 Pro Max on iOS 27.0 (24A435), in Release. The newest results come first: Plan 6b,
+Measured on "WW 16", an iPhone 16 Pro Max on iOS 27.0 (24A435), in Release. The newest results come first: Plan 8, Plan 6b,
 then Plan 6, then Plan 5.
 
 ## Plan 8
