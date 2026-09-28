@@ -1,3 +1,4 @@
+import Synchronization
 import UIKit
 import UniformTypeIdentifiers
 
@@ -13,8 +14,24 @@ final class GlimmerTextView: UITextView {
     /// Strongly held: the text layout manager's delegate is weak.
     private let fragmentProvider = GlimmerLayoutFragmentProvider(theme: .default)
     /// The laid-out text's height, set by `GlimmerView`; the frame is much taller (see `GlimmerView.textViewHeight`).
-    /// Read by the accessibility frame, which UIKit may ask for off the main thread; written only on it.
-    nonisolated(unsafe) var contentHeight: CGFloat = 0
+    var contentHeight: CGFloat = 0
+
+    /// VoiceOver frames the text, not the tall frame it is laid out in. Nonisolated, because UIKit's accessibility may
+    /// read it off the main thread, where a main-actor member traps; there it is the frame the main thread last read.
+    nonisolated override var accessibilityFrame: CGRect {
+        get {
+            guard Thread.isMainThread else { return lastAccessibilityFrame.withLock { $0 } }
+            let frame = MainActor.assumeIsolated {
+                let height = contentHeight > 0 ? min(contentHeight, bounds.height) : bounds.height
+                return UIAccessibility.convertToScreenCoordinates(CGRect(x: 0, y: 0, width: bounds.width, height: height), in: self)
+            }
+            lastAccessibilityFrame.withLock { $0 = frame }
+            return frame
+        }
+        set {}
+    }
+
+    nonisolated private let lastAccessibilityFrame = Mutex(CGRect.zero)
 
     /// Where Copy writes. The general pasteboard unless a host (or a test) redirects it.
     var pasteboard: UIPasteboard = .general
@@ -61,22 +78,18 @@ final class GlimmerTextView: UITextView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// UIKit's accessibility reads some of a text view's properties on a background queue, where a Swift override traps:
-    /// its Objective-C entry point checks that it runs on the main actor. So these overrides are Objective-C methods,
-    /// installed once, with no such check:
-    /// - `contentOffset` is always zero: the text view never scrolls itself (selection autoscroll,
-    ///   `scrollRangeToVisible`); the host does.
-    /// - `accessibilityFrame` ends at the laid-out text, not the tall frame it is laid out in, so VoiceOver frames the text.
+    /// `contentOffset` is always zero: the text view never scrolls itself (selection autoscroll, `scrollRangeToVisible`);
+    /// the host does. UIKit's accessibility reads some of a text view's properties on a background queue, where a
+    /// main-actor override traps, and this one must call `super` to set the offset, which a nonisolated override can't.
+    /// So its setters are Objective-C methods, installed once, with no main-actor check.
     private static let overridesInstalled: Void = installOverrides()
 
     nonisolated private static func installOverrides() {
         let base: AnyClass = UITextView.self
         let setOffset = #selector(setter: UIScrollView.contentOffset)
         let setOffsetAnimated = #selector(UIScrollView.setContentOffset(_:animated:))
-        let frame = NSSelectorFromString("accessibilityFrame")
         typealias SetOffset = @convention(c) (AnyObject, Selector, CGPoint) -> Void
         typealias SetOffsetAnimated = @convention(c) (AnyObject, Selector, CGPoint, Bool) -> Void
-        typealias Frame = @convention(c) (AnyObject, Selector) -> CGRect
         // The superclass's implementation is looked up per call: UIKit's accessibility may replace it once it loads.
         let setOffsetBlock: @convention(block) (AnyObject, CGPoint) -> Void = { object, _ in
             unsafeBitCast(class_getMethodImplementation(base, setOffset), to: SetOffset.self)(object, setOffset, .zero)
@@ -86,14 +99,7 @@ final class GlimmerTextView: UITextView {
                 object, setOffsetAnimated, .zero, false
             )
         }
-        let frameBlock: @convention(block) (AnyObject) -> CGRect = { object in
-            var rect = unsafeBitCast(class_getMethodImplementation(base, frame), to: Frame.self)(object, frame)
-            if let textView = object as? GlimmerTextView, textView.contentHeight > 0 {
-                rect.size.height = min(rect.height, textView.contentHeight)
-            }
-            return rect
-        }
-        for (selector, block) in [(setOffset, setOffsetBlock as Any), (setOffsetAnimated, setOffsetAnimatedBlock), (frame, frameBlock)] {
+        for (selector, block) in [(setOffset, setOffsetBlock as Any), (setOffsetAnimated, setOffsetAnimatedBlock)] {
             guard let method = class_getInstanceMethod(base, selector) else { continue }
             class_replaceMethod(GlimmerTextView.self, selector, imp_implementationWithBlock(block), method_getTypeEncoding(method))
         }
