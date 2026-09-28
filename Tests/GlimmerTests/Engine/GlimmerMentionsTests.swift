@@ -141,6 +141,13 @@ final class GlimmerMentionsTests: XCTestCase {
         XCTAssertEqual(mentions.streamingHoldBack(in: "ada@exa"), 0, "part of an email")
     }
 
+    /// The longest name GitHub allows, then a period that may start a domain: the whole of it waits, not all but its `@`.
+    func testTheLongestMentionIsHeldBackWhole() {
+        let name = String(repeating: "a", count: 39)
+        let markdown = "Thanks @\(name)."
+        XCTAssertEqual([GlimmerMentions() as any GlimmerExtension].prepared(markdown, isStreaming: true), "Thanks ")
+    }
+
     func testMentionsStreamWithoutMovingShownText() {
         assertStreamingKeepsShownTextInPlace(
             "Thanks @ada and @grace-hopper for this. Reach ada@example.com or @example.com.",

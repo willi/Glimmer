@@ -68,7 +68,8 @@ extension Sequence where Element == any GlimmerExtension {
         var visible = markdown
         if isStreaming {
             let held = map { $0.streamingHoldBack(in: markdown) }.max() ?? 0
-            if held > 0 { visible = String(markdown.dropLast(Swift.min(held, 40))) }
+            // Capped so a misbehaving extension can't stall the reveal; 64 covers GitHub's longest mention and a period.
+            if held > 0 { visible = String(markdown.dropLast(Swift.min(held, 64))) }
         }
         return reduce(visible) { $1.preprocess($0) }
     }
