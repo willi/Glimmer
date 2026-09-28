@@ -23,6 +23,7 @@ final class GlimmerImageEmbedView: UIView, GlimmerEmbedView {
         layer.cornerCurve = .continuous
         clipsToBounds = true
         isAccessibilityElement = true
+        accessibilityTraits = .image
         accessibilityLabel = alt
 
         imageView.contentMode = .scaleAspectFit
@@ -63,9 +64,15 @@ final class GlimmerImageEmbedView: UIView, GlimmerEmbedView {
         gestureRecognizer === tapRecognizer ? acceptsTaps : super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
 
-    override var accessibilityTraits: UIAccessibilityTraits {
-        get { acceptsTaps ? [.image, .button] : .image }
-        set { super.accessibilityTraits = newValue }
+    /// A button while the host takes image taps. Set, not computed: UIKit's accessibility may read a view off the main
+    /// thread, where a Swift override traps.
+    func updateAccessibility() {
+        accessibilityTraits = acceptsTaps ? [.image, .button] : .image
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        updateAccessibility()
     }
 
     /// An image embed continues only an identical one (`GlimmerEmbed.continues`), so there is nothing to update.

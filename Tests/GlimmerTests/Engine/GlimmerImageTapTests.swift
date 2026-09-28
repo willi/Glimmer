@@ -86,6 +86,24 @@ final class GlimmerImageTapTests: XCTestCase {
         XCTAssertNotNil(view.menuConfiguration(forLink: URL(string: "https://example.com")!, defaultMenu: UIMenu(children: [])))
     }
 
+    /// Its traits are set, not computed, so reading them off the main thread (as UIKit's accessibility may) is safe,
+    /// and they follow a handler set after the image is shown.
+    func testAStandaloneImagesTraitsAreSafeOffTheMainThread() throws {
+        let (view, window) = shown("![Chart](https://example.com/chart.png)", handler: nil)
+        let image = try XCTUnwrap(findSubview(GlimmerImageEmbedView.self, in: view))
+        view.onImageTap = { _, _ in }
+        nonisolated(unsafe) let object: NSObject = image
+        nonisolated(unsafe) var traits: UInt64?
+        let read = expectation(description: "read off the main thread")
+        DispatchQueue.global().async {
+            traits = (object.value(forKey: "accessibilityTraits") as? NSNumber)?.uint64Value
+            read.fulfill()
+        }
+        wait(for: [read], timeout: 5)
+        XCTAssertEqual(traits.map { UIAccessibilityTraits(rawValue: $0) }, [.image, .button])
+        _ = window
+    }
+
     func testPlainTextOfTheWholeAnswer() {
         let (view, window) = shown("# Title\n\nSome **bold** text.", handler: nil)
         XCTAssertEqual(view.plainText(), "Title\nSome bold text.", "blocks end in one newline, as copy writes them")

@@ -226,13 +226,20 @@ public final class GlimmerView: UIView {
     public var onImageTap: ((URL, String) -> Void)? {
         didSet {
             guard (oldValue == nil) != (onImageTap == nil) else { return }
-            Self.inlineImageViews(in: textView).forEach { $0.updateAccessibility() }
+            Self.updateImageAccessibility(in: textView)
         }
     }
 
-    private static func inlineImageViews(in view: UIView) -> [GlimmerInlineImageView] {
-        view.subviews.flatMap { subview in
-            (subview as? GlimmerInlineImageView).map { [$0] } ?? inlineImageViews(in: subview)
+    /// Images are buttons only while the host takes image taps.
+    private static func updateImageAccessibility(in view: UIView) {
+        for subview in view.subviews {
+            if let inline = subview as? GlimmerInlineImageView {
+                inline.updateAccessibility()
+            } else if let embed = subview as? GlimmerImageEmbedView {
+                embed.updateAccessibility()
+            } else {
+                updateImageAccessibility(in: subview)
+            }
         }
     }
 
