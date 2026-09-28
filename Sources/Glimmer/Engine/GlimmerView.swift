@@ -209,6 +209,8 @@ public final class GlimmerView: UIView {
         set { super.accessibilityTraits = newValue }
     }
 
+    // MARK: - Taps and menus
+
     /// The link's default menu plus the host's items.
     func linkMenu(for url: URL, defaultMenu: UIMenu) -> UIMenu {
         guard let linkMenuActions else { return defaultMenu }
