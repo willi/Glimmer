@@ -238,6 +238,8 @@ final class GlimmerStreamingDocument: @unchecked Sendable {
         usesReferenceDefinitions = isAppend ? usesReferenceDefinitions || found : found
     }
 
+    /// Also true for a footnote definition (`[^label]:`), on purpose: a definition renumbers markers and moves its note
+    /// below the last block, so it needs the full re-parse too.
     static func hasLinkReferenceDefinition(_ markdown: Substring) -> Bool {
         markdown.contains(#/(?m)^ {0,3}\[[^\]]+\]:/#)
     }

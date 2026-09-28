@@ -116,6 +116,38 @@ final class GlimmerFootnoteTests: XCTestCase {
         _ = window
     }
 
+    /// A footnote definition counts as a reference definition: from then on every update re-parses in full.
+    func testAFootnoteDefinitionTurnsOnFullReparses() {
+        XCTAssertTrue(GlimmerStreamingDocument.hasLinkReferenceDefinition("[^1]: A note."))
+        XCTAssertTrue(GlimmerStreamingDocument.hasLinkReferenceDefinition("[a]: https://example.com"))
+        XCTAssertFalse(GlimmerStreamingDocument.hasLinkReferenceDefinition("See [^1] and [a]."))
+    }
+
+    /// Streamed with the smooth reveal, then settled: markers keep their numbers and the notes appear, in order.
+    func testFootnotesSettleUnderTheSmoothReveal() {
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
+        let clock = ManualRevealClock()
+        view.clock = clock
+        let window = hostInWindow(view, width: 390, height: 800)
+        let full = "A[^x] and b[^y].\n\n[^y]: Why.\n[^x]: Ex."
+        for end in [8, 18, 30, full.count] {
+            view.update(markdown: String(full.prefix(end)), isStreaming: true, revealID: "smooth-notes")
+            waitForDocument(view)
+            clock.advance(to: clock.now + 0.5)
+        }
+        view.update(markdown: full, isStreaming: false, revealID: "smooth-notes")
+        waitForDocument(view)
+        clock.advance(to: clock.now + 30)
+        XCTAssertNil(view.engine, "the reveal finished")
+        let string = view.textView.textStorage.string
+        XCTAssertEqual(markers(in: view.textView.textStorage).map(\.number), ["1", "2"])
+        let ex = string.range(of: "Ex."), why = string.range(of: "Why.")
+        XCTAssertNotNil(ex)
+        XCTAssertNotNil(why)
+        if let ex, let why { XCTAssertLessThan(ex.lowerBound, why.lowerBound, "note 1 (x) first") }
+        _ = window
+    }
+
     func testFootnotesStreamWithoutMovingShownText() {
         assertStreamingKeepsShownTextInPlace("""
         Glimmer renders footnotes[^fn] the way the web does. A marker whose note comes later[^late] is a number \
