@@ -76,6 +76,48 @@ final class GlimmerSurfaceReuseTests: XCTestCase {
         _ = window
     }
 
+    /// A streamed edit inside a paragraph already drawn: TextKit makes a new fragment for it, so its old surface is
+    /// never handed back and the new words are drawn. Checked on the drawn pixels where they land.
+    func testAStreamedEditDrawsItsNewWordsWithReuseOn() async throws {
+        let scrollView = UIScrollView()
+        let window = hostInWindow(scrollView, width: 390, height: 800)
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil, reveal: .none))
+        view.frame = CGRect(x: 0, y: 0, width: 390, height: 2_000)
+        scrollView.addSubview(view)
+        view.update(markdown: "First paragraph, drawn.\n\nSecond paragraph starts", isStreaming: true)
+        await view.pendingDocument?.value
+        settle(view)
+        view.update(markdown: "First paragraph, drawn.\n\nSecond paragraph starts and grows", isStreaming: true)
+        await view.pendingDocument?.value
+        settle(view)
+        let textView = view.textView
+        let offset = (textView.textStorage.string as NSString).range(of: "and grows").location
+        let start = try XCTUnwrap(textView.position(from: textView.beginningOfDocument, offset: offset))
+        let end = try XCTUnwrap(textView.position(from: start, offset: 9))
+        let rect = textView.convert(textView.firstRect(for: try XCTUnwrap(textView.textRange(from: start, to: end))), to: window)
+            .intersection(window.bounds).integral
+        XCTAssertFalse(rect.isEmpty)
+        XCTAssertGreaterThan(inkPixels(in: rect, of: window), 30, "the new words are drawn")
+        let emptyRest = CGRect(x: rect.maxX + 20, y: rect.minY, width: max(0, window.bounds.maxX - rect.maxX - 30), height: rect.height)
+        XCTAssertLessThan(inkPixels(in: emptyRest, of: window), 5, "the check sees where there is no text")
+        _ = window
+    }
+
+    /// Dark pixels in `rect` of the window as drawn.
+    private func inkPixels(in rect: CGRect, of window: UIWindow) -> Int {
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { context in window.layer.render(in: context.cgContext) }
+        guard let cgImage = image.cgImage, let data = cgImage.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else { return 0 }
+        let scale = image.scale, perRow = cgImage.bytesPerRow, perPixel = cgImage.bitsPerPixel / 8
+        var count = 0
+        for y in max(0, Int(rect.minY * scale))..<min(cgImage.height, Int(rect.maxY * scale)) {
+            for x in max(0, Int(rect.minX * scale))..<min(cgImage.width, Int(rect.maxX * scale)) {
+                let pixel = bytes + y * perRow + x * perPixel
+                if pixel[0] < 90, pixel[1] < 90, pixel[2] < 90 { count += 1 }
+            }
+        }
+        return count
+    }
+
     func testWithoutReuseAPassRedrawsTheBand() {
         let (view, window) = shown(reuse: false)
         let count = fragmentViews(in: view.textView).count
