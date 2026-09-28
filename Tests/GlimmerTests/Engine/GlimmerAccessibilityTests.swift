@@ -33,6 +33,29 @@ final class GlimmerAccessibilityTests: XCTestCase {
         _ = window
     }
 
+    /// The same for the text view's other overridden properties UIKit may read: they must not trap off the main thread.
+    func testTheFrameAndOffsetCanBeReadOffTheMainThread() {
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil, reveal: .none))
+        let window = hostInWindow(view, width: 320, height: 800)
+        view.update(markdown: "A short answer.")
+        settle(view)
+        let expectedFrame = view.textView.accessibilityFrame
+        nonisolated(unsafe) let textView: NSObject = view.textView
+        nonisolated(unsafe) var offset: CGPoint?
+        nonisolated(unsafe) var frame: CGRect?
+        let read = expectation(description: "read off the main thread")
+        DispatchQueue.global().async {
+            offset = (textView.value(forKey: "contentOffset") as? NSValue)?.cgPointValue
+            frame = (textView.value(forKey: "accessibilityFrame") as? NSValue)?.cgRectValue
+            read.fulfill()
+        }
+        wait(for: [read], timeout: 5)
+        XCTAssertEqual(offset, .zero)
+        XCTAssertEqual(frame, expectedFrame)
+        XCTAssertLessThan(expectedFrame.height, 100, "the frame hugs the text, not the tall text view")
+        _ = window
+    }
+
     func testReplacingTheTextStillForgetsWhatWasMeasured() {
         let textView = GlimmerTextView()
         textView.frame = CGRect(x: 0, y: 0, width: 320, height: 800)
