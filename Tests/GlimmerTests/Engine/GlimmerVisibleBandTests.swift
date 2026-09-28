@@ -18,6 +18,9 @@ final class GlimmerVisibleBandTests: XCTestCase {
         } else {
             window = hostInWindow(scrollView, width: 390, height: 800)
         }
+        // Warm the document cache, as a re-shown answer is: an uncached configure lays out the whole answer, which would
+        // leave the preload nothing to do.
+        GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil)).update(markdown: long)
         let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
         view.update(markdown: long)
         let height = view.sizeThatFits(CGSize(width: 390, height: CGFloat.greatestFiniteMagnitude)).height
@@ -126,6 +129,9 @@ final class GlimmerVisibleBandTests: XCTestCase {
     func testLayoutPassRefreshesTheBandAfterTheHostMovesTheView() throws {
         let container = UIView()
         let window = hostInWindow(container, width: 390, height: 800)
+        // Warm the document cache, as a re-shown answer is: an uncached configure lays out the whole answer, which would
+        // leave the preload nothing to do.
+        GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil)).update(markdown: long)
         let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
         view.update(markdown: long)
         let height = view.sizeThatFits(CGSize(width: 390, height: CGFloat.greatestFiniteMagnitude)).height
@@ -145,6 +151,9 @@ final class GlimmerVisibleBandTests: XCTestCase {
     func testMovingTheViewRefreshesTheBandWithoutALayoutPass() throws {
         let container = UIView()
         let window = hostInWindow(container, width: 390, height: 800)
+        // Warm the document cache, as a re-shown answer is: an uncached configure lays out the whole answer, which would
+        // leave the preload nothing to do.
+        GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil)).update(markdown: long)
         let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
         view.update(markdown: long)
         let height = view.sizeThatFits(CGSize(width: 390, height: CGFloat.greatestFiniteMagnitude)).height
@@ -172,6 +181,9 @@ final class GlimmerVisibleBandTests: XCTestCase {
     func testMovingTheViewInsideAnAnimationDoesNotAnimateTheText() throws {
         let container = UIView()
         let window = hostInWindow(container, width: 390, height: 800)
+        // Warm the document cache, as a re-shown answer is: an uncached configure lays out the whole answer, which would
+        // leave the preload nothing to do.
+        GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil)).update(markdown: long)
         let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
         view.update(markdown: long)
         let height = view.sizeThatFits(CGSize(width: 390, height: CGFloat.greatestFiniteMagnitude)).height
@@ -203,6 +215,7 @@ final class GlimmerVisibleBandTests: XCTestCase {
 
     func testIdleFramesPreloadAheadOfTheBand() throws {
         let (view, _, window) = scrolled()
+        XCTAssertFalse(view.viewHoldsWorkerText, "shown from the cache, so only the band was laid out")
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
         let band = try XCTUnwrap(view.textView.renderedBand)
         let preloaded = try XCTUnwrap(view.textView.preloadedRange, "idle frames laid out ahead")

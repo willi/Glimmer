@@ -41,7 +41,7 @@ public final class GlimmerView: UIView {
     private var appliedUpdate = 0
     /// False while the view shows a cached text its worker never composed: the worker's first result then replaces the
     /// whole text instead of applying an edit to it.
-    private var viewHoldsWorkerText = true
+    private(set) var viewHoldsWorkerText = true
     /// The cache key of the settled text on screen, or nil (streaming, or edited since it was shown).
     private var cacheKey: GlimmerDocumentCache.Key?
     private var lastWidth: CGFloat = 0
