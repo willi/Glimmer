@@ -81,6 +81,8 @@ final class GlimmerSurfaceReuseTests: XCTestCase {
     func testAStreamedEditDrawsItsNewWordsWithReuseOn() async throws {
         let scrollView = UIScrollView()
         let window = hostInWindow(scrollView, width: 390, height: 800)
+        window.backgroundColor = .white
+        window.overrideUserInterfaceStyle = .light
         let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil, reveal: .none))
         view.frame = CGRect(x: 0, y: 0, width: 390, height: 2_000)
         scrollView.addSubview(view)
