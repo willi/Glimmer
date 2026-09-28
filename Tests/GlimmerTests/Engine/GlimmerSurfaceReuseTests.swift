@@ -59,6 +59,23 @@ final class GlimmerSurfaceReuseTests: XCTestCase {
         _ = window
     }
 
+    /// A surface handed back from the cache is put back in the canvas by UIKit, even one moved elsewhere meanwhile, so
+    /// a reused surface always renders in this text view (each text view caches only its own surfaces).
+    func testAReusedSurfaceMovedOutOfTheCanvasRendersInItAgain() throws {
+        let (view, window) = shown()
+        let before = fragmentViews(in: view.textView).count
+        let moved = try XCTUnwrap(fragmentViews(in: view.textView).first)
+        let elsewhere = UIView()
+        window.addSubview(elsewhere)
+        elsewhere.addSubview(moved)
+        XCTAssertEqual(fragmentViews(in: view.textView).count, before - 1)
+        pass(view)
+        view.layoutIfNeeded()
+        XCTAssertEqual(fragmentViews(in: view.textView).count, before, "the fragment is rendered in the canvas again")
+        XCTAssertTrue(moved.isDescendant(of: view.textView), "UIKit re-parents the surface it gets back")
+        _ = window
+    }
+
     func testWithoutReuseAPassRedrawsTheBand() {
         let (view, window) = shown(reuse: false)
         let count = fragmentViews(in: view.textView).count
