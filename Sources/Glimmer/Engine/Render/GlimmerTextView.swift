@@ -251,7 +251,9 @@ final class GlimmerTextView: UITextView {
         guard let line = fragment.textLineFragments.first(where: { NSLocationInRange(offset, $0.characterRange) }) else { return nil }
         let top = fragment.layoutFragmentFrame.minY + line.typographicBounds.minY + textContainerInset.top
         let lineStart = paragraphStart + line.characterRange.location
-        return (top, index > lineStart ? segmentRects(for: NSRange(location: lineStart, length: index - lineStart)) : [])
+        // Segment rects are in the text container's coordinates; `top` and the rects returned are in the view's.
+        let rects = index > lineStart ? segmentRects(for: NSRange(location: lineStart, length: index - lineStart)) : []
+        return (top, rects.map { $0.offsetBy(dx: textContainerInset.left, dy: textContainerInset.top) })
     }
 
     /// Whether the character at `index` begins a visual line: a paragraph start or a wrap point.

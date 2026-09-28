@@ -156,6 +156,20 @@ final class GlimmerTextViewTests: XCTestCase {
         XCTAssertEqual(textView.linkTextAttributes[.underlineStyle] as? Int, NSUnderlineStyle.single.rawValue)
     }
 
+    /// `top` and `rects` are both in the view's coordinates, inset included.
+    func testSettledLineAddsTheInsetToTopAndRectsAlike() throws {
+        let textView = GlimmerTextView()
+        textView.textContainerInset = UIEdgeInsets(top: 20, left: 10, bottom: 0, right: 10)
+        let window = hostInWindow(textView, width: 390, height: 800)
+        textView.attributedText = GlimmerComposer(theme: .default).compose(GlimmerParser.parse("One line of text here."))
+        textView.layoutIfNeeded()
+        let line = try XCTUnwrap(textView.settledLine(upTo: 8))
+        let first = try XCTUnwrap(line.rects.first)
+        XCTAssertEqual(first.minY, line.top, accuracy: 0.5)
+        XCTAssertEqual(first.minX, 10, accuracy: 0.5, "the left inset too")
+        _ = window
+    }
+
     func testSettledLineMatchesTheWideQuery() {
         let textView = GlimmerTextView()
         let window = hostInWindow(textView, width: 390, height: 4_000)
