@@ -13,6 +13,7 @@ final class GlimmerDocumentCache {
         let extensions: [String]
         let highlighter: String
         let imageLoader: String?
+        var inlineImageShape: GlimmerInlineImageShape = .circle
         /// Whether inline images' alt text links to them (the host takes image taps).
         var linksImagesForTaps = false
     }
@@ -22,7 +23,8 @@ final class GlimmerDocumentCache {
     static func supports(_ configuration: GlimmerConfiguration) -> Bool {
         configuration.extensions.allSatisfy { $0 is GlimmerMentions || $0 is GlimmerEmojiShortcodes }
             && configuration.highlighter is GlimmerBasicHighlighter
-            && (configuration.imageLoader == nil || configuration.imageLoader is GlimmerURLSessionImageLoader)
+            && (configuration.imageLoader == nil
+                || (configuration.imageLoader as? GlimmerURLSessionImageLoader)?.cache === GlimmerImageCache.shared)
     }
 
     private struct Entry {

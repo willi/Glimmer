@@ -22,6 +22,8 @@ final class GlimmerImageEmbedViewTests: XCTestCase {
     func testImageLoadsWithoutChangingHeight() async {
         let view = GlimmerImageEmbedView(source: url, alt: "chart", theme: theme, loader: StubImageLoader(result: .success(tallImage())))
         let before = view.embedHeight(forWidth: 300)
+        view.frame = CGRect(x: 0, y: 0, width: 300, height: before)
+        view.layoutIfNeeded()
         XCTAssertEqual(before, 300 / theme.imagePlaceholderAspect, accuracy: 0.5)
         let loaded = await waitUntil { view.imageView.image != nil }
         XCTAssertTrue(loaded)
@@ -31,6 +33,8 @@ final class GlimmerImageEmbedViewTests: XCTestCase {
 
     func testFailedLoadShowsAltText() async {
         let view = GlimmerImageEmbedView(source: url, alt: "chart", theme: theme, loader: StubImageLoader(result: .failure(URLError(.badServerResponse))))
+        view.frame = CGRect(x: 0, y: 0, width: 300, height: view.embedHeight(forWidth: 300))
+        view.layoutIfNeeded()
         let shown = await waitUntil { !view.altLabel.isHidden }
         XCTAssertTrue(shown)
         XCTAssertEqual(view.altLabel.text, "chart")

@@ -1,7 +1,7 @@
 import Glimmer
 import SwiftUI
 
-/// Images inside a paragraph: line-height squares that load through the configuration's image loader.
+/// Images inside a paragraph: configurable shapes that load through the configuration's image loader.
 struct InlineImageDemo: View {
     let markdownWithImages = """
         This is a paragraph with an inline image: ![Swift Logo](https://developer.apple.com/assets/elements/icons/swift/swift-64x64.png) right in the middle of the text.
@@ -26,11 +26,16 @@ struct InlineImageDemo: View {
                     .font(.largeTitle)
                     .bold()
 
-                Text("Simple Inline Example")
+                Text("Circular by Default")
                     .font(.headline)
 
                 // Simple inline image in text
                 sample(simpleInlineExample, tint: .gray)
+
+                Text("Rounded Rectangle")
+                    .font(.headline)
+
+                sample(simpleInlineExample, tint: .gray, shape: .roundedRectangle(cornerRadius: 3))
 
                 Text("Multiple Images with Formatting")
                     .font(.headline)
@@ -79,8 +84,10 @@ struct InlineImageDemo: View {
         .navigationTitle("Inline Images")
     }
 
-    private func sample(_ markdown: String, tint: Color) -> some View {
-        GlimmerText(markdown, configuration: Self.configuration)
+    private func sample(_ markdown: String, tint: Color, shape: GlimmerInlineImageShape = .circle) -> some View {
+        var configuration = Self.configuration
+        configuration.inlineImageShape = shape
+        return GlimmerText(markdown, configuration: configuration)
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))

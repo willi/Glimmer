@@ -10,13 +10,14 @@ final class GlimmerImageEmbedView: UIView, GlimmerEmbedView {
     private let theme: GlimmerTheme
     private let source: URL
     private let alt: String
-    private var loadTask: Task<Void, Never>?
+    private let imageLoader: GlimmerImageViewLoader?
     private lazy var tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(handleTap))
 
     init(source: URL, alt: String, theme: GlimmerTheme, loader: (any GlimmerImageLoader)?) {
         self.theme = theme
         self.source = source
         self.alt = alt
+        imageLoader = loader.map { GlimmerImageViewLoader(source: source, loader: $0, contentMode: .aspectFit) }
         super.init(frame: .zero)
         backgroundColor = theme.codeBlockBackground
         layer.cornerRadius = theme.embedCornerRadius
@@ -36,18 +37,12 @@ final class GlimmerImageEmbedView: UIView, GlimmerEmbedView {
         altLabel.isHidden = true
         addSubview(altLabel)
         addGestureRecognizer(tapRecognizer)
-
-        guard let loader else {
-            altLabel.isHidden = false
-            return
+        registerForTraitChanges([UITraitDisplayScale.self]) { (view: GlimmerImageEmbedView, _: UITraitCollection) in
+            view.setNeedsLayout()
         }
-        loadTask = Task { [weak self] in
-            do {
-                let image = try await loader.loadImage(from: source)
-                self?.imageView.image = image
-            } catch {
-                self?.altLabel.isHidden = false
-            }
+
+        if loader == nil {
+            altLabel.isHidden = false
         }
     }
 
@@ -83,10 +78,6 @@ final class GlimmerImageEmbedView: UIView, GlimmerEmbedView {
 
     func revealUnitRects(in box: CGRect) -> [CGRect] { [box] }
 
-    isolated deinit {
-        loadTask?.cancel()
-    }
-
     func embedHeight(forWidth width: CGFloat) -> CGFloat {
         min(width / theme.imagePlaceholderAspect, theme.maxImageHeight)
     }
@@ -95,5 +86,14 @@ final class GlimmerImageEmbedView: UIView, GlimmerEmbedView {
         super.layoutSubviews()
         imageView.frame = bounds
         altLabel.frame = bounds.insetBy(dx: theme.embedPadding, dy: theme.embedPadding)
+        imageLoader?.load(size: bounds.size, scale: traitCollection.displayScale) { [weak self] result in
+            switch result {
+            case .success(let image):
+                self?.imageView.image = image
+                self?.altLabel.isHidden = true
+            case .failure:
+                self?.altLabel.isHidden = self?.imageView.image != nil
+            }
+        }
     }
 }

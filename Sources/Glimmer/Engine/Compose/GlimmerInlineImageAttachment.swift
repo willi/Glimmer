@@ -1,6 +1,6 @@
 import UIKit
 
-/// An image inside a paragraph: a square as tall as the line, the image aspect-fitted inside. The square never changes
+/// An image inside a paragraph: a square as tall as the line, the image clipped to its configured shape. The square never changes
 /// size, so a load never moves text (the spec's promise for images); until it loads, or if it fails, it shows the
 /// placeholder tint. VoiceOver reads the alt text, which follows it as spoken-only text.
 final class GlimmerInlineImageAttachment: NSTextAttachment {
@@ -8,18 +8,23 @@ final class GlimmerInlineImageAttachment: NSTextAttachment {
     let alt: String
     let theme: GlimmerTheme
     let loader: (any GlimmerImageLoader)?
+    let shape: GlimmerInlineImageShape
     /// Built once and reused when TextKit asks for a fresh provider.
     private var cachedView: GlimmerInlineImageView?
 
     /// Inside a link: the link takes the tap.
     let isLinked: Bool
 
-    init(source: URL, alt: String, isLinked: Bool = false, theme: GlimmerTheme, loader: (any GlimmerImageLoader)?) {
+    init(
+        source: URL, alt: String, isLinked: Bool = false, theme: GlimmerTheme, loader: (any GlimmerImageLoader)?,
+        shape: GlimmerInlineImageShape = .circle
+    ) {
         self.source = source
         self.alt = alt
         self.isLinked = isLinked
         self.theme = theme
         self.loader = loader
+        self.shape = shape
         super.init(data: nil, ofType: nil)
     }
 
@@ -27,7 +32,7 @@ final class GlimmerInlineImageAttachment: NSTextAttachment {
 
     /// A new attachment for the same image, without a view: for a cached text shown by another view.
     func freshCopy() -> GlimmerInlineImageAttachment {
-        GlimmerInlineImageAttachment(source: source, alt: alt, isLinked: isLinked, theme: theme, loader: loader)
+        GlimmerInlineImageAttachment(source: source, alt: alt, isLinked: isLinked, theme: theme, loader: loader, shape: shape)
     }
 
     @MainActor
@@ -36,7 +41,7 @@ final class GlimmerInlineImageAttachment: NSTextAttachment {
     @MainActor
     func imageView() -> UIImageView {
         if let cachedView { return cachedView }
-        let view = GlimmerInlineImageView(source: source, alt: alt, isLinked: isLinked, theme: theme, loader: loader)
+        let view = GlimmerInlineImageView(source: source, alt: alt, isLinked: isLinked, theme: theme, loader: loader, shape: shape)
         cachedView = view
         return view
     }

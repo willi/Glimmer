@@ -23,9 +23,11 @@ private struct InlineStubLoader: GlimmerImageLoader {
 final class GlimmerInlineImageTests: XCTestCase {
     private let markdown = "A badge ![ci](https://example.com/b.png) in text."
 
-    /// `tag` keeps each test's text apart in the settled-document cache, which tells loaders apart by type only.
-    private func shown(loader: (any GlimmerImageLoader)?, tag: String = #function) -> (GlimmerView, UIWindow) {
-        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: loader, reveal: .none))
+    /// `tag` keeps each test's text apart in the settled-document cache.
+    private func shown(
+        loader: (any GlimmerImageLoader)?, shape: GlimmerInlineImageShape = .circle, tag: String = #function
+    ) -> (GlimmerView, UIWindow) {
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: loader, inlineImageShape: shape, reveal: .none))
         let window = hostInWindow(view, width: 390, height: 800)
         view.update(markdown: markdown + " " + tag)
         settle(view)
@@ -51,13 +53,98 @@ final class GlimmerInlineImageTests: XCTestCase {
         _ = window
     }
 
+    func testAnInlineImageIsCircularByDefault() throws {
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil, reveal: .none))
+        let window = hostInWindow(view, width: 390, height: 800)
+        view.update(markdown: markdown)
+        settle(view)
+        let imageView = try XCTUnwrap(imageAttachment(in: view).existingView)
+        XCTAssertGreaterThan(imageView.bounds.height, 0)
+        XCTAssertEqual(imageView.layer.cornerRadius, imageView.bounds.height / 2, accuracy: 0.5)
+        XCTAssertEqual(imageView.layer.cornerCurve, .circular)
+        XCTAssertTrue(imageView.clipsToBounds)
+        XCTAssertEqual(imageView.contentMode, .scaleAspectFill)
+        _ = window
+    }
+
+    func testRoundedInlineImagesUseTheConfiguredRadiusAndFitTheWholeImage() async throws {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 10)).image { _ in }
+        for radius in [CGFloat(0), 3, 7] {
+            let (view, window) = shown(loader: InlineStubLoader(result: .success(image)), shape: .roundedRectangle(cornerRadius: radius))
+            let imageView = try XCTUnwrap(imageAttachment(in: view).existingView)
+            let loaded = await waitUntil { imageView.image != nil }
+            XCTAssertTrue(loaded)
+            XCTAssertEqual(imageView.layer.cornerRadius, radius)
+            XCTAssertEqual(imageView.layer.cornerCurve, .continuous)
+            XCTAssertEqual(imageView.contentMode, .scaleAspectFit)
+            _ = window
+        }
+    }
+
+    func testAnInlineImageStaysCircularAtLargerTextSizes() throws {
+        let (view, window) = shown(loader: nil)
+        let originalSide = try XCTUnwrap(imageAttachment(in: view).existingView).bounds.height
+        view.traitOverrides.preferredContentSizeCategory = .accessibilityExtraExtraExtraLarge
+        settle(view)
+        let imageView = try XCTUnwrap(imageAttachment(in: view).existingView)
+        XCTAssertGreaterThan(imageView.bounds.height, originalSide)
+        XCTAssertEqual(imageView.bounds.width, imageView.bounds.height)
+        XCTAssertEqual(imageView.layer.cornerRadius, imageView.bounds.height / 2, accuracy: 0.5)
+        _ = window
+    }
+
+    func testChangingTheShapeUpdatesAnExistingView() throws {
+        let (view, window) = shown(loader: nil)
+        let originalBounds = try XCTUnwrap(imageAttachment(in: view).existingView).bounds
+        view.configuration.inlineImageShape = .roundedRectangle(cornerRadius: 3)
+        settle(view)
+        let rounded = try XCTUnwrap(imageAttachment(in: view).existingView)
+        XCTAssertEqual(rounded.layer.cornerRadius, 3)
+        XCTAssertEqual(rounded.bounds, originalBounds)
+        view.configuration.inlineImageShape = .circle
+        settle(view)
+        let circle = try XCTUnwrap(imageAttachment(in: view).existingView)
+        XCTAssertEqual(circle.layer.cornerRadius, circle.bounds.height / 2, accuracy: 0.5)
+        XCTAssertEqual(circle.bounds, originalBounds)
+        _ = window
+    }
+
+    func testCachedInlineImagesKeepTheirShapeWithoutSharingViews() throws {
+        GlimmerDocumentCache.shared.removeAll()
+        let (rounded, roundedWindow) = shown(loader: nil, shape: .roundedRectangle(cornerRadius: 3), tag: "shape cache")
+        let (circle, circleWindow) = shown(loader: nil, tag: "shape cache")
+        let circleImage = try XCTUnwrap(imageAttachment(in: circle).existingView)
+        XCTAssertEqual(circleImage.layer.cornerRadius, circleImage.bounds.height / 2, accuracy: 0.5)
+        let hits = GlimmerDocumentCache.shared.hits
+        let (cached, cachedWindow) = shown(loader: nil, shape: .roundedRectangle(cornerRadius: 3), tag: "shape cache")
+        XCTAssertEqual(GlimmerDocumentCache.shared.hits, hits + 1)
+        let cachedImage = try XCTUnwrap(imageAttachment(in: cached).existingView)
+        XCTAssertEqual(cachedImage.layer.cornerRadius, 3)
+        XCTAssertEqual(cachedImage.contentMode, .scaleAspectFit)
+        XCTAssertFalse(cachedImage === (try imageAttachment(in: rounded)).existingView)
+        _ = (roundedWindow, circleWindow, cachedWindow)
+    }
+
+    func testExtensionAndTableImagesUseTheConfiguredShape() throws {
+        let shape = GlimmerInlineImageShape.roundedRectangle(cornerRadius: 5)
+        let composer = GlimmerComposer(theme: .default, inlineImageShape: shape, extensions: [GlimmerEmojiShortcodes()])
+        let text = composer.compose(GlimmerParser.parse(":octocat: inline"))
+        let emoji = try XCTUnwrap(text.attribute(.attachment, at: 0, effectiveRange: nil) as? GlimmerInlineImageAttachment)
+        XCTAssertEqual(emoji.shape, shape)
+        let tableText = composer.compose(GlimmerParser.parse("| Badge |\n| --- |\n| ![ci](https://example.com/b.png) |"))
+        let table = try XCTUnwrap(tableText.attribute(.attachment, at: 0, effectiveRange: nil) as? GlimmerBlockAttachment)
+        guard case .table(_, let rows, _) = table.embed else { return XCTFail("expected a table") }
+        let image = try XCTUnwrap(rows[0][0].attribute(.attachment, at: 0, effectiveRange: nil) as? GlimmerInlineImageAttachment)
+        XCTAssertEqual(image.shape, shape)
+    }
+
     func testAnInlineImageLoadsItsImage() async throws {
         let image = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 10)).image { _ in }
         let (view, window) = shown(loader: InlineStubLoader(result: .success(image)))
         let imageView = try XCTUnwrap(imageAttachment(in: view).existingView)
         let loaded = await waitUntil { imageView.image != nil }
         XCTAssertTrue(loaded)
-        XCTAssertEqual(imageView.contentMode, .scaleAspectFit)
+        XCTAssertEqual(imageView.contentMode, .scaleAspectFill)
         _ = window
     }
 

@@ -6,6 +6,11 @@ import UIKit
 struct DemoImageLoader: GlimmerImageLoader {
     struct NotFound: Error {}
 
+    func loadImage(for request: GlimmerImageRequest) async throws -> UIImage {
+        guard request.url.scheme == nil else { return try await GlimmerURLSessionImageLoader().loadImage(for: request) }
+        return try await loadImage(from: request.url)
+    }
+
     func loadImage(from url: URL) async throws -> UIImage {
         guard url.scheme == nil else { return try await GlimmerURLSessionImageLoader().loadImage(from: url) }
         let name = url.relativeString

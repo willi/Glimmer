@@ -404,6 +404,7 @@ public final class GlimmerView: UIView {
             theme: configuration.theme.scaled(for: traitCollection),
             highlighter: configuration.highlighter,
             imageLoader: configuration.imageLoader,
+            inlineImageShape: configuration.inlineImageShape,
             extensions: configuration.extensions,
             linksImagesForTaps: onImageTap != nil
         ))
@@ -419,6 +420,7 @@ public final class GlimmerView: UIView {
             extensions: configuration.extensions.map { String(reflecting: type(of: $0)) },
             highlighter: String(reflecting: type(of: configuration.highlighter)),
             imageLoader: configuration.imageLoader.map { String(reflecting: type(of: $0)) },
+            inlineImageShape: configuration.inlineImageShape,
             linksImagesForTaps: onImageTap != nil
         )
         // An empty answer (every new view starts with one) costs nothing to compose; keep it out of the cache.

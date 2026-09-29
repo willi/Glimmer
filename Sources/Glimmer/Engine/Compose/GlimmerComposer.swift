@@ -8,6 +8,7 @@ struct GlimmerComposer {
     var theme: GlimmerTheme
     var highlighter: any GlimmerHighlighter = GlimmerBasicHighlighter()
     var imageLoader: (any GlimmerImageLoader)? = nil
+    var inlineImageShape: GlimmerInlineImageShape = .circle
     var extensions: [any GlimmerExtension] = []
     /// Whether the host takes image taps: an inline image's spoken alt text then links to the image for VoiceOver.
     var linksImagesForTaps = false

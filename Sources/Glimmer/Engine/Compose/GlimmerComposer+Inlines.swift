@@ -92,7 +92,9 @@ extension GlimmerComposer {
         var image = attributes
         let isLinked = attributes[.link] != nil
         let attachment = reuse?.inlineImage(source: url, alt: alt, isLinked: isLinked)
-            ?? GlimmerInlineImageAttachment(source: url, alt: alt, isLinked: isLinked, theme: theme, loader: imageLoader)
+            ?? GlimmerInlineImageAttachment(
+                source: url, alt: alt, isLinked: isLinked, theme: theme, loader: imageLoader, shape: inlineImageShape
+            )
         reuse?.record(inlineImage: attachment)
         image[.attachment] = attachment
         image[.glimmerSource] = markdown

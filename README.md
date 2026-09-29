@@ -103,12 +103,57 @@ let view = GlimmerView(configuration: configuration)
   a paragraph gets a square as tall as the line. `nil` shows a standalone image's alt text in its box. A load never
   shifts the text, because the space is reserved before the image arrives. Set `onImageTap` (on `GlimmerView` and
   `GlimmerText`) to make images tappable: it is called with the image's URL and alt text.
+  The default loader shares HTTP responses and prepared images across views, coalesces concurrent requests, and
+  prepares images at their display size. See [Image caching](#image-caching) for budgets and custom sessions.
+- **`inlineImageShape`** (`GlimmerInlineImageShape`): `.circle` by default, cropping the image to fill the circle.
+  Use `.roundedRectangle(cornerRadius: 3)` for the previous aspect-fitted appearance, or a radius of `0` for square
+  corners. Applies to images inside text, including extension images; standalone images use the theme's styling.
 - **`reveal`**: `.smooth(GlimmerRevealOptions())`, with fade duration, pacing and phrase-length options, or `.none`.
   When Reduce Motion is on, text always appears at once.
 - **`dataDetectors`**: phone numbers, addresses and so on. Off by default. While any are on, the text view styles every
   link in the theme's `linkColor`, so tappable tokens are drawn in it too instead of `mentionColor`.
 - **`allowsFind`**: turns on the system Find interaction. Present it with
   `view.findInteraction?.presentFindNavigator(showingReplace: false)`.
+
+## Image caching
+
+`GlimmerURLSessionImageLoader()` uses `GlimmerImageCache.shared` automatically for inline and standalone images.
+Its defaults are 32 MiB for prepared images, 16 MiB for HTTP responses in memory, and 128 MiB for HTTP responses on
+disk. Prepared images are charged by decoded byte size, dropped on memory warnings, and never retained if one image
+exceeds the budget. The prepared-image limit is advisory (`NSCache`). Set a capacity to zero to disable that layer.
+
+The HTTP cache follows server headers, expiration and revalidation through `URLSession`. Prepared images are reused
+only after the session resolves the response, keyed by its contents and display size; replacing an image at the same
+URL therefore does not leave an indefinitely stale decoded image. `Cache-Control: no-store` also prevents retaining
+prepared images. Downloads are shared across requested sizes, while each size gets its own prepared image. Removing
+one consumer cancels only its wait; the underlying work is cancelled when no consumers remain.
+
+To customize budgets, use a separate cache. Choose a distinct disk directory for each isolated cache:
+
+```swift
+let imageCache = GlimmerImageCache(
+    preparedImageMemoryCapacity: 16 * 1024 * 1024,
+    responseMemoryCapacity: 8 * 1024 * 1024,
+    responseDiskCapacity: 64 * 1024 * 1024,
+    diskDirectory: URL.cachesDirectory.appending(path: "MyApp/MarkdownImages")
+)
+let configuration = GlimmerConfiguration(
+    imageLoader: GlimmerURLSessionImageLoader(cache: imageCache)
+)
+
+await imageCache.removePreparedImages() // Keep cached HTTP responses.
+await imageCache.removeAll()            // Cancel pending loads and clear both layers.
+```
+
+`GlimmerImageCache(session:)` accepts a custom `URLSession`, using its HTTP cache and policies. Use separate caches
+for separate authenticated sessions. Clearing such a cache also clears that session's `URLCache`; already displayed
+images stay visible. Custom cache instances are excluded from composed-document sharing so attachments keep their
+own loader and session.
+
+Existing `GlimmerImageLoader` implementations continue to work. They can optionally implement
+`loadImage(for: GlimmerImageRequest)` to receive the target size in **pixels** and the fit/fill mode. Otherwise the
+default implementation calls `loadImage(from:)`. The built-in loader prepares thumbnails off the main thread,
+preserves aspect ratio and orientation, and never upscales. Circle clipping stays in the view.
 
 ## Extensions
 
