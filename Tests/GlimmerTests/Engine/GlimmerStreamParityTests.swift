@@ -14,11 +14,15 @@ final class GlimmerStreamParityTests: XCTestCase {
             let characters = Array(fixture.markdown)
             for end in stride(from: 1, through: characters.count, by: 3) {
                 let prefix = String(characters[..<end])
-                _ = document.update(markdown: prefix, isStreaming: true)
+                if let edit = document.update(markdown: prefix, isStreaming: true) {
+                    for update in edit.embedUpdates { update.attachment.update(to: update.embed) }
+                }
                 assertEquivalent(document.text, composer.compose(GlimmerParser.parse(GlimmerTailHealer.heal(prefix))),
                                  "\(fixture.name) prefix \(end)")
             }
-            _ = document.update(markdown: fixture.markdown, isStreaming: false)
+            if let edit = document.update(markdown: fixture.markdown, isStreaming: false) {
+                for update in edit.embedUpdates { update.attachment.update(to: update.embed) }
+            }
             assertEquivalent(document.text, composer.compose(GlimmerParser.parse(fixture.markdown)), "\(fixture.name) final")
         }
     }

@@ -36,18 +36,30 @@ final class GlimmerEmojiShortcodesTests: XCTestCase {
         XCTAssertEqual(composed("Type \\:rocket: for :rocket:").string, "Type :rocket: for 🚀")
     }
 
-    func testShortcodesSkipCode() {
+    func testShortcodesSkipCode() throws {
         XCTAssertEqual(composed("Type `:rocket:` for 🚀").string, "Type :rocket: for 🚀")
-        XCTAssertTrue(composed("```\n:rocket:\n```").string.contains("\u{FFFC}"), "a code block stays a code block")
+        let text = composed("```\n:rocket:\n```")
+        let attachment = try XCTUnwrap(blockAttachments(in: text).first)
+        guard case .codeBlock(_, let code, _) = attachment.embed else { return XCTFail("expected fenced code") }
+        XCTAssertEqual(code, ":rocket:")
+        XCTAssertEqual(GlimmerMarkdownSerializer.plainText(from: text, range: NSRange(location: 0, length: text.length)), ":rocket:")
     }
 
-    func testAnUnclosedShortcodeIsHeldBackUntilItCloses() {
+    func testAnUnclosedShortcodeIsHeldBackUntilItCloses() async {
         let shortcodes = GlimmerEmojiShortcodes()
         XCTAssertEqual(shortcodes.streamingHoldBack(in: "go :rock"), 5)
         XCTAssertEqual(shortcodes.streamingHoldBack(in: "go :rocket:"), 0)
         XCTAssertEqual(shortcodes.streamingHoldBack(in: "go :rock and"), 0, "released after a space")
         XCTAssertEqual(shortcodes.streamingHoldBack(in: "at 10:3"), 0, "a time")
         XCTAssertEqual(shortcodes.streamingHoldBack(in: "Note:"), 0)
+
+        let view = GlimmerView(configuration: GlimmerConfiguration(extensions: [shortcodes], imageLoader: nil, reveal: .none))
+        for (source, shown) in [("go :rock", "go"), ("go :rocket:", "go 🚀"), ("go :rock and", "go :rock and"), ("at 10:3", "at 10:3")] {
+            view.update(markdown: source, isStreaming: true)
+            await view.pendingDocument?.value
+            XCTAssertEqual(view.plainText(), shown, "visible content for \(source)")
+        }
+
     }
 
     func testShortcodesCopyAsSourceAndEmoji() {
@@ -77,9 +89,9 @@ final class GlimmerEmojiShortcodesTests: XCTestCase {
 
     func testShortcodesStreamWithoutMovingShownText() {
         assertStreamingKeepsShownTextInPlace(
-            "Ship it :rocket: then :tada: and :octocat: at 10:30.",
+            "Ship it :rocket: then :tada: and :octocat: at 10:30.\n\nThe next paragraph keeps growing.",
             configuration: GlimmerConfiguration(extensions: [GlimmerEmojiShortcodes()], imageLoader: nil, reveal: .none),
-            every: 1
+            every: 1, expectedPlainText: "Ship it 🚀 then 🎉 and :octocat: at 10:30.\nThe next paragraph keeps growing."
         )
     }
 

@@ -42,8 +42,14 @@ final class GlimmerPhraseChunkerTests: XCTestCase {
     }
 
     func testNeverSplitsGraphemes() {
-        let text = "👋🏽 hello there friend"
-        XCTAssertEqual(end(text, streaming: false), (text as NSString).length)
+        for grapheme in ["👋🏽", "👨‍👩‍👧‍👦", "e\u{301}", "🇹🇼"] {
+            let phrase = "one two three four five six seven " + grapheme + " "
+            let text = phrase + "the next phrase keeps going"
+            for streaming in [true, false] {
+                XCTAssertEqual(end(text, streaming: streaming), (phrase as NSString).length,
+                               "the eight-word cut must include the whole grapheme and stop before the next word")
+            }
+        }
     }
 
     func testNothingLeftReturnsNil() {

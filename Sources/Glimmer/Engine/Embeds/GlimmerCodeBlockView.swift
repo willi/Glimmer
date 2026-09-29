@@ -190,12 +190,12 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView, UITextViewDelegate {
     }
 
     /// A span of one colour in highlighted code.
-    struct ColorRun: Equatable {
+    private struct ColorRun: Equatable {
         let range: NSRange
         let color: UIColor?
     }
 
-    static func colorRuns(of text: NSAttributedString) -> [ColorRun] {
+    private static func colorRuns(of text: NSAttributedString) -> [ColorRun] {
         var runs: [ColorRun] = []
         text.enumerateAttribute(.foregroundColor, in: NSRange(location: 0, length: text.length)) { value, range, _ in
             runs.append(ColorRun(range: range, color: value as? UIColor))

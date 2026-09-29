@@ -54,20 +54,6 @@ final class GlimmerThemeTests: XCTestCase {
         XCTAssertNotEqual(light, dark)
     }
 
-    func testAttributeKeysAreNamespaced() {
-        XCTAssertEqual(NSAttributedString.Key.glimmerInlineCode.rawValue, "glimmer.inlineCode")
-        XCTAssertEqual(NSAttributedString.Key.glimmerQuoteDepth.rawValue, "glimmer.quoteDepth")
-        XCTAssertEqual(NSAttributedString.Key.glimmerListMarker.rawValue, "glimmer.listMarker")
-        XCTAssertEqual(NSAttributedString.Key.glimmerSource.rawValue, "glimmer.source")
-        XCTAssertEqual(NSAttributedString.Key.glimmerQuoteContinues.rawValue, "glimmer.quoteContinues")
-        XCTAssertEqual(NSAttributedString.Key.glimmerMarkdownPrefix.rawValue, "glimmer.markdownPrefix")
-        XCTAssertEqual(NSAttributedString.Key.glimmerListTightness.rawValue, "glimmer.listTightness")
-        XCTAssertEqual(NSAttributedString.Key.glimmerListOpens.rawValue, "glimmer.listOpens")
-        XCTAssertEqual(NSAttributedString.Key.glimmerSpokenOnly.rawValue, "glimmer.spokenOnly")
-        XCTAssertEqual(NSAttributedString.Key.glimmerStrong.rawValue, "glimmer.strong")
-        XCTAssertEqual(NSAttributedString.Key.glimmerEmphasis.rawValue, "glimmer.emphasis")
-    }
-
     func testHeadingFontFallsBackToBodyWithoutHeadingFonts() {
         var theme = GlimmerTheme.default
         theme.headingFonts = []

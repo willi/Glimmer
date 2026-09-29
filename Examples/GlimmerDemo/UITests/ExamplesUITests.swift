@@ -105,6 +105,9 @@ final class ExamplesUITests: XCTestCase {
         let announced = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'icon' AND elementType != %d",
                                                                                  XCUIElement.ElementType.textView.rawValue))
         XCTAssertEqual(announced.count, 1, "announced once, not also as a separate image")
+        inline.tap()
+        XCTAssertTrue(alert.waitForExistence(timeout: 5), "activating the inline image reaches its host")
+        XCTAssertTrue(alert.staticTexts["URL: https://github.githubassets.com/images/icons/emoji/octocat.png"].exists)
     }
 
     /// Streaming Reveal: a simulated stream and a one-shot play reach the end of the sample, in both hosts.

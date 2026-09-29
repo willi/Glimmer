@@ -5,7 +5,10 @@ import XCTest
 /// Counters the demo's benchmark shows, behind SPI: not part of the API.
 @MainActor
 final class GlimmerDiagnosticsTests: XCTestCase {
-    func testViewportPassesCountEveryTextViewsPasses() {
+    func testViewportPassesCountEveryTextViewsPasses() throws {
+        guard #available(iOS 27.0, *) else {
+            throw XCTSkip("Viewport-pass diagnostics use the iOS 27 TextKit callback")
+        }
         let before = GlimmerDiagnostics.viewportPasses
         let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil, reveal: .none))
         let window = hostInWindow(view, width: 390, height: 800)

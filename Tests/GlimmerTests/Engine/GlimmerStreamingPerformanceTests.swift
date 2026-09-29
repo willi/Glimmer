@@ -205,7 +205,7 @@ final class GlimmerStreamingPerformanceTests: XCTestCase {
 
     /// Spec addendum A3: a phrase start costs ≤ 0.5 ms on an iPhone 16 Pro Max. Each clock step here starts or
     /// settles phrases, as a wake does.
-    func testPhraseStartsStayCheap() async {
+    func testPhraseStartsStayCheap() async throws {
         // Before Plan 6 Task 3: 0.287 ms (Debug) and 0.225 ms (Release) on the simulator, and the simulator gates sit
         // about 30% under those. After it: 0.087 and 0.079 ms. The device measures 0.23 ms and gates at the spec's 0.5.
         #if DEBUG
@@ -215,12 +215,15 @@ final class GlimmerStreamingPerformanceTests: XCTestCase {
         #else
         let gate: Duration = .microseconds(500)
         #endif
+        let revealID = "phrase-starts"
+        GlimmerRevealStore.shared.clear(revealID)
+        defer { GlimmerRevealStore.shared.clear(revealID) }
         let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
         let clock = ManualRevealClock()
         view.clock = clock
         let window = hostInWindow(view, width: 390, height: 800)
         // Mixed markdown, as the device probe measured: lists, quotes and headings put many lines within reach.
-        view.update(markdown: String(longMixedAnswer.prefix(3_000)), isStreaming: true, revealID: "phrase-starts")
+        view.update(markdown: String(longMixedAnswer.prefix(3_000)), isStreaming: true, revealID: revealID)
         await view.pendingDocument?.value
         settle(view)
         var samples: [Duration] = []
@@ -232,9 +235,10 @@ final class GlimmerStreamingPerformanceTests: XCTestCase {
             clock.advance(to: time)
             samples.append(threadCPUTime() - start)
         }
+        XCTAssertGreaterThan(samples.count, 20)
+        _ = try XCTUnwrap(samples.first, "the reveal must schedule work before its cost can be measured")
         let median = samples.sorted()[samples.count / 2]
         print("PERF phrase start median \(median) over \(samples.count) wakes")
-        XCTAssertGreaterThan(samples.count, 20)
         XCTAssertLessThan(median, gate)
         _ = window
     }

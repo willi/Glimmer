@@ -10,20 +10,23 @@ final class GlimmerTableViewTests: XCTestCase {
         NSAttributedString(string: text, attributes: [.font: header ? theme.tableHeaderFont : theme.tableFont])
     }
 
-    func testShortTableFillsTheWidth() {
+    func testShortTableFillsTheWidthAfterResizing() {
         let table = GlimmerTableView(
             header: [cell("a", header: true), cell("b", header: true)],
             rows: [[cell("1"), cell("2")]],
             alignments: [.left, .right],
             theme: theme
         )
-        let layout = table.layout(forWidth: 300)
-        XCTAssertEqual(layout.contentWidth, 300, accuracy: 0.5)
-        XCTAssertEqual(layout.rowHeights.count, 2)
-        XCTAssertEqual(table.embedHeight(forWidth: 300), layout.height)
-
-        let window = hostInWindow(table, width: 300, height: layout.height)
-        XCTAssertLessThanOrEqual(table.scrollView.contentSize.width, 300.5)
+        let window = hostInWindow(table, width: 300, height: table.embedHeight(forWidth: 300))
+        for width in [CGFloat(300), 200, 300] {
+            table.frame.size.width = width
+            table.layoutIfNeeded()
+            let layout = table.layout(forWidth: width)
+            XCTAssertEqual(layout.contentWidth, width, accuracy: 0.5)
+            XCTAssertEqual(layout.rowHeights.count, 2)
+            XCTAssertEqual(table.embedHeight(forWidth: width), layout.height)
+            XCTAssertEqual(table.scrollView.contentSize.width, width, accuracy: 0.5)
+        }
         _ = window
     }
 
@@ -177,12 +180,6 @@ final class GlimmerTableViewTests: XCTestCase {
             theme: theme
         )
         XCTAssertEqual(table.cellLabels[1].count, 2)
-    }
-
-    func testLayoutIsCachedPerWidth() {
-        let table = GlimmerTableView(header: [cell("a", header: true)], rows: [[cell("1")]], alignments: [.none], theme: theme)
-        XCTAssertEqual(table.layout(forWidth: 300), table.layout(forWidth: 300))
-        XCTAssertNotEqual(table.layout(forWidth: 300).columnWidths, table.layout(forWidth: 200).columnWidths)
     }
 
     func testGridChangesDoNotAnimate() {

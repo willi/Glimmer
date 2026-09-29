@@ -4,6 +4,26 @@ import XCTest
 
 @MainActor
 final class GlimmerMarkdownSerializerTests: XCTestCase {
+    func testRoundTripComparisonDetectsChangedTableCellStyling() {
+        let plain = NSAttributedString(string: "cell", attributes: [.foregroundColor: UIColor.red])
+        let changed = NSAttributedString(string: "cell", attributes: [.foregroundColor: UIColor.blue])
+        func table(_ cell: NSAttributedString) -> NSAttributedString {
+            NSAttributedString(attachment: GlimmerBlockAttachment(
+                embed: .table(header: [cell], rows: [], alignments: [.none]), theme: .default,
+                highlighter: GlimmerBasicHighlighter(), imageLoader: nil
+            ))
+        }
+        // The visible string and attachment class match; the cell payload must still be compared.
+        let options = XCTExpectedFailure.Options()
+        options.issueMatcher = {
+            $0.compactDescription.contains("table cell styling: \(NSAttributedString.Key.foregroundColor.rawValue) at 0")
+        }
+        XCTExpectFailure("Changed table styling must fail the round-trip oracle", options: options) {
+            assertEquivalent(table(plain), table(changed), "table cell styling")
+        }
+        assertEquivalent(table(plain), table(plain), "independently composed equivalent cells")
+    }
+
     private let composer = GlimmerComposer(theme: .default)
 
     private func compose(_ markdown: String) -> NSAttributedString {

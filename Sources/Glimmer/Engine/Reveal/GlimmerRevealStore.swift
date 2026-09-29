@@ -8,9 +8,9 @@ final class GlimmerRevealStore {
     static let shared = GlimmerRevealStore()
 
     private let capacity: Int
-    /// `version` is the text view's text version when the entry was recorded, or -1 when unknown; `owner` is that text
+    /// `version` is the text view's text version when the entry was recorded; `owner` is that text
     /// view's serial number, since a version identifies text only within its own view.
-    private var entries: [String: (length: Int, prefixHash: Int, version: Int, owner: Int?)] = [:]
+    private var entries: [String: (length: Int, prefixHash: Int, version: Int, owner: Int)] = [:]
     private var recent: [String] = []
 
     init(capacity: Int = 256) {
@@ -28,15 +28,10 @@ final class GlimmerRevealStore {
         return entry.length
     }
 
-    /// Records `length` for `id`. It only grows while `text` is the same answer; a regenerated answer starts over.
-    func record(_ length: Int, text: NSString, for id: String) {
-        record(length, text: text, version: -1, owner: nil, for: id)
-    }
-
     /// Records `length` for `id`, where `version` changes whenever `text` does. While it stays the same, the opening is
     /// hashed again only if the hashed part grew, so recording on every reveal step costs nothing on a long answer.
-    func record(_ length: Int, text: NSString, version: Int, owner: Int?, for id: String) {
-        if version >= 0, let owner, let entry = entries[id], entry.version == version, entry.owner == owner {
+    func record(_ length: Int, text: NSString, version: Int, owner: Int, for id: String) {
+        if let entry = entries[id], entry.version == version, entry.owner == owner {
             let stored = max(entry.length, length)
             let grew = min(stored, 1_024, text.length) != min(entry.length, 1_024, text.length)
             entries[id] = (stored, grew ? Self.prefixHash(of: text, length: stored) : entry.prefixHash, version, owner)

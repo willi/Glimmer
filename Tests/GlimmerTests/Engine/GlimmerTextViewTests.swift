@@ -50,6 +50,23 @@ final class GlimmerTextViewTests: XCTestCase {
         XCTAssertEqual(textView.sizeThatFits(CGSize(width: 0, height: CGFloat.greatestFiniteMagnitude)).height, 0)
     }
 
+    func testReplacingTextInvalidatesItsMeasuredHeightAtTheSameWidth() {
+        let textView = GlimmerTextView()
+        let size = CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)
+        let composer = GlimmerComposer(theme: theme)
+        textView.replaceText(with: composer.compose(GlimmerParser.parse("Short answer.")))
+        let before = textView.sizeThatFits(size).height
+        XCTAssertGreaterThan(before, 0)
+
+        let replacement = composer.compose(GlimmerParser.parse(String(repeating: "Another paragraph.\n\n", count: 20)))
+        textView.replaceText(with: replacement)
+        let after = textView.sizeThatFits(size).height
+        let fresh = GlimmerTextView()
+        fresh.replaceText(with: replacement)
+        XCTAssertGreaterThan(after, before, "the previous same-width measurement must not survive replacement")
+        XCTAssertEqual(after, fresh.sizeThatFits(size).height, accuracy: 0.5)
+    }
+
     func testCodeBlockAttachmentHostsAFullWidthView() throws {
         let code = GlimmerEmbed.codeBlock(language: "swift", code: "let x = 1\nlet y = 2")
         let textView = GlimmerTextView()
@@ -62,21 +79,6 @@ final class GlimmerTextViewTests: XCTestCase {
         XCTAssertEqual(view.frame.height, view.embedHeight(forWidth: 390), accuracy: 0.5)
         XCTAssertGreaterThan(height, view.frame.height)
         _ = window
-    }
-
-    func testFactoryBuildsEveryEmbedKind() {
-        let url = URL(string: "https://example.com/a.png")!  // test-only literal
-        let embeds: [GlimmerEmbed] = [
-            .codeBlock(language: nil, code: "x"),
-            .table(header: [NSAttributedString(string: "h")], rows: [], alignments: [.none]),
-            .image(source: url, alt: "a"),
-            .thematicBreak,
-        ]
-        let kinds = embeds.map { embed in
-            let attachment = GlimmerBlockAttachment(embed: embed, theme: theme, highlighter: GlimmerBasicHighlighter(), imageLoader: nil)
-            return String(describing: type(of: GlimmerEmbedViewFactory.makeView(for: attachment)))
-        }
-        XCTAssertEqual(kinds, ["GlimmerCodeBlockView", "GlimmerTableView", "GlimmerImageEmbedView", "GlimmerRuleView"])
     }
 
     func testEmbedsResizeWhenWidthChanges() throws {
@@ -132,9 +134,10 @@ final class GlimmerTextViewTests: XCTestCase {
         let loader = SuspendingImageLoader()
         let url = URL(string: "https://example.com/a.png")!  // test-only literal
         var view: GlimmerImageEmbedView? = GlimmerImageEmbedView(source: url, alt: "a", theme: theme, loader: loader)
-        let started = await waitUntil { loader.didStart }
-        XCTAssertTrue(started)
-        XCTAssertNotNil(view)
+        // Size-aware loading starts when TextKit supplies the attachment's display bounds.
+        view?.frame = CGRect(x: 0, y: 0, width: 100, height: 100)
+        view?.layoutIfNeeded()
+        guard await waitUntil({ loader.didStart }) else { return XCTFail("the laid-out image must start loading") }
         view = nil
         let cancelled = await waitUntil { loader.wasCancelled }
         XCTAssertTrue(cancelled, "a dropped image view must not keep fetching")

@@ -179,6 +179,7 @@ final class GlimmerStreamingDocumentTests: XCTestCase {
             if let edit = document.update(markdown: prefix, isStreaming: true) {
                 XCTAssertGreaterThanOrEqual(edit.range.location, min(previousLastOffset, mirror.length),
                                             "committed blocks changed at prefix \(end)")
+                for update in edit.embedUpdates { update.attachment.update(to: update.embed) }
                 mirror.replaceCharacters(in: edit.range, with: edit.replacement)
             }
             assertEquivalent(document.text, freshCompose(prefix, isStreaming: true), "prefix \(end)")
@@ -187,6 +188,7 @@ final class GlimmerStreamingDocumentTests: XCTestCase {
             previousLastOffset = max(0, (document.blockOffsets.dropLast().last ?? 1) - 1)
         }
         if let edit = document.update(markdown: markdown, isStreaming: false) {
+            for update in edit.embedUpdates { update.attachment.update(to: update.embed) }
             mirror.replaceCharacters(in: edit.range, with: edit.replacement)
         }
         assertEquivalent(document.text, freshCompose(markdown, isStreaming: false), "final")

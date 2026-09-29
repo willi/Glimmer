@@ -47,7 +47,7 @@ final class GlimmerDocumentCacheTests: XCTestCase {
         XCTAssertEqual(first.plainText(), "Hello Carol")
     }
 
-    func testCachedAttachmentsUseTheCurrentLoaderInstance() throws {
+    func testCustomLoaderInstancesNeverShareCachedAttachments() throws {
         let firstLoader = RecordingImageLoader()
         let secondLoader = RecordingImageLoader()
         let first = GlimmerView(configuration: .init(imageLoader: firstLoader))

@@ -10,15 +10,6 @@ final class GlimmerEmbedViewPoolTests: XCTestCase {
         GlimmerEmbedViewPool.shared.removeAll()
     }
 
-    func testAStreamingViewPreparesACodeBlockView() async {
-        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
-        let window = hostInWindow(view, width: 390, height: 800)
-        view.update(markdown: "An answer begins", isStreaming: true, revealID: "pool")
-        let prepared = await waitUntil { GlimmerEmbedViewPool.shared.hasCodeBlockView(for: GlimmerTheme.default.scaled(for: view.traitCollection)) }
-        XCTAssertTrue(prepared)
-        _ = window
-    }
-
     func testAStreamedCodeBlockTakesThePreparedView() async throws {
         let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
         let window = hostInWindow(view, width: 390, height: 800)
@@ -43,16 +34,21 @@ final class GlimmerEmbedViewPoolTests: XCTestCase {
 
     /// A settled answer that takes the prepared view (it composes a code block) prepares no replacement: only a stream
     /// is waiting for the next fence.
-    func testTakingOutsideAStreamPreparesNoReplacement() async {
+    func testTakingOutsideAStreamPreparesNoReplacement() async throws {
         let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil, reveal: .none))
         let window = hostInWindow(view, width: 390, height: 800)
         let theme = GlimmerTheme.default.scaled(for: view.traitCollection)
         view.update(markdown: "An answer begins", isStreaming: true, revealID: "settle")
-        _ = await waitUntil { GlimmerEmbedViewPool.shared.hasCodeBlockView(for: theme) }
+        guard await waitUntil({ GlimmerEmbedViewPool.shared.hasCodeBlockView(for: theme) }) else {
+            return XCTFail("the stream must prepare a view before the settled answer takes it")
+        }
+        let prepared = try XCTUnwrap(GlimmerEmbedViewPool.shared.peekCodeBlockView(for: theme))
         view.update(markdown: "An answer ends \(UUID())\n\n```swift\nlet x = 1\n```", isStreaming: false, revealID: "settle")
         await view.pendingDocument?.value
         settle(view)
-        try? await Task.sleep(for: .milliseconds(150))
+        let shown = try XCTUnwrap(findSubview(GlimmerCodeBlockView.self, in: view))
+        XCTAssertTrue(shown === prepared, "the settled answer consumed the prepared view")
+        try await Task.sleep(for: .milliseconds(150))
         XCTAssertFalse(GlimmerEmbedViewPool.shared.hasCodeBlockView(for: theme), "no replacement for a settled answer")
         _ = window
     }
