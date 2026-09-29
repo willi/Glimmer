@@ -81,6 +81,9 @@ final class GlimmerViewStreamingTests: XCTestCase {
         await view.pendingDocument?.value
         XCTAssertNil(view.textView.layer.mask)
         XCTAssertNil(view.engine)
+        XCTAssertEqual(view.plainText(), answer)
+        XCTAssertGreaterThan(view.intrinsicContentSize.height, 0)
+        XCTAssertEqual(view.intrinsicContentSize.height, fullHeight(view), accuracy: 0.5)
         _ = window
     }
 

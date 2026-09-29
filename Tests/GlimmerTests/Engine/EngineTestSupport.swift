@@ -56,8 +56,7 @@ func layoutFragments(_ textView: UITextView) -> [NSTextLayoutFragment] {
     return fragments
 }
 
-/// Compares two attributed strings run by run. Attachments compare by type, because every composition creates new
-/// attachment objects; every other attribute value must be `isEqual`.
+/// Compares rendered content run by run, including attachment payloads but not their view or loader identity.
 func assertEquivalent(
     _ lhs: NSAttributedString, _ rhs: NSAttributedString, _ message: String,
     file: StaticString = #filePath, line: UInt = #line
@@ -75,11 +74,49 @@ func assertEquivalent(
             guard let rightValue = right[key] else { continue }
             if let leftAttachment = leftValue as? NSTextAttachment, let rightAttachment = rightValue as? NSTextAttachment {
                 XCTAssertTrue(type(of: leftAttachment) == type(of: rightAttachment), "\(message): attachment at \(index)", file: file, line: line)
+                switch (leftAttachment, rightAttachment) {
+                case let (left as GlimmerBlockAttachment, right as GlimmerBlockAttachment):
+                    assertEquivalent(left.embed, right.embed, message, file: file, line: line)
+                case let (left as GlimmerInlineImageAttachment, right as GlimmerInlineImageAttachment):
+                    XCTAssertEqual(left.source, right.source, message, file: file, line: line)
+                    XCTAssertEqual(left.alt, right.alt, message, file: file, line: line)
+                    XCTAssertEqual(left.isLinked, right.isLinked, message, file: file, line: line)
+                    XCTAssertEqual(left.shape, right.shape, message, file: file, line: line)
+                case let (left as GlimmerInlineAttachment, right as GlimmerInlineAttachment):
+                    XCTAssertEqual(left.token, right.token, message, file: file, line: line)
+                default:
+                    XCTAssertEqual(leftAttachment.bounds, rightAttachment.bounds, message, file: file, line: line)
+                    XCTAssertEqual(leftAttachment.image?.pngData(), rightAttachment.image?.pngData(), message, file: file, line: line)
+                }
             } else {
                 XCTAssertTrue((leftValue as AnyObject).isEqual(rightValue), "\(message): \(key.rawValue) at \(index)", file: file, line: line)
             }
         }
         index = min(NSMaxRange(lhsRange), NSMaxRange(rhsRange))
+    }
+}
+
+private func assertEquivalent(
+    _ lhs: GlimmerEmbed, _ rhs: GlimmerEmbed, _ message: String, file: StaticString, line: UInt
+) {
+    switch (lhs, rhs) {
+    case let (.codeBlock(language, code, highlighted), .codeBlock(otherLanguage, otherCode, otherHighlight)):
+        XCTAssertEqual(language, otherLanguage, message, file: file, line: line)
+        XCTAssertEqual(code, otherCode, message, file: file, line: line)
+        XCTAssertEqual(highlighted == nil, otherHighlight == nil, message, file: file, line: line)
+        if let highlighted, let otherHighlight { assertEquivalent(highlighted, otherHighlight, message, file: file, line: line) }
+    case let (.table(header, rows, alignments), .table(otherHeader, otherRows, otherAlignments)):
+        XCTAssertEqual(alignments, otherAlignments, message, file: file, line: line)
+        XCTAssertEqual(rows.count, otherRows.count, message, file: file, line: line)
+        for (left, right) in zip([header] + rows, [otherHeader] + otherRows) {
+            XCTAssertEqual(left.count, right.count, message, file: file, line: line)
+            for (cell, otherCell) in zip(left, right) { assertEquivalent(cell, otherCell, message, file: file, line: line) }
+        }
+    case let (.image(source, alt), .image(otherSource, otherAlt)):
+        XCTAssertEqual(source, otherSource, message, file: file, line: line)
+        XCTAssertEqual(alt, otherAlt, message, file: file, line: line)
+    case (.thematicBreak, .thematicBreak): break
+    default: XCTFail("\(message): different embed kinds", file: file, line: line)
     }
 }
 
@@ -174,25 +211,39 @@ func threadCPUTime() -> Duration {
 @MainActor
 func assertStreamingKeepsShownTextInPlace(
     _ markdown: String, configuration: GlimmerConfiguration = GlimmerConfiguration(imageLoader: nil, reveal: .none),
-    every step: Int = 3, file: StaticString = #filePath, line: UInt = #line
+    every step: Int = 3, expectedPlainText: String? = nil, file: StaticString = #filePath, line: UInt = #line
 ) {
     let view = GlimmerView(configuration: configuration)
     let window = hostInWindow(view, width: 390, height: 800)
     var previous: ShownText?
+    var comparedStableText = false
     var end = markdown.startIndex
     while end < markdown.endIndex {
         end = markdown.index(end, offsetBy: step, limitedBy: markdown.endIndex) ?? markdown.endIndex
         view.update(markdown: String(markdown[..<end]), isStreaming: end < markdown.endIndex, revealID: "stability")
         let deadline = Date().addingTimeInterval(5)
         while view.pendingDocument != nil, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.002)) }
+        guard view.pendingDocument == nil else {
+            return XCTFail("the streaming document did not finish", file: file, line: line)
+        }
         view.layoutIfNeeded()
         let shown = ShownText(view.textView)
-        if let previous, let failure = shown.movedText(since: previous) {
-            XCTFail("at prefix \(markdown.distance(from: markdown.startIndex, to: end)) " +
-                    "(…\(String(markdown[..<end].suffix(30)).debugDescription)): \(failure)", file: file, line: line)
-            break
+        if let previous {
+            comparedStableText = comparedStableText || previous.stableLength > 0
+            if let failure = shown.movedText(since: previous) {
+                XCTFail("at prefix \(markdown.distance(from: markdown.startIndex, to: end)) " +
+                        "(…\(String(markdown[..<end].suffix(30)).debugDescription)): \(failure)", file: file, line: line)
+                break
+            }
         }
         previous = shown
+    }
+    XCTAssertTrue(comparedStableText, "the fixture never compared a nonempty stable paragraph", file: file, line: line)
+    let settled = GlimmerView(configuration: configuration)
+    settled.update(markdown: markdown)
+    assertEquivalent(view.textView.textStorage, settled.textView.textStorage, "the stream reached its settled content", file: file, line: line)
+    if let expectedPlainText {
+        XCTAssertEqual(view.plainText(), expectedPlainText, file: file, line: line)
     }
     _ = window
 }
@@ -245,11 +296,21 @@ struct ShownText {
             return "text before offset \(stable) changed: \(previous.text.substring(to: stable).debugDescription) became " +
                 "\(text.substring(to: min(stable, text.length)).debugDescription)"
         }
-        for before in previous.styles where before.range.location < stable {
-            guard let after = styles.first(where: { NSLocationInRange(before.range.location, $0.range) }) else { continue }
-            if before.color != after.color || before.font != after.font || before.attachment != after.attachment {
-                return "text at \(before.range.location) was restyled: \(before) → \(after)"
+        var position = 0
+        var beforeIndex = 0
+        var afterIndex = 0
+        while position < stable {
+            guard beforeIndex < previous.styles.count, afterIndex < styles.count else {
+                return "text at \(position) lost its style run"
             }
+            let before = previous.styles[beforeIndex], after = styles[afterIndex]
+            if before.color != after.color || before.font != after.font || before.attachment != after.attachment {
+                return "text at \(position) was restyled: \(before) → \(after)"
+            }
+            // Either snapshot may introduce a run boundary inside the other's uniform text.
+            position = min(NSMaxRange(before.range), NSMaxRange(after.range), stable)
+            if position == NSMaxRange(before.range) { beforeIndex += 1 }
+            if position == NSMaxRange(after.range) { afterIndex += 1 }
         }
         let now = Array(rects.prefix(previous.rects.count))
         guard now.count == previous.rects.count else { return "\(previous.rects.count) glyph rects became \(now.count)" }

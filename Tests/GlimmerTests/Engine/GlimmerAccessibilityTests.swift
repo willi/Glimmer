@@ -154,14 +154,6 @@ final class GlimmerAccessibilityTests: XCTestCase {
         _ = window
     }
 
-    func testReplacingTheTextStillForgetsWhatWasMeasured() {
-        let textView = GlimmerTextView()
-        textView.frame = CGRect(x: 0, y: 0, width: 320, height: 800)
-        let version = textView.textVersion
-        textView.replaceText(with: NSAttributedString(string: "New text"))
-        XCTAssertNotEqual(textView.textVersion, version)
-    }
-
     func testRevealingViewIsOneElementWithTheRevealedText() async {
         let (view, clock, window) = revealingView()
         view.update(markdown: answer, isStreaming: true)

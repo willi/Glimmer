@@ -62,11 +62,6 @@ enum GlimmerTailHealer {
 
     /// The line that would close a fence still open at the end of `markdown`, or nil. It repeats the opener's quote
     /// markers and indentation, so a fence inside a list item or a quote closes there instead of starting a new block.
-    static func openFence(in markdown: String) -> String? {
-        var scan = FenceScan()
-        return openFence(in: markdown, scan: &scan)
-    }
-
     private static func openFence(in markdown: String, scan: inout FenceScan) -> String? {
         let utf8 = markdown.utf8
         var lineStart = utf8.index(utf8.startIndex, offsetBy: min(scan.scannedTo, utf8.count))

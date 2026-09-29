@@ -182,7 +182,10 @@ final class GlimmerInlineImageTests: XCTestCase {
     }
 
     func testInlineImagesStreamWithoutMovingShownText() {
-        assertStreamingKeepsShownTextInPlace("Status ![build](https://example.com/b.png) and ![cov](https://example.com/c.png) badges, then more text.")
+        assertStreamingKeepsShownTextInPlace(
+            "Status ![build](https://example.com/b.png) and ![cov](https://example.com/c.png) badges.\n\nThe next paragraph keeps growing.",
+            expectedPlainText: "Status build and cov badges.\nThe next paragraph keeps growing."
+        )
     }
 
     func testAStreamingParagraphKeepsItsImage() throws {

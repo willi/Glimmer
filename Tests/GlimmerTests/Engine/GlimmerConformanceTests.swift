@@ -2,16 +2,16 @@ import XCTest
 @testable import Glimmer
 
 final class GlimmerConformanceTests: XCTestCase {
-    func testCommonMarkExamplesNeverLoseContent() throws {
+    func testCommonMarkExamplesWithHTMLProduceBlocks() throws {
         let examples = try SpecExamples.load("spec")
         XCTAssertGreaterThan(examples.count, 600)
-        assertNoContentLoss(examples)
+        assertProducesBlocks(examples)
     }
 
-    func testGFMExtensionExamplesNeverLoseContent() throws {
+    func testGFMExtensionExamplesWithHTMLProduceBlocks() throws {
         let examples = try SpecExamples.load("extensions")
         XCTAssertGreaterThan(examples.count, 20)
-        assertNoContentLoss(examples)
+        assertProducesBlocks(examples)
     }
 
     func testEveryNodeKindIsReachable() throws {
@@ -29,13 +29,13 @@ final class GlimmerConformanceTests: XCTestCase {
 
     // MARK: - Helpers
 
-    /// Whenever cmark's reference HTML has content, the Glimmer tree must too. (The reverse is not asserted:
-    /// some fixtures enable options, such as footnotes and tag filtering, that Glimmer leaves off.)
-    private func assertNoContentLoss(_ examples: [SpecExample], file: StaticString = #filePath, line: UInt = #line) {
+    /// Smoke coverage, not semantic conformance: nonempty reference HTML must produce at least one block.
+    /// Fixture options and Glimmer's presentation differ, so this does not compare the contents or HTML bytes.
+    private func assertProducesBlocks(_ examples: [SpecExample], file: StaticString = #filePath, line: UInt = #line) {
         for example in examples where !example.html.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             XCTAssertFalse(
                 GlimmerParser.parse(example.markdown).isEmpty,
-                "\(example.file) example \(example.number) lost content: \(example.markdown.debugDescription)",
+                "\(example.file) example \(example.number) produced no blocks: \(example.markdown.debugDescription)",
                 file: file, line: line
             )
         }

@@ -196,15 +196,6 @@ final class GlimmerCodeBlockViewTests: XCTestCase {
         }
     }
 
-    func testColorRunsDescribeTheHighlight() {
-        let theme = GlimmerTheme.default
-        let text = GlimmerCodeHighlighting.highlightedCode("let x = 1 // c", language: "swift", theme: theme, highlighter: GlimmerBasicHighlighter())
-        let runs = GlimmerCodeBlockView.colorRuns(of: text)
-        XCTAssertEqual(runs.first?.range.location, 0)
-        XCTAssertEqual(runs.map(\.range.length).reduce(0, +), text.length)
-        XCTAssertTrue(runs.contains { $0.color == theme.syntaxCommentColor })
-    }
-
     /// The colour-run diff also handles code that shrinks (a healed fence dropped) and a language that changes (the info
     /// string completing): the text and colours match a fresh block at each step.
     func testStreamedCodeThatShrinksOrChangesLanguageMatchesAFreshHighlight() {

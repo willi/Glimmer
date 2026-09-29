@@ -155,12 +155,20 @@ final class GlimmerMentionsTests: XCTestCase {
         XCTAssertEqual(text.attribute(.foregroundColor, at: 7, effectiveRange: nil) as? UIColor, theme.textColor)
     }
 
-    func testAPartialMentionIsHeldBackWhileStreaming() {
+    func testAPartialMentionIsHeldBackWhileStreaming() async {
         let mentions = GlimmerMentions()
         XCTAssertEqual(mentions.streamingHoldBack(in: "Thanks @gra"), 4)
         XCTAssertEqual(mentions.streamingHoldBack(in: "Thanks @grace."), 7)
         XCTAssertEqual(mentions.streamingHoldBack(in: "Thanks @grace "), 0)
         XCTAssertEqual(mentions.streamingHoldBack(in: "ada@exa"), 0, "part of an email")
+
+        let view = GlimmerView(configuration: GlimmerConfiguration(extensions: [mentions], imageLoader: nil, reveal: .none))
+        for (source, shown) in [("Thanks @gra", "Thanks"), ("Thanks @grace.", "Thanks"), ("Thanks @grace ", "Thanks @grace"), ("ada@exa", "ada@exa")] {
+            view.update(markdown: source, isStreaming: true)
+            await view.pendingDocument?.value
+            XCTAssertEqual(view.plainText(), shown, "visible content for \(source)")
+        }
+
     }
 
     /// The longest name GitHub allows, then a period that may start a domain: the whole of it waits, not all but its `@`.
@@ -172,9 +180,9 @@ final class GlimmerMentionsTests: XCTestCase {
 
     func testMentionsStreamWithoutMovingShownText() {
         assertStreamingKeepsShownTextInPlace(
-            "Thanks @ada and @grace-hopper for this. Reach ada@example.com or @example.com.",
+            "Thanks @ada and @grace-hopper for this. Reach ada@example.com or @example.com.\n\nThe next paragraph keeps growing.",
             configuration: GlimmerConfiguration(extensions: [GlimmerMentions()], imageLoader: nil, reveal: .none),
-            every: 1
+            every: 1, expectedPlainText: "Thanks @ada and @grace-hopper for this. Reach ada@example.com or @example.com.\nThe next paragraph keeps growing."
         )
     }
 

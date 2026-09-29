@@ -22,6 +22,9 @@ final class BenchmarkHitchUITests: XCTestCase {
         XCTAssertTrue(summary.waitForExistence(timeout: 10))
         print("BENCHMARK \(summary.label)")
         XCTAssertTrue(summary.label.hasPrefix("done"), summary.label)
+        let frames = summary.label.firstMatch(of: #/frames=([0-9]+)/#).flatMap { Int($0.1) }
+        // A stopped monitor reports a perfect ratio of zero. Require sustained sampling before trusting it.
+        XCTAssertGreaterThan(try XCTUnwrap(frames, summary.label), 60, summary.label)
         #if !targetEnvironment(simulator)
         let ratio = summary.label.firstMatch(of: #/ratio=([0-9.]+)ms\/s/#).flatMap { Double($0.1) }
         XCTAssertLessThan(try XCTUnwrap(ratio, summary.label), 4.5, summary.label)

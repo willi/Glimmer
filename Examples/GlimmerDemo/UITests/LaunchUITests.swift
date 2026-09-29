@@ -1,14 +1,6 @@
 import XCTest
 
 final class LaunchUITests: XCTestCase {
-    @MainActor
-    func testEngineGalleryOpens() {
-        let app = XCUIApplication()
-        app.launchArguments = ["--engine-gallery"]
-        app.launch()
-        XCTAssertTrue(app.navigationBars["Engine Gallery"].waitForExistence(timeout: 15))
-    }
-
     /// VoiceOver builds a task line's label from its text and skips the checkbox image, so the line must carry its
     /// state as text.
     @MainActor

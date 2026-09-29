@@ -57,10 +57,10 @@ final class GlimmerTailHealerTests: XCTestCase {
         }
     }
 
-    func testOpenFenceDetection() {
-        XCTAssertEqual(GlimmerTailHealer.openFence(in: "````js\nx"), "````")
-        XCTAssertNil(GlimmerTailHealer.openFence(in: "```\nx\n```"))
-        XCTAssertNil(GlimmerTailHealer.openFence(in: "inline ``` not a fence"))
+    func testFenceHealingUsesTheOpeningRunAndLeavesClosedFencesAlone() {
+        XCTAssertEqual(GlimmerTailHealer.heal("````js\nx"), "````js\nx\n````")
+        XCTAssertEqual(GlimmerTailHealer.heal("```\nx\n```"), "```\nx\n```")
+        XCTAssertEqual(GlimmerTailHealer.heal("inline ``` not a fence"), "inline ``` not a fence```")
     }
 
     func testFenceInsideAListStaysInTheList() {
