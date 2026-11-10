@@ -198,6 +198,39 @@ final class GlimmerTextViewTests: XCTestCase {
         XCTAssertGreaterThan(checked, 100)
         _ = window
     }
+
+    func testOwnedTextViewSuppressesIntrinsicContentSizeInvalidation() throws {
+        final class CountingHost: UIView {
+            var passes = 0
+            override func layoutSubviews() {
+                passes += 1
+                super.layoutSubviews()
+            }
+        }
+        let glimmerView = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
+        XCTAssertFalse(glimmerView.textView.managesOwnIntrinsicHeight)
+
+        let host = CountingHost(frame: CGRect(x: 0, y: 0, width: 390, height: 800))
+        let window = hostInWindow(host, width: 390, height: 800)
+        let textView = GlimmerTextView()
+        textView.managesOwnIntrinsicHeight = false
+        textView.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(textView)
+        NSLayoutConstraint.activate([
+            textView.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            textView.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            textView.topAnchor.constraint(equalTo: host.topAnchor),
+        ])
+        let document = GlimmerStreamingDocument(composer: GlimmerComposer(theme: theme))
+        if let first = document.update(markdown: "First line.", isStreaming: true) { textView.apply(first) }
+        host.layoutIfNeeded()
+        host.passes = 0
+        let second = try XCTUnwrap(document.update(markdown: "First line.\n\nSecond paragraph that grows the text.", isStreaming: true))
+        textView.apply(second)
+        host.layoutIfNeeded()
+        XCTAssertEqual(host.passes, 0, "an owned text view leaves intrinsic sizing to its owner")
+        _ = window
+    }
 }
 
 /// Counts fetches; returns an empty image.

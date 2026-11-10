@@ -65,6 +65,7 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView, UITextViewDelegate {
         clipsToBounds = true
 
         let padding = theme.embedPadding
+        textView.managesOwnIntrinsicHeight = false
         textView.backgroundColor = .clear
         textView.textContainerInset = UIEdgeInsets(top: padding, left: padding, bottom: padding, right: padding)
         textView.setText(self.highlighted)

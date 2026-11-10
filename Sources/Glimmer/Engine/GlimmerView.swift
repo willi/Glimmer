@@ -56,7 +56,7 @@ public final class GlimmerView: UIView {
     private var contentHeight: (version: Int, width: CGFloat, height: CGFloat)?
     /// The bottom of the last revealed line, for a revealed length and width. Appends after the revealed text do not
     /// move it; edits that reach into the revealed text clear it.
-    private var revealedHeight: (revealed: Int, width: CGFloat, height: CGFloat)?
+    private(set) var revealedHeight: (revealed: Int, width: CGFloat, height: CGFloat)?
     /// The first character whose layout may have changed since the text view was last measured.
     private var layoutChangedFrom = 0
     /// Embeds that reveal in units (code lines, table rows): document offset → each unit's length.
@@ -71,6 +71,7 @@ public final class GlimmerView: UIView {
         super.init(frame: .zero)
         // While revealing, this view is shorter than the text and clips the rest (see `fitTextViewToContent`).
         clipsToBounds = true
+        textView.managesOwnIntrinsicHeight = false
         textView.delegate = self
         textView.reusesDrawnText = configuration.reusesDrawnText
         addSubview(textView)
@@ -480,12 +481,13 @@ public final class GlimmerView: UIView {
         embedUnits = result.embedUnits
         if let edit = result.edit {
             cacheKey = nil
+            let reachesRevealed = engine.map { editReachesRevealedText(edit, revealedLength: $0.revealedLength) } ?? false
             // Grown code blocks and tables update their views in place; the edit then re-lays them out.
             for update in edit.embedUpdates { update.attachment.update(to: update.embed) }
             textView.apply(edit)
             layoutChangedFrom = min(layoutChangedFrom, edit.range.location)
             // Revealed text changed or reflowed (a list turned loose, a header became a table): fading phrases move.
-            if let engine, edit.range.location < engine.revealedLength {
+            if reachesRevealed {
                 revealMask.invalidateGeometry()
                 revealedHeight = nil
             }
@@ -497,11 +499,39 @@ public final class GlimmerView: UIView {
         }
         if replacedText || result.edit != nil { fitTextViewToContent() }
         startRevealIfNeeded(isStreaming: result.isStreaming)
-        engine?.textChanged(NSString(string: textView.textStorage.string), isStreaming: result.isStreaming,
+        engine?.textChanged(textView.textStorage.string as NSString, isStreaming: result.isStreaming,
                             now: clock.now, embedUnits: embedUnits)
-        advanceReveal()
-        reportHeightIfChanged()
+        if engine != nil {
+            advanceReveal()
+        } else {
+            reportHeightIfChanged()
+        }
         lastApplyDuration = ContinuousClock.now - started
+    }
+
+    /// Whether `edit` changes or can reflow text before `revealedLength`. An edit to a paragraph starts at the
+    /// paragraph's opening even when it only appends to the unrevealed tail; if the revealed prefix and the word
+    /// containing its end are unchanged, its glyphs stay where they are.
+    private func editReachesRevealedText(_ edit: GlimmerDocumentEdit, revealedLength: Int) -> Bool {
+        guard edit.range.location < revealedLength else { return false }
+        let revealedInEdit = revealedLength - edit.range.location
+        let newString = edit.replacement.string as NSString
+        var keepEnd = revealedInEdit
+        if keepEnd > 0, keepEnd <= newString.length {
+            let lastRevealed = newString.character(at: keepEnd - 1)
+            if lastRevealed != 0x20, lastRevealed != 0x09, lastRevealed != 0x0A {
+                while keepEnd < newString.length {
+                    let unit = newString.character(at: keepEnd)
+                    if unit == 0x20 || unit == 0x09 || unit == 0x0A || unit >= 0x2E80 { break }
+                    keepEnd += 1
+                }
+                if keepEnd == revealedInEdit, keepEnd < newString.length { keepEnd += 1 }
+            }
+        }
+        guard keepEnd <= edit.range.length, keepEnd <= edit.replacement.length else { return true }
+        let oldPrefix = textView.textStorage.attributedSubstring(from: NSRange(location: edit.range.location, length: keepEnd))
+        let newPrefix = edit.replacement.attributedSubstring(from: NSRange(location: 0, length: keepEnd))
+        return !oldPrefix.isEqual(to: newPrefix)
     }
 
     // MARK: - Height
@@ -582,7 +612,7 @@ public final class GlimmerView: UIView {
 
     private func reportHeightIfChanged() {
         let height = height(forWidth: bounds.width)
-        guard height != lastReportedHeight else { return }
+        guard abs(height - lastReportedHeight) > 0.01 else { return }
         lastReportedHeight = height
         invalidateIntrinsicContentSize()
         onHeightChange?()
