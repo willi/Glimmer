@@ -207,4 +207,76 @@ final class GlimmerViewStreamingTests: XCTestCase {
             .compose(GlimmerParser.parse(answer)).string)
         _ = window
     }
+
+    func testHiddenLookaheadChunksKeepRevealedHeightAndSuppressHostRelayout() async throws {
+        final class CountingHost: UIView {
+            var passes = 0
+            override func layoutSubviews() {
+                passes += 1
+                super.layoutSubviews()
+            }
+        }
+        let host = CountingHost(frame: CGRect(x: 0, y: 0, width: 240, height: 800))
+        let window = hostInWindow(host, width: 240, height: 800)
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
+        let clock = ManualRevealClock()
+        view.clock = clock
+        view.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            view.topAnchor.constraint(equalTo: host.topAnchor),
+        ])
+        var heightChanges = 0
+        view.onHeightChange = { heightChanges += 1 }
+
+        let opening = "First phrase here. Second phrase"
+        view.update(markdown: opening, isStreaming: true)
+        await view.pendingDocument?.value
+        host.layoutIfNeeded()
+        let initialRevealed = try XCTUnwrap(view.engine).revealedLength
+        let initialHeight = view.intrinsicContentSize.height
+        XCTAssertGreaterThan(initialRevealed, 0)
+        XCTAssertGreaterThan(initialHeight, 0)
+        XCTAssertEqual(heightChanges, 1)
+
+        heightChanges = 0
+        host.passes = 0
+
+        // Appending lookahead text to the same paragraph and following paragraphs while the reveal has not advanced
+        // must keep the cached revealed height and never trigger `onHeightChange` or host Auto Layout passes.
+        let chunk2 = opening + " continues with many more unrevealed words that wrap across a second and third line of the paragraph."
+        view.update(markdown: chunk2, isStreaming: true)
+        await view.pendingDocument?.value
+        host.layoutIfNeeded()
+        XCTAssertNotNil(view.revealedHeight, "unrevealed lookahead inside the same paragraph keeps the cached revealed height")
+        XCTAssertEqual(view.engine?.revealedLength, initialRevealed)
+        XCTAssertEqual(view.intrinsicContentSize.height, initialHeight)
+        XCTAssertGreaterThan(view.textView.contentHeight, initialHeight * 2)
+        XCTAssertEqual(heightChanges, 0, "hidden lookahead must not fire onHeightChange")
+        XCTAssertEqual(host.passes, 0, "hidden lookahead must not invalidate intrinsic content size")
+
+        let chunk3 = chunk2 + "\n\nAnother hidden paragraph arrives in the same frame.\n\nAnd a third hidden paragraph below that."
+        view.update(markdown: chunk3, isStreaming: true)
+        await view.pendingDocument?.value
+        host.layoutIfNeeded()
+        XCTAssertNotNil(view.revealedHeight)
+        XCTAssertEqual(view.intrinsicContentSize.height, initialHeight)
+        XCTAssertEqual(heightChanges, 0)
+        XCTAssertEqual(host.passes, 0)
+
+        // Advancing the reveal clock onto the next lines now reports the new height and lays out the host.
+        var time = 0.0
+        while view.intrinsicContentSize.height <= initialHeight, time < 5 {
+            time += 0.05
+            clock.advance(to: time)
+        }
+        host.layoutIfNeeded()
+        XCTAssertGreaterThan(view.intrinsicContentSize.height, initialHeight)
+        XCTAssertGreaterThanOrEqual(heightChanges, 1)
+        XCTAssertGreaterThanOrEqual(host.passes, 1)
+        XCTAssertEqual(view.frame.height, view.intrinsicContentSize.height, accuracy: 0.5)
+        _ = window
+    }
 }

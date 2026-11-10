@@ -25,6 +25,8 @@ final class GlimmerTextView: UITextView {
     var contentHeight: CGFloat = 0 {
         didSet { if contentHeight != oldValue { refreshAccessibilityFrame() } }
     }
+    /// False when an owning view (`GlimmerView`, `GlimmerCodeBlockView`) sizes this view and reports its own height.
+    var managesOwnIntrinsicHeight = true
 
     /// VoiceOver frames the text, not the tall frame it is laid out in. Nonisolated, because UIKit's accessibility may
     /// read it off the main thread, where a main-actor member traps; there it is the frame the main thread last read.
@@ -198,12 +200,17 @@ final class GlimmerTextView: UITextView {
         return CGSize(width: UIView.noIntrinsicMetric, height: height)
     }
 
+    override func invalidateIntrinsicContentSize() {
+        guard managesOwnIntrinsicHeight else { return }
+        super.invalidateIntrinsicContentSize()
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
         refreshAccessibilityFrame()
         guard bounds.width != lastLayoutWidth else { return }
         lastLayoutWidth = bounds.width
-        invalidateIntrinsicContentSize()
+        if managesOwnIntrinsicHeight { invalidateIntrinsicContentSize() }
     }
 
     // MARK: - Streaming edits
@@ -229,7 +236,7 @@ final class GlimmerTextView: UITextView {
             textStorage.replaceCharacters(in: edit.range, with: edit.replacement)
         }
         textVersion &+= 1
-        invalidateIntrinsicContentSize()
+        if managesOwnIntrinsicHeight { invalidateIntrinsicContentSize() }
     }
 
     // MARK: - Reveal geometry
