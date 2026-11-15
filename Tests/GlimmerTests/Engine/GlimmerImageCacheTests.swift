@@ -249,15 +249,22 @@ final class GlimmerImageCacheTests: XCTestCase {
         let url = try await server.start()
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
+        func diskCache() -> URLCache {
+            URLCache(memoryCapacity: 0, diskCapacity: 16 * 1024 * 1024, directory: directory)
+        }
         func session() -> URLSession {
             let configuration = URLSessionConfiguration.default
-            configuration.urlCache = URLCache(memoryCapacity: 0, diskCapacity: 16 * 1024 * 1024, directory: directory)
+            configuration.urlCache = diskCache()
             return URLSession(configuration: configuration)
         }
         let firstSession = session()
         let first = GlimmerURLSessionImageLoader(cache: GlimmerImageCache(session: firstSession))
         _ = try await first.loadImage(from: url)
-        let stored = await waitUntil(timeout: 8) { (firstSession.configuration.urlCache?.currentDiskUsage ?? 0) > 0 }
+        // URLCache commits the response some time after the load returns. Neither `currentDiskUsage` (an empty
+        // store's own files already count) nor the writing cache (it answers before the commit) shows when, so
+        // ask a separate cache on the same directory, which sees only what a new session would.
+        let committed = diskCache()
+        let stored = await waitUntil(timeout: 8) { committed.cachedResponse(for: URLRequest(url: url)) != nil }
         XCTAssertTrue(stored, "URLSession must write the cacheable response to disk")
         firstSession.finishTasksAndInvalidate()
         let secondSession = session()
