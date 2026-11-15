@@ -219,6 +219,38 @@ final class GlimmerImagePolicyTests: XCTestCase {
         _ = window
     }
 
+    // MARK: - Asked again before the load
+
+    func testARefusingGateNeverCallsTheLoader() async throws {
+        let loader = RecordingLoader()
+        let url = try XCTUnwrap(URL(string: u))
+        let gate = GlimmerImageGate(policy: hide, candidate: GlimmerImageCandidate(url: url, alt: "", origin: .markdown))
+        let viewLoader = GlimmerImageViewLoader(source: url, loader: loader, contentMode: .aspectFit, gate: gate)
+        var result: Result<UIImage, Error>?
+        viewLoader.load(size: CGSize(width: 10, height: 10), scale: 2) { result = $0 }
+        let finished = await waitUntil { result != nil }
+        XCTAssertTrue(finished)
+        XCTAssertThrowsError(try result?.get())
+        XCTAssertEqual(loader.requested, [])
+    }
+
+    /// Both image views pass their policy on: an answer that changes after composing still stops the load.
+    func testThePolicyIsAskedAgainBeforeTheLoad() {
+        let state = PolicyState(answer: .load)
+        let loader = RecordingLoader()
+        let view = GlimmerView(configuration: GlimmerConfiguration(
+            imageLoader: loader, imagePolicy: Scripted(state: state), reveal: .none
+        ))
+        view.update(markdown: "Inline ![a](https://a.example/a.png).\n\n![b](https://a.example/b.png)")
+        // Composed, but not in a window: no attachment view exists yet.
+        state.answer = .hide
+        let window = hostInWindow(view, width: 390, height: 800)
+        settle(view)
+        XCTAssertEqual(imageAttachments(in: view.textView.textStorage).count, 2)
+        XCTAssertEqual(loader.requested, [])
+        _ = window
+    }
+
     // MARK: - What the policy sees
 
     func testThePolicySeesEveryImageWithItsURLAltTitleAndOrigin() throws {

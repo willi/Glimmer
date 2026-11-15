@@ -7,15 +7,21 @@ final class GlimmerBlockAttachment: NSTextAttachment {
     let theme: GlimmerTheme
     let highlighter: any GlimmerHighlighter
     let imageLoader: (any GlimmerImageLoader)?
+    /// The image policy that allowed an image embed, asked again before it loads. Nil without a policy.
+    let imageGate: GlimmerImageGate?
     /// Built once. TextKit asks for a fresh provider on every height query and frame change; rebuilding the view each
     /// time would re-highlight code and re-fetch images.
     private var cachedView: (any GlimmerEmbedView)?
 
-    init(embed: GlimmerEmbed, theme: GlimmerTheme, highlighter: any GlimmerHighlighter, imageLoader: (any GlimmerImageLoader)?) {
+    init(
+        embed: GlimmerEmbed, theme: GlimmerTheme, highlighter: any GlimmerHighlighter, imageLoader: (any GlimmerImageLoader)?,
+        imageGate: GlimmerImageGate? = nil
+    ) {
         self.embed = embed
         self.theme = theme
         self.highlighter = highlighter
         self.imageLoader = imageLoader
+        self.imageGate = imageGate
         super.init(data: nil, ofType: nil)
     }
 
@@ -34,7 +40,7 @@ final class GlimmerBlockAttachment: NSTextAttachment {
 
     /// A new attachment for the same embed, without a view: for a cached text shown by another view.
     func freshCopy() -> GlimmerBlockAttachment {
-        GlimmerBlockAttachment(embed: embed, theme: theme, highlighter: highlighter, imageLoader: imageLoader)
+        GlimmerBlockAttachment(embed: embed, theme: theme, highlighter: highlighter, imageLoader: imageLoader, imageGate: imageGate)
     }
 
     /// Moves the attachment to a grown embed and updates its view, if one was made. Main thread: it touches the view,
@@ -109,7 +115,9 @@ enum GlimmerEmbedViewFactory {
         case .table(let header, let rows, let alignments):
             return GlimmerTableView(header: header, rows: rows, alignments: alignments, theme: attachment.theme)
         case .image(let source, let alt):
-            return GlimmerImageEmbedView(source: source, alt: alt, theme: attachment.theme, loader: attachment.imageLoader)
+            return GlimmerImageEmbedView(
+                source: source, alt: alt, theme: attachment.theme, loader: attachment.imageLoader, gate: attachment.imageGate
+            )
         case .thematicBreak:
             return GlimmerRuleView(theme: attachment.theme)
         }

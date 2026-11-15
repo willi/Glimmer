@@ -113,7 +113,8 @@ extension GlimmerComposer {
         let isLinked = attributes[.link] != nil
         let attachment = reuse?.inlineImage(source: url, alt: alt, isLinked: isLinked)
             ?? GlimmerInlineImageAttachment(
-                source: url, alt: alt, isLinked: isLinked, theme: theme, loader: imageLoader, shape: inlineImageShape
+                source: url, alt: alt, isLinked: isLinked, theme: theme, loader: imageLoader, shape: inlineImageShape,
+                gate: imageGate(url: url, alt: alt, title: title, origin: origin)
             )
         reuse?.record(inlineImage: attachment)
         image[.attachment] = attachment

@@ -16,6 +16,8 @@ public struct GlimmerImageRequest: Sendable {
     public var targetPixelSize: CGSize?
     /// Whether the image will fit inside or fill the requested size.
     public var contentMode: ContentMode
+    /// The host's image policy bound to this image, when one is set.
+    var gate: GlimmerImageGate?
 
     /// Creates a request. Invalid or empty dimensions are treated as an original-size request.
     public init(url: URL, targetPixelSize: CGSize? = nil, contentMode: ContentMode = .aspectFit) {

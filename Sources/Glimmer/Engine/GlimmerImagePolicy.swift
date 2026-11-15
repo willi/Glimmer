@@ -18,8 +18,8 @@ public enum GlimmerImageDecision: Sendable, Hashable {
 /// or from a cache, and reserves no space in the text.
 ///
 /// The policy is asked from any thread, and more than once for the same image: each time the text is composed while
-/// an answer streams. Answer quickly, and always the same for the same image. Two policies that compare equal must
-/// decide equally, because views with equal policies share composed answers.
+/// an answer streams, and again just before the load. Answer quickly, and always the same for the same image. Two
+/// policies that compare equal must decide equally, because views with equal policies share composed answers.
 public protocol GlimmerImagePolicy: Sendable, Hashable {
     /// What to do with `image`.
     func decision(for image: GlimmerImageCandidate) -> GlimmerImageDecision

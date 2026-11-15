@@ -61,6 +61,13 @@ struct GlimmerComposer {
         index == 0 || (imagePolicy != nil && precedingLength == 0)
     }
 
+    /// The policy bound to an image it decided to load, for the check before the load. Nil without a policy.
+    func imageGate(url: URL, alt: String, title: String?, origin: GlimmerImageCandidate.Origin) -> GlimmerImageGate? {
+        imagePolicy.map {
+            GlimmerImageGate(policy: $0, candidate: GlimmerImageCandidate(url: url, alt: alt, title: title, origin: origin))
+        }
+    }
+
     /// What to do with an image. With no policy every image loads, as it did before policies existed. A policy that
     /// cannot be asked, because the URL does not parse, fails closed to the alt text.
     func imageDecision(url: URL?, alt: String, title: String?, origin: GlimmerImageCandidate.Origin) -> GlimmerImageDecision {
@@ -100,7 +107,8 @@ struct GlimmerComposer {
             if let image = standaloneImage(inlines) {
                 appendEmbed(.image(source: image.url, alt: image.alt),
                             source: GlimmerMarkdownSerializer.imageSource(source: image.url.absoluteString, alt: image.alt),
-                            context: context, marker: marker, to: output)
+                            context: context, marker: marker,
+                            imageGate: imageGate(url: image.url, alt: image.alt, title: image.title, origin: .markdown), to: output)
             } else {
                 appendTextParagraph(inlines, font: theme.bodyFont, context: context, marker: marker, to: output)
             }
@@ -234,12 +242,14 @@ struct GlimmerComposer {
 
     private func appendEmbed(
         _ embed: GlimmerEmbed, source: String, context: Context, marker: NSAttributedString?,
-        to output: NSMutableAttributedString
+        imageGate: GlimmerImageGate? = nil, to output: NSMutableAttributedString
     ) {
         if let marker { appendTextParagraph([], font: theme.bodyFont, context: context, marker: marker, to: output) }
         let start = output.length
         let attachment = context.reuse?.attachment(for: embed)
-            ?? GlimmerBlockAttachment(embed: embed, theme: theme, highlighter: highlighter, imageLoader: imageLoader)
+            ?? GlimmerBlockAttachment(
+                embed: embed, theme: theme, highlighter: highlighter, imageLoader: imageLoader, imageGate: imageGate
+            )
         context.reuse?.record(attachment, embed: embed, at: output.length)
         output.append(NSAttributedString(attachment: attachment))
         output.append(NSAttributedString(string: "\n"))

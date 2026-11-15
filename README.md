@@ -196,7 +196,7 @@ When writing a policy:
   equal must decide equally. A struct with no stored properties, or with its allowed hosts as a property, gets this
   for free.
 - **It is asked from any thread, and more than once for the same image**: each time the text is composed while an
-  answer streams. Answer quickly, and always the same.
+  answer streams, and again just before the load. Answer quickly, and always the same.
 
 With no policy set, nothing changes.
 

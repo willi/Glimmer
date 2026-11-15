@@ -12,14 +12,16 @@ final class GlimmerInlineImageView: UIImageView {
 
     init(
         source: URL, alt: String, isLinked: Bool = false, theme: GlimmerTheme, loader: (any GlimmerImageLoader)?,
-        shape: GlimmerInlineImageShape = .circle
+        shape: GlimmerInlineImageShape = .circle, gate: GlimmerImageGate? = nil
     ) {
         self.source = source
         self.alt = alt
         self.isLinked = isLinked
         self.shape = shape
         imageLoader = loader.map {
-            GlimmerImageViewLoader(source: source, loader: $0, contentMode: shape == .circle ? .aspectFill : .aspectFit)
+            GlimmerImageViewLoader(
+                source: source, loader: $0, contentMode: shape == .circle ? .aspectFill : .aspectFit, gate: gate
+            )
         }
         super.init(frame: .zero)
         contentMode = shape == .circle ? .scaleAspectFill : .scaleAspectFit
