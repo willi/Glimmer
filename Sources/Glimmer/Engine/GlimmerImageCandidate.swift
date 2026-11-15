@@ -12,7 +12,7 @@ public struct GlimmerImageCandidate: Sendable, Hashable {
     }
 
     /// The URL as written, whatever its scheme: a relative name, a `file:` URL and a `data:` URL are asked about
-    /// too.
+    /// too. When the policy is asked about a redirect, the URL the server redirects to.
     public var url: URL
     /// The alt text, without its markdown. For an extension's token, its `displayText`.
     public var alt: String

@@ -26,6 +26,14 @@ public struct GlimmerImageRequest: Sendable {
         self.contentMode = contentMode
     }
 
+    /// Whether the host's image policy allows following a redirect to `url`. Always true when no policy is set.
+    ///
+    /// The built-in loader asks before each redirect and fails the load when the answer is false. A custom loader
+    /// that follows redirects itself should do the same; otherwise its redirects are not checked.
+    public func permitsRedirect(to url: URL) -> Bool {
+        gate?.permits(url) ?? true
+    }
+
     var validPixelSize: CGSize? {
         guard let size = targetPixelSize, size.width.isFinite, size.height.isFinite,
               size.width > 0, size.height > 0 else { return nil }

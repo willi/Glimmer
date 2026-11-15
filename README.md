@@ -192,11 +192,15 @@ When writing a policy:
 
 - **Every image is asked about**, whatever its URL's scheme: relative names, `file:` and `data:` URLs too. Under a
   policy, an image whose URL does not parse shows its alt text.
-- **A policy is a `Hashable` value.** Views with equal policies share composed answers, so two policies that compare
-  equal must decide equally. A struct with no stored properties, or with its allowed hosts as a property, gets this
-  for free.
+- **A policy is a `Hashable` value.** Views with equal policies share composed answers and downloads, so two
+  policies that compare equal must decide equally. A struct with no stored properties, or with its allowed hosts as a
+  property, gets this for free.
 - **It is asked from any thread, and more than once for the same image**: each time the text is composed while an
-  answer streams, and again just before the load. Answer quickly, and always the same.
+  answer streams, again just before the load, and for each redirect. Answer quickly, and always the same.
+- **Redirects are checked.** Before the built-in loader follows a redirect, it asks the policy about the same image
+  with the URL it redirects to. A refused redirect is not requested and the load fails. The image then keeps its
+  placeholder, because the text is already laid out. A custom `GlimmerImageLoader` that follows redirects itself must
+  call `request.permitsRedirect(to:)` and fail the load on `false`; otherwise its redirects are not checked.
 
 With no policy set, nothing changes.
 
