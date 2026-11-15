@@ -95,6 +95,10 @@ serves images in links, lists, quotes and table cells, and extension tokens.
   `displayText`, copying as the token's `source`. For an emoji shortcode with no Unicode form that is `:name:`.
 - A paragraph or heading left with nothing but spaces and line breaks after an image was dropped is omitted. A list
   item keeps its marker. `GlimmerStreamingDocument` already handles blocks that emit no text.
+- An image that shows nothing takes with it the white space that stood only around it: spaces at the start or end of
+  its line, one of two spaces it stood between, and the break of a line that held nothing else (added after review).
+- The first block that shows text has no heading space above it when every block before it was left out by the
+  policy. A block that shows nothing by itself, such as an empty quote, does not count (narrowed after review).
 
 ### Load time and redirects
 
@@ -103,8 +107,9 @@ call, and a refusal fails the load without calling the loader. An image that car
 has one, is refused too: it did not come from that view's composer.
 
 The built-in loader asks the policy on every redirect, with the same candidate and the redirect's URL. A refused
-redirect is not followed and the load fails. Downloads in flight are shared only between requests whose policies are
-equal, so a view with a policy never rides on a request made without one.
+redirect is not followed and the load fails. Downloads in flight are shared only between requests for the same image
+(URL, alt, title and origin) under equal policies, so a view with a policy never rides on a request made without one,
+or on one the policy could answer differently about.
 
 ### Document cache
 

@@ -28,4 +28,7 @@ extension NSAttributedString.Key {
     static let glimmerSpokenOnly = NSAttributedString.Key("glimmer.spokenOnly")
     /// The extension token a text or image presentation shows (a `GlimmerTokenBox`), for `onTokenTap`.
     static let glimmerToken = NSAttributedString.Key("glimmer.token")
+    /// `true` on the mark the composer leaves where the image policy kept an image from showing and nothing took its
+    /// place. It lives only while a run of inlines is composed: `closeImageGaps` removes every one.
+    static let glimmerImageGap = NSAttributedString.Key("glimmer.imageGap")
 }

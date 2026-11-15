@@ -15,5 +15,18 @@ struct GlimmerImageGate: Sendable {
     }
 }
 
+/// Two gates are equal when they put the same image to equal policies. Only then is one's answer about a redirect
+/// also the other's, which is what lets their requests share a download.
+extension GlimmerImageGate: Hashable {
+    static func == (lhs: GlimmerImageGate, rhs: GlimmerImageGate) -> Bool {
+        lhs.candidate == rhs.candidate && lhs.policy.isEqual(to: rhs.policy)
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(candidate)
+        hasher.combine(GlimmerImagePolicyKey(policy: policy))
+    }
+}
+
 /// The image policy refused a load.
 struct GlimmerImageRefused: Error {}

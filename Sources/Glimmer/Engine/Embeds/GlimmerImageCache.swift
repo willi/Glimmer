@@ -12,11 +12,12 @@ public actor GlimmerImageCache {
         let permitsStorage: Bool
     }
 
-    /// Requests share a download only under equal image policies. Its redirects are put to the policy of the request
-    /// that started it, so a request with a policy must never ride on one made without it.
+    /// Requests share a download only for the same image under equal policies. Its redirects are put to the policy
+    /// for the request that started it, so a request with a policy must never ride on one made without it, nor on
+    /// one for an image the policy might answer differently about: another alt text, title or origin.
     private struct DownloadKey: Hashable, Sendable {
         let url: URL
-        let policy: GlimmerImagePolicyKey?
+        let gate: GlimmerImageGate?
     }
 
     private let session: URLSession
@@ -67,7 +68,7 @@ public actor GlimmerImageCache {
         observeMemoryWarningsIfNeeded()
         let generation = self.generation
         let invalidation = self.invalidation
-        let downloadKey = DownloadKey(url: request.url, policy: request.gate.map { GlimmerImagePolicyKey(policy: $0.policy) })
+        let downloadKey = DownloadKey(url: request.url, gate: request.gate)
         let download = try await downloads.value(for: downloadKey) { [session] in
             let (data, response): (Data, URLResponse)
             if request.gate == nil {

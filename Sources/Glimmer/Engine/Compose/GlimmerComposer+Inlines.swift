@@ -2,11 +2,25 @@ import UIKit
 
 extension GlimmerComposer {
     /// `reuse` offers back a re-composed block's inline images, so a streaming paragraph keeps its image.
+    /// `soleImageDecision` is the policy's answer for the only image of a paragraph, when the caller already asked.
     /// Returns whether the image policy kept an image from showing.
     @discardableResult
     func appendInlines(
         _ inlines: [GlimmerInline], attributes: [NSAttributedString.Key: Any], reuse: GlimmerAttachmentReuse? = nil,
-        to output: NSMutableAttributedString
+        soleImageDecision: GlimmerImageDecision? = nil, to output: NSMutableAttributedString
+    ) -> Bool {
+        let start = output.length
+        let keptAnImageFromShowing = appendRun(
+            inlines, attributes: attributes, reuse: reuse, decided: soleImageDecision, to: output
+        )
+        if keptAnImageFromShowing { Self.closeImageGaps(in: output, from: start) }
+        return keptAnImageFromShowing
+    }
+
+    /// One level of inlines. `decided` answers for an image at this level only, never for one nested inside.
+    private func appendRun(
+        _ inlines: [GlimmerInline], attributes: [NSAttributedString.Key: Any], reuse: GlimmerAttachmentReuse?,
+        decided: GlimmerImageDecision? = nil, to output: NSMutableAttributedString
     ) -> Bool {
         var keptAnImageFromShowing = false
         // As in a browser, spaces around a `<br>` don't start or end a line.
@@ -31,15 +45,15 @@ extension GlimmerComposer {
             case .emphasis(let children):
                 var emphasized = adding(.traitItalic, to: attributes)
                 emphasized[.glimmerEmphasis] = true
-                if appendInlines(children, attributes: emphasized, reuse: reuse, to: output) { keptAnImageFromShowing = true }
+                if appendRun(children, attributes: emphasized, reuse: reuse, to: output) { keptAnImageFromShowing = true }
             case .strong(let children):
                 var strong = adding(.traitBold, to: attributes)
                 strong[.glimmerStrong] = true
-                if appendInlines(children, attributes: strong, reuse: reuse, to: output) { keptAnImageFromShowing = true }
+                if appendRun(children, attributes: strong, reuse: reuse, to: output) { keptAnImageFromShowing = true }
             case .strikethrough(let children):
                 var struck = attributes
                 struck[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
-                if appendInlines(children, attributes: struck, reuse: reuse, to: output) { keptAnImageFromShowing = true }
+                if appendRun(children, attributes: struck, reuse: reuse, to: output) { keptAnImageFromShowing = true }
             case .link(let destination, _, let children):
                 var linked = attributes
                 if let url = URL(string: destination) {
@@ -48,17 +62,21 @@ extension GlimmerComposer {
                     linked[.foregroundColor] = theme.linkColor
                     if theme.underlinesLinks { linked[.underlineStyle] = NSUnderlineStyle.single.rawValue }
                 }
-                if appendInlines(children, attributes: linked, reuse: reuse, to: output) { keptAnImageFromShowing = true }
+                if appendRun(children, attributes: linked, reuse: reuse, to: output) { keptAnImageFromShowing = true }
             case .image(let source, let title, let alt):
                 let decision = appendInlineImage(
-                    source: source, alt: alt, title: title, origin: .markdown,
+                    source: source, alt: alt, title: title, origin: .markdown, decided: decided,
                     markdown: GlimmerMarkdownSerializer.imageSource(source: source, alt: alt), attributes: attributes,
                     reuse: reuse, to: output
                 )
                 guard decision != .load else { break }
                 keptAnImageFromShowing = true
-                // Ordinary text in the style around it. It copies as what is shown, not as the image the host refused.
-                if decision == .showAltText { output.append(NSAttributedString(string: alt, attributes: attributes)) }
+                if decision == .showAltText, !alt.isEmpty {
+                    // Ordinary text in the style around it. It copies as what is shown, not as the image the host refused.
+                    output.append(NSAttributedString(string: alt, attributes: attributes))
+                } else {
+                    Self.markImageGap(in: output)
+                }
             case .softBreak:
                 output.append(NSAttributedString(string: " ", attributes: attributes))
             case .lineBreak:
@@ -93,14 +111,16 @@ extension GlimmerComposer {
     /// the alt text, dimmed, as before.
     ///
     /// Returns the image policy's decision. Anything but `.load` appends nothing: the caller puts its own text in the
-    /// image's place, the alt text for a markdown image and the token's text for an extension's.
+    /// image's place, the alt text for a markdown image and the token's text for an extension's. `decided` is that
+    /// decision when the caller already has it, so the policy is not asked a second time.
     func appendInlineImage(
-        source: String, alt: String, title: String? = nil, origin: GlimmerImageCandidate.Origin, markdown: String,
-        spoken: String? = nil, attributes: [NSAttributedString.Key: Any], reuse: GlimmerAttachmentReuse? = nil,
+        source: String, alt: String, title: String? = nil, origin: GlimmerImageCandidate.Origin,
+        decided: GlimmerImageDecision? = nil, markdown: String, spoken: String? = nil,
+        attributes: [NSAttributedString.Key: Any], reuse: GlimmerAttachmentReuse? = nil,
         to output: NSMutableAttributedString
     ) -> GlimmerImageDecision {
         let parsed = URL(string: source)
-        let decision = imageDecision(url: parsed, alt: alt, title: title, origin: origin)
+        let decision = decided ?? imageDecision(url: parsed, alt: alt, title: title, origin: origin)
         guard decision == .load else { return decision }
         guard let url = parsed else {
             var faded = attributes
@@ -134,6 +154,66 @@ extension GlimmerComposer {
 
     static func isBreakTag(_ html: String) -> Bool {
         html.wholeMatch(of: #/<br\s*/?>/#.ignoresCase()) != nil
+    }
+
+    // MARK: - The space around an image that is not shown
+
+    /// Marks the place of an image the policy kept from showing, where nothing was put instead. The white space
+    /// around it can only be judged once the text after it is composed, so `closeImageGaps` does that.
+    private static func markImageGap(in output: NSMutableAttributedString) {
+        output.append(NSAttributedString(string: "\u{200B}", attributes: [.glimmerImageGap: true]))
+    }
+
+    /// Removes every mark from `start` on, and with each the white space that stood only around its image: the
+    /// spaces at the start or the end of its line, one of two spaces it stood between, and the break of a line that
+    /// held nothing else. Without this a hidden image above its caption leaves a blank line above the caption.
+    private static func closeImageGaps(in output: NSMutableAttributedString, from start: Int) {
+        var location = start
+        while location < output.length {
+            if output.attribute(.glimmerImageGap, at: location, effectiveRange: nil) == nil {
+                location += 1
+            } else {
+                output.deleteCharacters(in: NSRange(location: location, length: 1))
+                location = closeImageGap(at: location, in: output, from: start)
+            }
+        }
+    }
+
+    /// Returns where the gap is once the white space before it is gone. Marks further on are still in the text and
+    /// count as text here; each is closed in its turn.
+    private static func closeImageGap(at location: Int, in output: NSMutableAttributedString, from start: Int) -> Int {
+        let text = output.mutableString
+        var gap = location
+        func isLineBreak(_ index: Int) -> Bool { text.character(at: index) == 0x2028 }
+        // A code span's own spaces stay, as they do beside a `<br>`.
+        func isSpace(_ index: Int) -> Bool {
+            let character = text.character(at: index)
+            return (character == 0x20 || character == 0x09)
+                && output.attribute(.glimmerInlineCode, at: index, effectiveRange: nil) == nil
+        }
+        func startsLine() -> Bool { gap == start || isLineBreak(gap - 1) }
+        func endsLine() -> Bool { gap == output.length || isLineBreak(gap) }
+        func delete(_ index: Int) { output.deleteCharacters(in: NSRange(location: index, length: 1)) }
+
+        if startsLine() || isSpace(gap - 1) {
+            while gap < output.length, isSpace(gap) { delete(gap) }
+        }
+        if endsLine() {
+            while gap > start, isSpace(gap - 1) {
+                gap -= 1
+                delete(gap)
+            }
+        }
+        // The image was alone on its line, so the line goes with it: its own break, or on the last line the one above.
+        if startsLine(), endsLine() {
+            if gap < output.length {
+                delete(gap)
+            } else if gap > start {
+                gap -= 1
+                delete(gap)
+            }
+        }
+        return gap
     }
 
     /// Appends plain text, turning extension tokens into chips, text or inline images. Returns whether the image
@@ -189,9 +269,12 @@ extension GlimmerComposer {
                 source: url.absoluteString, alt: token.displayText, origin: .extensionToken(kind: token.kind),
                 markdown: token.source, spoken: token.accessibilityLabel, attributes: run, reuse: reuse, to: output
             )
+            guard decision != .load else { return false }
+            let end = output.length
             // Without its image the token is its text, as if the extension had presented it that way.
             if decision == .showAltText { appendTokenText(token, tappable: false, attributes: attributes, to: output) }
-            return decision != .load
+            if output.length == end { Self.markImageGap(in: output) }
+            return true
         }
     }
 

@@ -103,7 +103,8 @@ final class GlimmerStreamingDocument: @unchecked Sendable {
             let reuse = GlimmerAttachmentReuse(index < blockAttachments.count ? blockAttachments[index] : [],
                                                inlineImages: index < blockInlineImages.count ? blockInlineImages[index] : [])
             let fragment = composer.composeBlock(
-                parsed.blocks[index], isFirst: composer.startsDocument(index: index, precedingLength: running), reusing: reuse
+                parsed.blocks[index],
+                isFirst: composer.startsDocument(index: index, in: parsed.blocks, precedingLength: running), reusing: reuse
             )
             newFragments.append(fragment)
             newOffsets.append(running)

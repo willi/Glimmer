@@ -8,6 +8,23 @@ private struct Answer: GlimmerImagePolicy {
     func decision(for image: GlimmerImageCandidate) -> GlimmerImageDecision { answer }
 }
 
+/// Answers like `Answer`, as another type.
+private struct OtherAnswer: GlimmerImagePolicy {
+    var answer: GlimmerImageDecision
+    func decision(for image: GlimmerImageCandidate) -> GlimmerImageDecision { answer }
+}
+
+/// A policy that can be subclassed. Every instance compares equal to every other.
+private class OpenPolicy: GlimmerImagePolicy, @unchecked Sendable {
+    static func == (lhs: OpenPolicy, rhs: OpenPolicy) -> Bool { true }
+    func hash(into hasher: inout Hasher) {}
+    func decision(for image: GlimmerImageCandidate) -> GlimmerImageDecision { .load }
+}
+
+private final class StricterPolicy: OpenPolicy, @unchecked Sendable {
+    override func decision(for image: GlimmerImageCandidate) -> GlimmerImageDecision { .hide }
+}
+
 /// Loads images from the given hosts and shows the alt text of the rest.
 private struct AllowHosts: GlimmerImagePolicy {
     var hosts: Set<String>
@@ -161,6 +178,18 @@ final class GlimmerImagePolicyTests: XCTestCase {
         return found
     }
 
+    private func imageSources(in text: NSAttributedString) -> [String] {
+        imageAttachments(in: text).compactMap { attachment in
+            if let inline = attachment as? GlimmerInlineImageAttachment { return inline.source.absoluteString }
+            guard let block = attachment as? GlimmerBlockAttachment, case .image(let source, _) = block.embed else { return nil }
+            return source.absoluteString
+        }
+    }
+
+    private func subviews<T: UIView>(_ type: T.Type, in root: UIView) -> [T] {
+        ((root as? T).map { [$0] } ?? []) + root.subviews.flatMap { subviews(type, in: $0) }
+    }
+
     private func attributes(of substring: String, in text: NSAttributedString) -> [NSAttributedString.Key: Any] {
         let range = (text.string as NSString).range(of: substring)
         guard range.location != NSNotFound else {
@@ -241,11 +270,39 @@ final class GlimmerImagePolicyTests: XCTestCase {
         )
         let loaded = await waitUntil { loader.requested.count >= 2 }
         XCTAssertTrue(loaded)
+        XCTAssertEqual(subviews(GlimmerInlineImageView.self, in: view).count, 1)
+        XCTAssertEqual(subviews(GlimmerImageEmbedView.self, in: view).count, 1)
         view.configuration.imagePolicy = alt
         settle(view)
         XCTAssertEqual(imageAttachments(in: view.textView.textStorage).count, 0)
         XCTAssertEqual(view.plainText(), "Inline a.\nb")
+        XCTAssertEqual(subviews(GlimmerInlineImageView.self, in: view).count, 0, "the image's view is gone, not only its text")
+        XCTAssertEqual(subviews(GlimmerImageEmbedView.self, in: view).count, 0)
         XCTAssertEqual(loader.requested.count, 2, "nothing is requested again")
+        _ = window
+    }
+
+    func testChangingOrRemovingAPolicyOnALiveViewDecidesItsImagesAgain() async throws {
+        let loader = RecordingLoader()
+        let a = "https://ok.example/a.png", b = "https://other.example/b.png"
+        let (view, window) = shown("Inline ![a](\(a)) and ![b](\(b)).", policy: AllowHosts(hosts: ["ok.example"]), loader: loader)
+        var loaded = await waitUntil { loader.requested.count >= 1 }
+        XCTAssertTrue(loaded)
+        XCTAssertEqual(imageSources(in: view.textView.textStorage), [a])
+        XCTAssertEqual(loader.requested.map(\.absoluteString), [a])
+
+        view.configuration.imagePolicy = AllowHosts(hosts: ["other.example"])
+        loaded = await waitUntil { loader.requested.count >= 2 }
+        XCTAssertTrue(loaded)
+        settle(view)
+        XCTAssertEqual(imageSources(in: view.textView.textStorage), [b])
+        XCTAssertEqual(subviews(GlimmerInlineImageView.self, in: view).count, 1, "only the newly allowed image has a view")
+        XCTAssertEqual(loader.requested.map(\.absoluteString), [a, b], "the image the new policy refuses is not requested again")
+
+        view.configuration.imagePolicy = nil
+        loaded = await waitUntil { subviews(GlimmerInlineImageView.self, in: view).count == 2 }
+        XCTAssertTrue(loaded)
+        XCTAssertEqual(imageSources(in: view.textView.textStorage), [a, b])
         _ = window
     }
 
@@ -330,6 +387,12 @@ final class GlimmerImagePolicyTests: XCTestCase {
         XCTAssertTrue(state.seen.contains { $0.alt == ":octocat:" && $0.origin == .extensionToken(kind: "emoji") }, "\(state.seen)")
     }
 
+    func testABlockedStandaloneImageIsAskedAboutOnce() {
+        let state = PolicyState(answer: .showAltText)
+        _ = compose("![Chart](\(u))", policy: Scripted(state: state))
+        XCTAssertEqual(state.seen.count, 1, "\(state.seen)")
+    }
+
     // MARK: - What a blocked image shows
 
     func testAltTextRendersAsTheTextAroundIt() throws {
@@ -346,7 +409,7 @@ final class GlimmerImagePolicyTests: XCTestCase {
 
     func testEmptyAltTextRendersNothing() {
         let text = compose("A ![](\(u)) b", policy: alt)
-        XCTAssertEqual(text.string, "A  b")
+        XCTAssertEqual(text.string, "A b")
         XCTAssertEqual(imageAttachments(in: text).count, 0)
     }
 
@@ -363,6 +426,69 @@ final class GlimmerImagePolicyTests: XCTestCase {
         let document = GlimmerStreamingDocument(composer: GlimmerComposer(theme: .default, imagePolicy: hide))
         _ = document.update(markdown: "![x](\(u))\n\n# Title", isStreaming: false)
         assertEquivalent(document.text, heading, "composed block by block")
+    }
+
+    func testAHiddenLeadingImageStreamsLikeAFreshCompose() {
+        let markdown = "![x](\(u))\n\n# Title\n\nBody ![y](\(u)) text\n\n## Next"
+        let composer = GlimmerComposer(theme: .default, imagePolicy: hide)
+        let document = GlimmerStreamingDocument(composer: composer)
+        for end in 1...markdown.count {
+            let prefix = String(markdown.prefix(end))
+            _ = document.update(markdown: prefix, isStreaming: true)
+            let fresh = GlimmerStreamingDocument(composer: composer)
+            _ = fresh.update(markdown: prefix, isStreaming: true)
+            assertEquivalent(document.text, fresh.text, "after \(prefix.debugDescription)")
+        }
+        _ = document.update(markdown: markdown, isStreaming: false)
+        assertEquivalent(document.text, compose("# Title\n\nBody text\n\n## Next", policy: hide), "settled")
+    }
+
+    /// Only a block the policy left out moves the start of the document. An empty quote shows nothing with or
+    /// without a policy, so the heading after it keeps the space it has with none.
+    func testAHeadingAfterAnEmptyBlockKeepsItsSpaceUnderAPolicy() {
+        let markdown = ">\n\n# Title"
+        let unpoliced = compose(markdown, policy: nil)
+        assertEquivalent(compose(markdown, policy: hide), unpoliced, "composed whole")
+        let document = GlimmerStreamingDocument(composer: GlimmerComposer(theme: .default, imagePolicy: hide))
+        _ = document.update(markdown: markdown, isStreaming: false)
+        assertEquivalent(document.text, unpoliced, "composed block by block")
+        assertEquivalent(compose("> ![x](\(u))\n\n# Title", policy: hide), compose("# Title", policy: hide), "a quote the policy emptied")
+    }
+
+    func testAnImageThatIsNotShownTakesTheSpaceAroundItWithIt() {
+        let image = "![x](\(u))"
+        let cases: [(markdown: String, shown: String)] = [
+            ("\(image)\nCaption", "Caption"),
+            ("\(image)  \nCaption", "Caption"),
+            ("\(image)<br>Caption", "Caption"),
+            ("Caption\n\(image)", "Caption"),
+            ("Caption  \n\(image)", "Caption"),
+            ("Text \(image) more", "Text more"),
+            ("Text\(image) more", "Text more"),
+            ("Text \(image)more", "Text more"),
+            ("One  \n\(image)  \nThree", "One\u{2028}Three"),
+            ("*\(image)* text", "text"),
+            ("\(image) \(image)\nCaption", "Caption"),
+            ("Caption \(image) \(image)", "Caption"),
+            ("\(image)` code`", " code"),
+        ]
+        for (markdown, shown) in cases {
+            XCTAssertEqual(compose(markdown, policy: hide).string, shown, markdown.debugDescription)
+        }
+        assertEquivalent(compose("\(image)\nCaption", policy: hide), compose("Caption", policy: hide), "a hidden image above its caption")
+        XCTAssertEqual(compose("![](\(u))\nCaption", policy: alt).string, "Caption", "empty alt text shows nothing either")
+        XCTAssertEqual(
+            compose("Hi :octocat: there", policy: hide, extensions: [GlimmerEmojiShortcodes()]).string, "Hi there",
+            "an extension's image"
+        )
+        XCTAssertEqual(markdown(of: compose("Text \(image) more", policy: hide)), "Text more")
+    }
+
+    func testAHiddenImageInATableCellTakesItsSpaceWithIt() throws {
+        let text = compose("| a |\n|---|\n| ![x](\(u)) text |", policy: hide)
+        let attachment = try XCTUnwrap(blockAttachments(in: text).first)
+        guard case .table(_, let rows, _) = attachment.embed else { return XCTFail("expected a table") }
+        XCTAssertEqual(rows.first?.first?.string, "text")
     }
 
     func testABlockedStandaloneImageIsAnOrdinaryParagraph() {
@@ -449,5 +575,24 @@ final class GlimmerImagePolicyTests: XCTestCase {
             view.update(markdown: "A ![photo](https://ok.example/photo.png) and ![ad](https://bad.example/ad.png).")
         }
         XCTAssertEqual(GlimmerDocumentCache.shared.hits, hits + 1)
+    }
+
+    func testPoliciesOfDifferentTypesAreDifferentKeys() {
+        let one = GlimmerImagePolicyKey(policy: Answer(answer: .hide))
+        let other = GlimmerImagePolicyKey(policy: OtherAnswer(answer: .hide))
+        XCTAssertNotEqual(one, other)
+        XCTAssertNotEqual(one.hashValue, other.hashValue, "the type is part of the hash")
+        XCTAssertEqual(one, GlimmerImagePolicyKey(policy: Answer(answer: .hide)))
+        XCTAssertEqual(one.hashValue, GlimmerImagePolicyKey(policy: Answer(answer: .hide)).hashValue)
+    }
+
+    /// A subclass can decide differently, so it is never its superclass's key, whichever side it is on.
+    func testAPolicyAndItsSubclassAreDifferentKeysBothWays() {
+        let open = GlimmerImagePolicyKey(policy: OpenPolicy())
+        let stricter = GlimmerImagePolicyKey(policy: StricterPolicy())
+        XCTAssertNotEqual(open, stricter)
+        XCTAssertNotEqual(stricter, open)
+        XCTAssertEqual(open, GlimmerImagePolicyKey(policy: OpenPolicy()))
+        XCTAssertEqual(stricter, GlimmerImagePolicyKey(policy: StricterPolicy()))
     }
 }

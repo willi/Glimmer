@@ -185,17 +185,18 @@ an emoji shortcode (its `kind` is `"emoji"`). The policy answers with one of:
 | `.hide` | Nothing. |
 
 An image that is not loaded is never requested, from the network or from a cache, and reserves no space. A standalone
-image's alt text is an ordinary paragraph, and a paragraph left empty is left out. The text copies as what is shown,
-not as `![alt](url)`, and that includes `markdownSource()`; it is not reported to `onImageTap`; and VoiceOver reads it
-as text.
+image's alt text is an ordinary paragraph, and a paragraph left empty is left out. An image that shows nothing takes
+with it the white space that stood only around it, so a hidden image above its caption leaves no blank line. The text
+copies as what is shown, not as `![alt](url)`, and that includes `markdownSource()`; it is not reported to
+`onImageTap`; and VoiceOver reads it as text.
 
 When writing a policy:
 
 - **Every image is asked about**, whatever its URL's scheme: relative names, `file:` and `data:` URLs too. Under a
   policy, an image whose URL does not parse shows its alt text.
-- **A policy is a `Hashable` value.** Views with equal policies share composed answers and downloads, so two
-  policies that compare equal must decide equally. A struct with no stored properties, or with its allowed hosts as a
-  property, gets this for free.
+- **A policy is a `Hashable` value.** Views with equal policies share composed answers, and downloads of the same
+  image, so two policies that compare equal must decide equally. A struct with no stored properties, or with its
+  allowed hosts as a property, gets this for free. Policies of different types are never equal.
 - **It is asked from any thread, and more than once for the same image**: each time the text is composed while an
   answer streams, again just before the load, and for each redirect. Answer quickly, and always the same.
 - **Redirects are checked.** Before the built-in loader follows a redirect, it asks the policy about the same image

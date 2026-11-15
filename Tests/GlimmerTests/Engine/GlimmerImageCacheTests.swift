@@ -10,6 +10,14 @@ private struct AllowPaths: GlimmerImagePolicy {
     }
 }
 
+/// Follows a redirect only for the image with the given alt text. Any image may load `/image.png` itself.
+private struct RedirectsForAlt: GlimmerImagePolicy {
+    var alt: String
+    func decision(for image: GlimmerImageCandidate) -> GlimmerImageDecision {
+        image.alt == alt || image.url.path() == "/image.png" ? .load : .hide
+    }
+}
+
 @MainActor
 final class GlimmerImageCacheTests: XCTestCase {
     private func png(color: UIColor = .red, size: CGSize = CGSize(width: 40, height: 20)) throws -> Data {
@@ -277,10 +285,10 @@ final class GlimmerImageCacheTests: XCTestCase {
 
     // MARK: - Redirects under an image policy
 
-    private func request(_ url: URL, policy: (any GlimmerImagePolicy)?) -> GlimmerImageRequest {
+    private func request(_ url: URL, policy: (any GlimmerImagePolicy)?, alt: String = "") -> GlimmerImageRequest {
         var request = GlimmerImageRequest(url: url)
         request.gate = policy.map {
-            GlimmerImageGate(policy: $0, candidate: GlimmerImageCandidate(url: url, alt: "", origin: .markdown))
+            GlimmerImageGate(policy: $0, candidate: GlimmerImageCandidate(url: url, alt: alt, origin: .markdown))
         }
         return request
     }
@@ -341,6 +349,25 @@ final class GlimmerImageCacheTests: XCTestCase {
             XCTFail("a policed load never receives an image fetched through a redirect its policy refuses")
         } catch {}
         let image = try await unpoliced.value
+        XCTAssertEqual(image.size, CGSize(width: 40, height: 20))
+    }
+
+    /// A shared download's redirects are put to the policy for the image that started it. Another image with the
+    /// same URL is a different question, so it gets its own download and its own answer.
+    func testADifferentImageDoesNotRideOnADownloadOfTheSameURL() async throws {
+        let (server, url) = try await redirectingServer(delay: 0.3)
+        defer { server.stop() }
+        let loader = GlimmerURLSessionImageLoader(cache: isolatedCache())
+        let policy = RedirectsForAlt(alt: "trusted")
+        let trusted = request(url, policy: policy, alt: "trusted")
+        let first = Task { try await loader.loadImage(for: trusted) }
+        let started = await waitUntil { server.requestCount == 1 }
+        XCTAssertTrue(started)
+        do {
+            _ = try await loader.loadImage(for: request(url, policy: policy, alt: "other"))
+            XCTFail("an image never receives a download that followed a redirect its policy refuses for it")
+        } catch {}
+        let image = try await first.value
         XCTAssertEqual(image.size, CGSize(width: 40, height: 20))
     }
 
