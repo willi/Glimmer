@@ -2,10 +2,13 @@ import UIKit
 
 extension GlimmerComposer {
     /// `reuse` offers back a re-composed block's inline images, so a streaming paragraph keeps its image.
+    /// Returns whether the image policy kept an image from showing.
+    @discardableResult
     func appendInlines(
         _ inlines: [GlimmerInline], attributes: [NSAttributedString.Key: Any], reuse: GlimmerAttachmentReuse? = nil,
         to output: NSMutableAttributedString
-    ) {
+    ) -> Bool {
+        var keptAnImageFromShowing = false
         // As in a browser, spaces around a `<br>` don't start or end a line.
         var afterBreakTag = false
         for inline in inlines {
@@ -14,7 +17,9 @@ extension GlimmerComposer {
             switch inline {
             case .text(let text):
                 let shown = afterBreakTag ? String(text.drop { $0 == " " || $0 == "\t" }) : text
-                if !shown.isEmpty { appendText(shown, attributes: attributes, reuse: reuse, to: output) }
+                if !shown.isEmpty, appendText(shown, attributes: attributes, reuse: reuse, to: output) {
+                    keptAnImageFromShowing = true
+                }
             case .softBreak where afterBreakTag:
                 break
             case .code(let code):
@@ -26,15 +31,15 @@ extension GlimmerComposer {
             case .emphasis(let children):
                 var emphasized = adding(.traitItalic, to: attributes)
                 emphasized[.glimmerEmphasis] = true
-                appendInlines(children, attributes: emphasized, reuse: reuse, to: output)
+                if appendInlines(children, attributes: emphasized, reuse: reuse, to: output) { keptAnImageFromShowing = true }
             case .strong(let children):
                 var strong = adding(.traitBold, to: attributes)
                 strong[.glimmerStrong] = true
-                appendInlines(children, attributes: strong, reuse: reuse, to: output)
+                if appendInlines(children, attributes: strong, reuse: reuse, to: output) { keptAnImageFromShowing = true }
             case .strikethrough(let children):
                 var struck = attributes
                 struck[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
-                appendInlines(children, attributes: struck, reuse: reuse, to: output)
+                if appendInlines(children, attributes: struck, reuse: reuse, to: output) { keptAnImageFromShowing = true }
             case .link(let destination, _, let children):
                 var linked = attributes
                 if let url = URL(string: destination) {
@@ -43,10 +48,17 @@ extension GlimmerComposer {
                     linked[.foregroundColor] = theme.linkColor
                     if theme.underlinesLinks { linked[.underlineStyle] = NSUnderlineStyle.single.rawValue }
                 }
-                appendInlines(children, attributes: linked, reuse: reuse, to: output)
-            case .image(let source, _, let alt):
-                appendInlineImage(source: source, alt: alt, markdown: GlimmerMarkdownSerializer.imageSource(source: source, alt: alt),
-                                  attributes: attributes, reuse: reuse, to: output)
+                if appendInlines(children, attributes: linked, reuse: reuse, to: output) { keptAnImageFromShowing = true }
+            case .image(let source, let title, let alt):
+                let decision = appendInlineImage(
+                    source: source, alt: alt, title: title, origin: .markdown,
+                    markdown: GlimmerMarkdownSerializer.imageSource(source: source, alt: alt), attributes: attributes,
+                    reuse: reuse, to: output
+                )
+                guard decision != .load else { break }
+                keptAnImageFromShowing = true
+                // Ordinary text in the style around it. It copies as what is shown, not as the image the host refused.
+                if decision == .showAltText { output.append(NSAttributedString(string: alt, attributes: attributes)) }
             case .softBreak:
                 output.append(NSAttributedString(string: " ", attributes: attributes))
             case .lineBreak:
@@ -74,20 +86,28 @@ extension GlimmerComposer {
                 output.append(NSAttributedString(string: "\(footnotes.number(for: label))", attributes: marker))
             }
         }
+        return keptAnImageFromShowing
     }
 
     /// An image inside a paragraph: a line-height square, then its alt text for VoiceOver only. An unusable URL shows
     /// the alt text, dimmed, as before.
+    ///
+    /// Returns the image policy's decision. Anything but `.load` appends nothing: the caller puts its own text in the
+    /// image's place, the alt text for a markdown image and the token's text for an extension's.
     func appendInlineImage(
-        source: String, alt: String, markdown: String, spoken: String? = nil, attributes: [NSAttributedString.Key: Any],
-        reuse: GlimmerAttachmentReuse? = nil, to output: NSMutableAttributedString
-    ) {
-        guard let url = URL(string: source) else {
+        source: String, alt: String, title: String? = nil, origin: GlimmerImageCandidate.Origin, markdown: String,
+        spoken: String? = nil, attributes: [NSAttributedString.Key: Any], reuse: GlimmerAttachmentReuse? = nil,
+        to output: NSMutableAttributedString
+    ) -> GlimmerImageDecision {
+        let parsed = URL(string: source)
+        let decision = imageDecision(url: parsed, alt: alt, title: title, origin: origin)
+        guard decision == .load else { return decision }
+        guard let url = parsed else {
             var faded = attributes
             faded[.foregroundColor] = theme.secondaryTextColor
             faded[.glimmerSource] = markdown
             output.append(NSAttributedString(string: alt, attributes: faded))
-            return
+            return .load
         }
         var image = attributes
         let isLinked = attributes[.link] != nil
@@ -100,7 +120,7 @@ extension GlimmerComposer {
         image[.glimmerSource] = markdown
         output.append(NSAttributedString(string: "\u{FFFC}", attributes: image))
         let label = spoken ?? alt
-        guard !label.isEmpty else { return }
+        guard !label.isEmpty else { return .load }
         var spokenAttributes = attributes
         spokenAttributes[.font] = (attributes[.font] as? UIFont ?? theme.bodyFont).withSize(0.01)
         spokenAttributes[.foregroundColor] = UIColor.clear
@@ -108,17 +128,20 @@ extension GlimmerComposer {
         // Inside a link the alt text reads as part of it, and the link takes the tap.
         if linksImagesForTaps, !isLinked { spokenAttributes[.link] = GlimmerTokenBox.imageLink(at: output.length) }
         output.append(NSAttributedString(string: label, attributes: spokenAttributes))
+        return .load
     }
 
     static func isBreakTag(_ html: String) -> Bool {
         html.wholeMatch(of: #/<br\s*/?>/#.ignoresCase()) != nil
     }
 
-    /// Appends plain text, turning extension tokens into chips, text or inline images.
+    /// Appends plain text, turning extension tokens into chips, text or inline images. Returns whether the image
+    /// policy kept a token's image from showing.
+    @discardableResult
     func appendText(
         _ text: String, attributes: [NSAttributedString.Key: Any], reuse: GlimmerAttachmentReuse? = nil,
         to output: NSMutableAttributedString
-    ) {
+    ) -> Bool {
         let inLink = attributes[.link] != nil
         let tokens = extensions.filter { !inLink || $0.appliesInsideLinks }.flatMap { glimmerExtension in
             glimmerExtension.scan(text)
@@ -126,45 +149,63 @@ extension GlimmerComposer {
                 .map { (glimmerExtension: glimmerExtension, token: $0) }
         }.sorted { $0.token.range.lowerBound < $1.token.range.lowerBound }
 
+        var keptAnImageFromShowing = false
         var cursor = text.startIndex
         for match in tokens where match.token.range.lowerBound >= cursor {
             if cursor < match.token.range.lowerBound {
                 output.append(NSAttributedString(string: String(text[cursor..<match.token.range.lowerBound]), attributes: attributes))
             }
-            appendToken(match.token, glimmerExtension: match.glimmerExtension, attributes: attributes, reuse: reuse, to: output)
+            if appendToken(match.token, glimmerExtension: match.glimmerExtension, attributes: attributes, reuse: reuse, to: output) {
+                keptAnImageFromShowing = true
+            }
             cursor = match.token.range.upperBound
         }
         if cursor < text.endIndex {
             output.append(NSAttributedString(string: String(text[cursor...]), attributes: attributes))
         }
+        return keptAnImageFromShowing
     }
 
+    /// Returns whether the image policy kept the token's image from showing.
     private func appendToken(
         _ token: GlimmerInlineToken, glimmerExtension: any GlimmerExtension, attributes: [NSAttributedString.Key: Any],
         reuse: GlimmerAttachmentReuse?, to output: NSMutableAttributedString
-    ) {
+    ) -> Bool {
         switch token.presentation {
         case .chip:
             var chip = attributes
             chip[.attachment] = GlimmerInlineAttachment(token: token, glimmerExtension: glimmerExtension, theme: theme)
             chip[.glimmerSource] = token.source
             output.append(NSAttributedString(string: "\u{FFFC}", attributes: chip))
+            return false
         case .text(let tappable):
-            // Text like any other: it wraps and selects as words do. Copy writes the source; a tap reports the token.
-            var run = attributes
-            run[.glimmerSource] = token.source
-            run[.glimmerToken] = GlimmerTokenBox(token)
-            if tappable {
-                run[.foregroundColor] = theme.mentionColor
-                run[.link] = GlimmerTokenBox.link(kind: token.kind, at: output.length)
-            }
-            output.append(NSAttributedString(string: token.displayText, attributes: run))
+            appendTokenText(token, tappable: tappable, attributes: attributes, to: output)
+            return false
         case .image(let url):
             var run = attributes
             run[.glimmerToken] = GlimmerTokenBox(token)
-            appendInlineImage(source: url.absoluteString, alt: token.displayText, markdown: token.source,
-                              spoken: token.accessibilityLabel, attributes: run, reuse: reuse, to: output)
+            let decision = appendInlineImage(
+                source: url.absoluteString, alt: token.displayText, origin: .extensionToken(kind: token.kind),
+                markdown: token.source, spoken: token.accessibilityLabel, attributes: run, reuse: reuse, to: output
+            )
+            // Without its image the token is its text, as if the extension had presented it that way.
+            if decision == .showAltText { appendTokenText(token, tappable: false, attributes: attributes, to: output) }
+            return decision != .load
         }
+    }
+
+    /// Text like any other: it wraps and selects as words do. Copy writes the source; a tap reports the token.
+    private func appendTokenText(
+        _ token: GlimmerInlineToken, tappable: Bool, attributes: [NSAttributedString.Key: Any], to output: NSMutableAttributedString
+    ) {
+        var run = attributes
+        run[.glimmerSource] = token.source
+        run[.glimmerToken] = GlimmerTokenBox(token)
+        if tappable {
+            run[.foregroundColor] = theme.mentionColor
+            run[.link] = GlimmerTokenBox.link(kind: token.kind, at: output.length)
+        }
+        output.append(NSAttributedString(string: token.displayText, attributes: run))
     }
 
     private func adding(_ trait: UIFontDescriptor.SymbolicTraits, to attributes: [NSAttributedString.Key: Any]) -> [NSAttributedString.Key: Any] {

@@ -405,6 +405,7 @@ public final class GlimmerView: UIView {
             theme: configuration.theme.scaled(for: traitCollection),
             highlighter: configuration.highlighter,
             imageLoader: configuration.imageLoader,
+            imagePolicy: configuration.imagePolicy,
             inlineImageShape: configuration.inlineImageShape,
             extensions: configuration.extensions,
             linksImagesForTaps: onImageTap != nil
@@ -421,6 +422,7 @@ public final class GlimmerView: UIView {
             extensions: configuration.extensions.map { String(reflecting: type(of: $0)) },
             highlighter: String(reflecting: type(of: configuration.highlighter)),
             imageLoader: configuration.imageLoader.map { String(reflecting: type(of: $0)) },
+            imagePolicy: configuration.imagePolicy.map { GlimmerImagePolicyKey(policy: $0) },
             inlineImageShape: configuration.inlineImageShape,
             linksImagesForTaps: onImageTap != nil
         )

@@ -8,6 +8,8 @@ struct GlimmerComposer {
     var theme: GlimmerTheme
     var highlighter: any GlimmerHighlighter = GlimmerBasicHighlighter()
     var imageLoader: (any GlimmerImageLoader)? = nil
+    /// The host's say over which images load. Nil loads every image.
+    var imagePolicy: (any GlimmerImagePolicy)? = nil
     var inlineImageShape: GlimmerInlineImageShape = .circle
     var extensions: [any GlimmerExtension] = []
     /// Whether the host takes image taps: an inline image's spoken alt text then links to the image for VoiceOver.
@@ -45,9 +47,26 @@ struct GlimmerComposer {
 
     func compose(_ blocks: [GlimmerBlock]) -> NSAttributedString {
         let output = NSMutableAttributedString()
-        for (index, block) in blocks.enumerated() { output.append(composeBlock(block, isFirst: index == 0)) }
+        for (index, block) in blocks.enumerated() {
+            output.append(composeBlock(block, isFirst: startsDocument(index: index, precedingLength: output.length)))
+        }
         if output.length > 0 { output.deleteCharacters(in: NSRange(location: output.length - 1, length: 1)) }
         return output
+    }
+
+    /// Whether the block at `index` opens the document, with `precedingLength` characters composed before it. Under
+    /// an image policy the blocks before it may all have been left out, and the first block that shows text is then
+    /// the one with no heading space above it.
+    func startsDocument(index: Int, precedingLength: Int) -> Bool {
+        index == 0 || (imagePolicy != nil && precedingLength == 0)
+    }
+
+    /// What to do with an image. With no policy every image loads, as it did before policies existed. A policy that
+    /// cannot be asked, because the URL does not parse, fails closed to the alt text.
+    func imageDecision(url: URL?, alt: String, title: String?, origin: GlimmerImageCandidate.Origin) -> GlimmerImageDecision {
+        guard let imagePolicy else { return .load }
+        guard let url else { return .showAltText }
+        return imagePolicy.decision(for: GlimmerImageCandidate(url: url, alt: alt, title: title, origin: origin))
     }
 
     /// One top-level block, ending in "\n". `compose(_:)` is exactly these joined with the final "\n" removed, which
@@ -195,7 +214,14 @@ struct GlimmerComposer {
         let start = output.length
         let attributes = baseAttributes(font: font, context: context)
         if let marker { output.append(marker) }
-        appendInlines(inlines, attributes: attributes, reuse: context.reuse, to: output)
+        let contentStart = output.length
+        let keptAnImageFromShowing = appendInlines(inlines, attributes: attributes, reuse: context.reuse, to: output)
+        // A paragraph that held only images the policy did not load is left out, so no blank line stands in for them.
+        // A list item keeps its marker.
+        if keptAnImageFromShowing, marker == nil, Self.isBlank(output, from: contentStart) {
+            output.deleteCharacters(in: NSRange(location: start, length: output.length - start))
+            return
+        }
         output.append(NSAttributedString(string: "\n", attributes: attributes))
         let range = NSRange(location: start, length: output.length - start)
         let style = paragraphStyle(context: context, marker: marker)
@@ -334,7 +360,9 @@ struct GlimmerComposer {
 
     // MARK: - Embeds
 
-    private func standaloneImage(_ inlines: [GlimmerInline]) -> (url: URL, alt: String)? {
+    /// The image of a paragraph that holds nothing else, when it loads. One the policy does not load composes as
+    /// text like any other paragraph, so no image box is reserved for it.
+    private func standaloneImage(_ inlines: [GlimmerInline]) -> (url: URL, alt: String, title: String?)? {
         let meaningful = inlines.filter { inline in
             switch inline {
             case .softBreak, .lineBreak: false
@@ -342,10 +370,16 @@ struct GlimmerComposer {
             default: true
             }
         }
-        guard meaningful.count == 1, case .image(let source, _, let alt) = meaningful[0], let url = URL(string: source) else {
+        guard meaningful.count == 1, case .image(let source, let title, let alt) = meaningful[0], let url = URL(string: source),
+              imageDecision(url: url, alt: alt, title: title, origin: .markdown) == .load else {
             return nil
         }
-        return (url, alt)
+        return (url, alt, title)
+    }
+
+    /// Whether everything from `location` on is spaces, tabs and line breaks.
+    private static func isBlank(_ text: NSAttributedString, from location: Int) -> Bool {
+        (text.string as NSString).substring(from: location).allSatisfy { $0 == " " || $0 == "\t" || $0 == "\u{2028}" }
     }
 
     private func tableEmbed(_ table: GlimmerTable) -> GlimmerEmbed {

