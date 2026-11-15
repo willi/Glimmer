@@ -99,7 +99,8 @@ serves images in links, lists, quotes and table cells, and extension tokens.
 ### Load time and redirects
 
 `GlimmerImageViewLoader` is the only caller of `GlimmerImageLoader`. Given a policy, it asks again just before the
-call, and a refusal fails the load without calling the loader.
+call, and a refusal fails the load without calling the loader. An image that carries no policy, inside a view that
+has one, is refused too: it did not come from that view's composer.
 
 The built-in loader asks the policy on every redirect, with the same candidate and the redirect's URL. A refused
 redirect is not followed and the load fails. Downloads in flight are shared only between requests whose policies are
@@ -117,7 +118,9 @@ These were not in the brief. Correct any of them.
 1. **Every image URL goes to the policy,** whatever its scheme: relative names, `file:` and `data:` too. "Remote" is
    not a line the library can draw safely, since `URLSession` loads `file:` URLs.
 2. **A blocked image copies as what is shown** (the alt text, or the shortcode), not as `![alt](url)`. The host has
-   said the URL must not be fetched; pasting it into another renderer would fetch it.
+   said the URL must not be fetched; pasting it into another renderer would fetch it. This includes
+   `markdownSource()` with no range, which under a policy returns the markdown of the shown text instead of the
+   answer as given (added after review).
 3. **An unparseable URL under a policy shows the alt text as ordinary text.** The policy cannot be asked without a
    URL. With no policy it stays as today (dimmed alt text).
 4. **A refused redirect leaves the placeholder,** not alt text. The text is already laid out by then.
@@ -131,8 +134,18 @@ These were not in the brief. Correct any of them.
 
 Checked across `Sources/Glimmer/Engine`: the only network call is `GlimmerImageCache`'s `URLSession`. Raw HTML is
 shown as literal text, so `<img>` never loads. Reference-style images reach the composer as ordinary image nodes.
-Streaming holds an incomplete image back, so a partial URL is never requested. There is no font, link-preview or
-favicon loading. `markdownSource(for:)`, `plainText(for:)` and accessibility read the composed text and load nothing.
+There is no font or favicon loading. `markdownSource(for:)`, `plainText(for:)` and accessibility read text and load
+nothing.
+
+Two corrections after review:
+
+- **Partial URLs while streaming.** Streaming holds an incomplete inline image back, so its partial URL is never an
+  image. A reference-style image is different, and was before this change: its definition line (`[ref]: https://…`)
+  is complete to the parser at every prefix, so while it streams, each prefix of the URL is an image. Under a policy
+  each prefix is put to the policy; with none, each is requested.
+- **Link previews.** When the host sets `linkMenuActions`, a long press on a link shows the system's menu with its
+  default preview of the link, which can load the page. It happens only on the user's long press, and links are not
+  policed.
 
 ## 7. Tests
 

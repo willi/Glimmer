@@ -57,6 +57,36 @@ private final class RecordingLoader: GlimmerImageLoader, @unchecked Sendable {
     }
 }
 
+/// Asks each request a view makes whether its policy would follow a redirect to either of two URLs.
+private final class RedirectProbeLoader: GlimmerImageLoader, @unchecked Sendable {
+    struct Probe: Equatable {
+        let image: String
+        let followsAllowed: Bool
+        let followsRefused: Bool
+    }
+
+    private let lock = NSLock()
+    private var recorded: [Probe] = []
+    private let allowed: URL
+    private let refused: URL
+
+    init(allowed: URL, refused: URL) {
+        self.allowed = allowed
+        self.refused = refused
+    }
+
+    var probes: [Probe] { lock.withLock { recorded } }
+
+    func loadImage(from url: URL) async throws -> UIImage { throw URLError(.unsupportedURL) }
+
+    func loadImage(for request: GlimmerImageRequest) async throws -> UIImage {
+        let probe = Probe(image: request.url.lastPathComponent, followsAllowed: request.permitsRedirect(to: allowed),
+                          followsRefused: request.permitsRedirect(to: refused))
+        lock.withLock { recorded.append(probe) }
+        return UIImage()
+    }
+}
+
 /// The host's image policy: a blocked image is ordinary text or nothing, and is never requested.
 @MainActor
 final class GlimmerImagePolicyTests: XCTestCase {
@@ -251,6 +281,43 @@ final class GlimmerImagePolicyTests: XCTestCase {
         _ = window
     }
 
+    /// The load-time check does not rest on the composer: an image view that reached a policed host any other way
+    /// has nothing to show the policy allowed it, and is refused even when the policy would say yes.
+    func testAnImageThatSkippedTheComposerIsNotLoadedUnderAPolicy() throws {
+        let loader = RecordingLoader()
+        let url = try XCTUnwrap(URL(string: u))
+        let host = GlimmerView(configuration: GlimmerConfiguration(
+            imageLoader: nil, imagePolicy: Answer(answer: .load), reveal: .none
+        ))
+        let window = hostInWindow(host, width: 390, height: 400)
+        let inline = GlimmerInlineImageView(source: url, alt: "", theme: .default, loader: loader)
+        inline.frame = CGRect(x: 0, y: 0, width: 24, height: 24)
+        host.addSubview(inline)
+        let embed = GlimmerImageEmbedView(source: url, alt: "", theme: .default, loader: loader)
+        embed.frame = CGRect(x: 0, y: 40, width: 200, height: 100)
+        host.addSubview(embed)
+        settle(host)
+        XCTAssertEqual(loader.requested, [])
+        _ = window
+    }
+
+    /// The redirect check reaches production requests: both image views hand their policy to the loader.
+    func testRequestsFromViewsCarryThePolicyForRedirects() async throws {
+        let loader = RedirectProbeLoader(
+            allowed: try XCTUnwrap(URL(string: "https://ok.example/elsewhere.png")),
+            refused: try XCTUnwrap(URL(string: "https://bad.example/?d=secret"))
+        )
+        let (_, window) = shown(
+            "Inline ![a](https://ok.example/a.png).\n\n![b](https://ok.example/b.png)",
+            policy: AllowHosts(hosts: ["ok.example"]), loader: loader
+        )
+        let loaded = await waitUntil { loader.probes.count >= 2 }
+        XCTAssertTrue(loaded)
+        XCTAssertEqual(Set(loader.probes.map(\.image)), ["a.png", "b.png"])
+        XCTAssertTrue(loader.probes.allSatisfy { $0.followsAllowed && !$0.followsRefused }, "\(loader.probes)")
+        _ = window
+    }
+
     // MARK: - What the policy sees
 
     func testThePolicySeesEveryImageWithItsURLAltTitleAndOrigin() throws {
@@ -334,7 +401,36 @@ final class GlimmerImagePolicyTests: XCTestCase {
         assertEquivalent(compose(markdown(of: text), policy: alt), text, "copied and composed again")
     }
 
+    func testCopyAnswerNeverHandsOutARefusedURL() {
+        let (view, window) = shown("See ![the chart](https://attacker.example/?d=secret).", policy: alt, loader: nil)
+        XCTAssertEqual(view.markdownSource(), "See the chart.")
+        _ = window
+    }
+
     // MARK: - Settled answers shared between views
+
+    /// Feed cells show settled text from the cache: its images must still carry the policy that allowed them.
+    func testSettledTextFromTheCacheKeepsThePolicyOnItsImages() throws {
+        let policy = AllowHosts(hosts: ["ok.example"])
+        let text = compose("Inline ![a](https://ok.example/a.png).\n\n![b](https://ok.example/b.png)", policy: policy)
+        let cache = GlimmerDocumentCache()
+        let key = GlimmerDocumentCache.Key(
+            source: "answer", theme: .default, extensions: [], highlighter: "none", imageLoader: nil,
+            imagePolicy: GlimmerImagePolicyKey(policy: policy)
+        )
+        cache.store(text, for: key)
+        let cached = try XCTUnwrap(cache.text(for: key))
+        let gates = imageAttachments(in: cached).map { attachment in
+            (attachment as? GlimmerInlineImageAttachment)?.gate ?? (attachment as? GlimmerBlockAttachment)?.imageGate
+        }
+        XCTAssertEqual(gates.count, 2)
+        let allowed = try XCTUnwrap(URL(string: "https://ok.example/elsewhere.png"))
+        let refused = try XCTUnwrap(URL(string: "https://bad.example/?d=secret"))
+        for gate in gates {
+            XCTAssertEqual(gate?.permits(allowed), true)
+            XCTAssertEqual(gate?.permits(refused), false)
+        }
+    }
 
     func testAViewWithAPolicyDoesNotReuseTextComposedWithoutOne() {
         let first = GlimmerView(configuration: .init(imageLoader: nil))

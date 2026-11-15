@@ -361,5 +361,6 @@ final class GlimmerImageCacheTests: XCTestCase {
             XCTFail("a refused redirect fails the load, cached or not")
         } catch {}
         XCTAssertEqual(requests(for: "/moved.png", on: server), 1, "the refused target is not requested again")
+        XCTAssertEqual(requests(for: "/image.png", on: server), 1, "the second redirect came from the cache")
     }
 }

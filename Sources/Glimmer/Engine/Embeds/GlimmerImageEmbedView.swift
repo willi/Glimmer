@@ -86,7 +86,7 @@ final class GlimmerImageEmbedView: UIView, GlimmerEmbedView {
         super.layoutSubviews()
         imageView.frame = bounds
         altLabel.frame = bounds.insetBy(dx: theme.embedPadding, dy: theme.embedPadding)
-        imageLoader?.load(size: bounds.size, scale: traitCollection.displayScale) { [weak self] result in
+        imageLoader?.load(size: bounds.size, scale: traitCollection.displayScale, hostPolicy: glimmerHostImagePolicy) { [weak self] result in
             switch result {
             case .success(let image):
                 self?.imageView.image = image

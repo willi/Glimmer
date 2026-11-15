@@ -19,16 +19,21 @@ final class GlimmerImageViewLoader {
         self.gate = gate
     }
 
-    func load(size: CGSize, scale: CGFloat, completion: @escaping @MainActor (Result<UIImage, Error>) -> Void) {
+    /// `hostPolicy` is the image policy of the `GlimmerView` the image is shown in, if it has one.
+    func load(
+        size: CGSize, scale: CGFloat, hostPolicy: (any GlimmerImagePolicy)? = nil,
+        completion: @escaping @MainActor (Result<UIImage, Error>) -> Void
+    ) {
         guard size.width.isFinite, size.height.isFinite, scale.isFinite,
               size.width > 0, size.height > 0, scale > 0 else { return }
         let pixels = CGSize(width: ceil(size.width * scale), height: ceil(size.height * scale))
         if let requestedSize, requestedSize.width >= pixels.width, requestedSize.height >= pixels.height { return }
         requestedSize = pixels
         loadTask?.cancel()
-        // The policy allowed this image when the text was composed. Asking again here, where every load starts,
-        // covers any path to a view that the composer did not decide.
-        guard gate?.permits(source) ?? true else {
+        // The policy allowed this image when the text was composed. It is asked again here, where every load starts,
+        // so a refusal does not rest on the composer alone. An image with no gate inside a host that has a policy
+        // was never put to that policy: it is refused, not trusted.
+        guard gate != nil || hostPolicy == nil, gate?.permits(source) ?? true else {
             completion(.failure(GlimmerImageRefused()))
             return
         }

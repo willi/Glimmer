@@ -186,7 +186,8 @@ an emoji shortcode (its `kind` is `"emoji"`). The policy answers with one of:
 
 An image that is not loaded is never requested, from the network or from a cache, and reserves no space. A standalone
 image's alt text is an ordinary paragraph, and a paragraph left empty is left out. The text copies as what is shown,
-not as `![alt](url)`; it is not reported to `onImageTap`; and VoiceOver reads it as text.
+not as `![alt](url)`, and that includes `markdownSource()`; it is not reported to `onImageTap`; and VoiceOver reads it
+as text.
 
 When writing a policy:
 
@@ -198,9 +199,12 @@ When writing a policy:
 - **It is asked from any thread, and more than once for the same image**: each time the text is composed while an
   answer streams, again just before the load, and for each redirect. Answer quickly, and always the same.
 - **Redirects are checked.** Before the built-in loader follows a redirect, it asks the policy about the same image
-  with the URL it redirects to. A refused redirect is not requested and the load fails. The image then keeps its
-  placeholder, because the text is already laid out. A custom `GlimmerImageLoader` that follows redirects itself must
-  call `request.permitsRedirect(to:)` and fail the load on `false`; otherwise its redirects are not checked.
+  with the URL it redirects to. A refused redirect is not requested and the load fails. The text is already laid out
+  by then, so an inline image keeps its placeholder and a standalone image shows its alt text in its box.
+- **A custom loader has to keep the check.** A `GlimmerImageLoader` that follows redirects itself must call
+  `request.permitsRedirect(to:)` and fail the load on `false`. One that wraps the built-in loader must pass on the
+  `GlimmerImageRequest` it was given, with `loadImage(for:)`; `loadImage(from:)` and a request built from the URL
+  alone carry no policy. Otherwise its redirects are not checked.
 
 With no policy set, nothing changes.
 
@@ -250,7 +254,9 @@ keeps its own selection inside. While an answer reveals, the selection stops at 
 
 Copy writes plain text and markdown (`net.daringfireball.markdown`), so a paste into a markdown-aware app keeps
 lists, code, emphasis and links. `markdownSource(for:)` gives the markdown for any range, or, with no range, the whole
-answer as given; `plainText(for:)` gives the plain text copy writes. Hosts can add their own edit-menu and link-menu items:
+answer as given; `plainText(for:)` gives the plain text copy writes. With an [image policy](#image-policy) set,
+`markdownSource()` gives the markdown of the shown text instead, so the URL of a refused image is never handed out.
+Hosts can add their own edit-menu and link-menu items:
 
 ```swift
 view.editMenuActions = { selection in

@@ -51,7 +51,7 @@ final class GlimmerInlineImageView: UIImageView {
         case .roundedRectangle(let cornerRadius):
             layer.cornerRadius = cornerRadius.isFinite ? min(max(0, cornerRadius), maximumRadius) : 0
         }
-        imageLoader?.load(size: bounds.size, scale: traitCollection.displayScale) { [weak self] result in
+        imageLoader?.load(size: bounds.size, scale: traitCollection.displayScale, hostPolicy: glimmerHostImagePolicy) { [weak self] result in
             if case .success(let image) = result { self?.image = image }
         }
     }
