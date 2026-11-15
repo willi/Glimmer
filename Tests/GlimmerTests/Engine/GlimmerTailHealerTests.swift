@@ -94,6 +94,63 @@ final class GlimmerTailHealerTests: XCTestCase {
         XCTAssertEqual(GlimmerTailHealer.heal("Use `a <b"), "Use `a <b`", "inside code a tag is text")
     }
 
+    /// To cmark a reference definition is complete at every prefix of its destination, so every reference to it would
+    /// resolve to each prefix in turn. It waits for the line break that ends its destination's line.
+    func testAReferenceDefinitionBeingTypedIsHeldBack() {
+        let body = "![six][ref]\n\n"
+        for definition in [
+            "[ref]:", "[ref]: ", "[ref]: h", "[ref]: https://a.exam", "[ref]: https://a.example/6.png",
+            "[ref]: <https://a.exam", "[ref]: <https://a.example/6.png>",
+            "[ref]: https://a.example/6.png \"Si", "[ref]: https://a.example/6.png \"Six\"",
+            "[ref]: https://a.example/6.png 'Six' ", "[ref]: https://a.example/6.png (Si",
+            // The destination may sit alone on the next line, and a label may span lines.
+            "[ref]:\n", "[ref]:\nhttps://a.exam", "[long\nlabel]: https://a.exam",
+        ] {
+            XCTAssertEqual(GlimmerTailHealer.heal(body + definition), body, definition.debugDescription)
+        }
+        // Its line has ended: the destination is final. A title on the next line would change nothing shown.
+        let complete = body + "[ref]: https://a.example/6.png\n"
+        XCTAssertEqual(GlimmerTailHealer.heal(complete), complete)
+        XCTAssertEqual(GlimmerTailHealer.heal(body + "[one]: /1.png\n[ref]: /6"), body + "[one]: /1.png\n",
+                       "only the definition being typed waits")
+        // Its container stays, so an empty quote or list item does not come and go.
+        XCTAssertEqual(GlimmerTailHealer.heal("> [ref]: /6"), "> ")
+        XCTAssertEqual(GlimmerTailHealer.heal("- [ref]: /6"), "- ")
+        XCTAssertEqual(GlimmerTailHealer.heal("> [ref]:\n> /6"), "> ")
+    }
+
+    /// A finished definition is not inline text: closing a delimiter in it, or dropping one, would change its
+    /// destination.
+    func testAFinishedReferenceDefinitionIsLeftAlone() {
+        let body = "![six][ref]\n\n"
+        for definitions in [
+            "[ref]: https://a.example/_next/6.png\n",
+            "[ref]: https://a.example/wiki/Six_(number)\n",
+            "[ref]: https://a.example/6.png?size=*\n",
+            "[ref]: https://a.example/_6.png \"Six\"\n",
+            "[ref]: <https://a.example/_6.png>\n",
+            "[ref]:\nhttps://a.example/_6.png\n",
+            "[one]: /_1.png\n[ref]: /6*.png\n",
+        ] {
+            XCTAssertEqual(GlimmerTailHealer.heal(body + definitions), body + definitions, definitions.debugDescription)
+        }
+        // What follows a definition is healed as before, and only that.
+        XCTAssertEqual(GlimmerTailHealer.heal("[ref]: /_6.png\nSome **bold"), "[ref]: /_6.png\nSome **bold**")
+        XCTAssertEqual(GlimmerTailHealer.heal("> [ref]: /_6.png\n> Some **bold"), "> [ref]: /_6.png\n> Some **bold**")
+        XCTAssertEqual(GlimmerTailHealer.heal("[one]: /_1.png\n[tw"), "[one]: /_1.png\ntw")
+        XCTAssertEqual(GlimmerTailHealer.heal("[one]: /_1.png\n[two]: /2"), "[one]: /_1.png\n")
+    }
+
+    /// Text after the destination that is not a title makes the line a paragraph to cmark, and it shows at once. So
+    /// does a footnote definition, whose note is text, not a destination.
+    func testALineThatCannotBeAReferenceDefinitionIsNotHeldBack() {
+        for paragraph in [
+            "[Note]: this is", "[ref]: /6.png \"Six\" and", "[Note]:\nthis is", "see [ref]: /6", "See[^1].\n\n[^1]: Yes",
+        ] {
+            XCTAssertEqual(GlimmerTailHealer.heal(paragraph), paragraph)
+        }
+    }
+
     func testLinkAndFootnoteSyntaxInsideCodeStaysLiteralWhileStreaming() {
         for code in ["array[0", "array[0]", "[label](url", "![alt", "[^note", "[^note]"] {
             for delimiter in ["`", "``", "```"] {

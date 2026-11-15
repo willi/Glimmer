@@ -33,12 +33,16 @@ enum GlimmerTailHealer {
         tail = holdBackTableHeader(tail)
         tail = holdBackOpeningPipe(tail)
         tail = holdBackSetextUnderline(tail)
-        tail = holdBackFootnoteStarts(tail)
-        tail = holdBackPartialBreakTag(tail)
-        tail = holdBackTrailingBackslash(tail)
-        tail = healLinks(tail)
-        tail = closeInlineDelimiters(tail)
-        return String(markdown[..<tailStart]) + tail
+        tail = holdBackReferenceDefinition(tail)
+        // Only what follows the last finished reference definition is inline text.
+        let inlineStart = endOfReferenceDefinitions(in: tail)
+        var inline = String(tail[inlineStart...])
+        inline = holdBackFootnoteStarts(inline)
+        inline = holdBackPartialBreakTag(inline)
+        inline = holdBackTrailingBackslash(inline)
+        inline = healLinks(inline)
+        inline = closeInlineDelimiters(inline)
+        return String(markdown[..<tailStart]) + tail[..<inlineStart] + inline
     }
 
     /// Where the paragraph still being typed starts: after the last blank line, or at the last line opening a list
@@ -180,6 +184,75 @@ enum GlimmerTailHealer {
               !lines[lines.count - 2].trimmingCharacters(in: .whitespaces).isEmpty else { return tail }
         lines.removeLast()
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    // MARK: - Reference definitions
+
+    /// How far a link reference definition has got.
+    private enum ReferenceDefinition {
+        /// The line break that ends its destination's line has arrived; `end` is just past it.
+        case finished(end: String.Index)
+        /// The buffer ends before that line break.
+        case unfinished
+    }
+
+    /// A link reference definition still being typed (`[ref]:`, `[ref]: https://a.exam`) waits for the line break that
+    /// ends its destination's line. To cmark it is complete at every prefix of the destination, so each prefix would
+    /// become, in turn, the destination of every link and image that uses it, and an image is requested as soon as it
+    /// is composed. After that line break the destination cannot change: only a title can still follow, on the next
+    /// line, and a title changes nothing that is shown. So the definition counts as complete there, and until then
+    /// references to it stay literal text.
+    private static func holdBackReferenceDefinition(_ tail: String) -> String {
+        guard let last = lastReferenceDefinition(in: tail), case .unfinished = last.state else { return tail }
+        // The container prefix stays, so an empty quote or list item does not come and go.
+        return String(tail[..<last.start])
+    }
+
+    /// Where inline text starts in `tail`: just past its last finished reference definition. A definition is not
+    /// inline text. Healed like the paragraph around it, a lone `_` or `*` in its destination would be closed or
+    /// dropped, and references would resolve to a URL nobody wrote.
+    private static func endOfReferenceDefinitions(in tail: String) -> String.Index {
+        guard let last = lastReferenceDefinition(in: tail), case .finished(let end) = last.state else { return tail.startIndex }
+        return end
+    }
+
+    /// The last reference definition in `tail`: where its label opens, after the line's container prefix, and how
+    /// far it has got.
+    ///
+    /// Whether cmark would read the line as a definition depends on the lines above it (a definition cannot interrupt
+    /// a paragraph). They are not checked: treating a line that only looks like a definition as one delays a word of
+    /// text or leaves a delimiter above it open, while missing a real one requests URLs nobody wrote.
+    private static func lastReferenceDefinition(in tail: String) -> (start: String.Index, state: ReferenceDefinition)? {
+        // Nearly every tail leaves here.
+        guard tail.contains("]:") else { return nil }
+        // The label opens a line: the last one, or an earlier one when the label spans lines, the destination sits
+        // alone on the next line, or other text follows the definition.
+        var lineEnd = tail.endIndex
+        while true {
+            let lineStart = tail[..<lineEnd].lastIndex(of: "\n").map { tail.index(after: $0) } ?? tail.startIndex
+            let content = containerPrefix(of: tail[lineStart..<lineEnd]).content
+            if content.first == "[", let state = referenceDefinition(at: tail[content.startIndex...]) {
+                return (content.startIndex, state)
+            }
+            guard lineStart > tail.startIndex else { return nil }
+            lineEnd = tail.index(before: lineStart)
+        }
+    }
+
+    /// How far the reference definition that opens `text` has got, or nil if `text` does not open with one. `text`
+    /// runs from a line's opening bracket to the end of the buffer.
+    private static func referenceDefinition(at text: Substring) -> ReferenceDefinition? {
+        // `[label]:`, then the destination on that line or alone on the next. `[^label]:` is a footnote definition.
+        guard let label = text.prefixMatch(of: #/\[(?!\^)(?:[^\[\]\\]|\\.)+\]:[ \t]*(?:\n[ >\t]*)?/#) else { return nil }
+        let line = text[label.range.upperBound...]
+        // The destination, bare or in angle brackets, perhaps a title, and the line break.
+        if let finished = line.prefixMatch(of: #/(?:<[^<>\n]*>|[^\s<]\S*)(?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^()\n]*\)))?[ \t]*\n/#) {
+            return .finished(end: finished.range.upperBound)
+        }
+        // That line so far, to the end of the buffer: nothing, the destination, or the destination and a title.
+        // Anything else makes the line a paragraph to cmark, which shows as it is typed.
+        let unfinished = #/(?:(?:<[^<>\n]*>?|[^\s<]\S*)(?:[ \t]+(?:"[^"\n]*"?|'[^'\n]*'?|\([^()\n]*\)?)?)?)?[ \t]*/#
+        return line.wholeMatch(of: unfinished) == nil ? nil : .unfinished
     }
 
     // MARK: - Links and images

@@ -119,6 +119,72 @@ final class GlimmerStreamingDocumentTests: XCTestCase {
         }
     }
 
+    /// To cmark a definition is complete at every prefix of its URL. Shown as typed, each prefix would become the
+    /// destination of the images and links that use it, and an image is requested as soon as it is composed.
+    func testAReferenceDefinitionBeingTypedNeverResolvesToAPartialURL() {
+        let url = "https://a.example/6.png"
+        for markdown in [
+            "![six][ref]\n\n[ref]: \(url)",
+            "Text ![six][ref] end.\n\n[ref]: \(url)",
+            "See [six][ref].\n\n[ref]: \(url)",
+            "![six][ref]\n\n[ref]:\n\(url)",
+            "![six][ref]\n\n[ref]: <\(url)>",
+            "![six][ref]\n\n[ref]: \(url) \"Six\"",
+            "![six][ref]\n\n[other]: https://a.example/1.png\n[ref]: \(url)",
+            "> ![six][ref]\n>\n> [ref]: \(url)",
+        ] {
+            XCTAssertEqual(destinationsSeenWhileStreaming(markdown), [url], markdown.debugDescription)
+        }
+    }
+
+    /// A finished definition is not inline text. Healed like the paragraph it sits in, a lone `_` or `*` in its URL
+    /// was closed or dropped, and references resolved to a URL nobody wrote until the paragraph ended.
+    func testAFinishedReferenceDefinitionKeepsItsURLWhileStreaming() {
+        for url in ["https://a.example/_next/6.png", "https://a.example/wiki/Six_(number)", "https://a.example/6.png?size=*"] {
+            let markdown = "![six][ref]\n\n[ref]: \(url)\n[other]: https://a.example/1.png\n"
+            XCTAssertEqual(destinationsSeenWhileStreaming(markdown), [url], markdown.debugDescription)
+        }
+    }
+
+    /// Every URL the document would load or open while `markdown` streams one character at a time, then settles.
+    private func destinationsSeenWhileStreaming(_ markdown: String) -> Set<String> {
+        let document = GlimmerStreamingDocument(composer: composer)
+        var seen: Set<String> = []
+        let characters = Array(markdown)
+        for end in 1...characters.count {
+            _ = document.update(markdown: String(characters[..<end]), isStreaming: true)
+            seen.formUnion(destinations(in: document.text))
+        }
+        _ = document.update(markdown: markdown, isStreaming: false)
+        return seen.union(destinations(in: document.text))
+    }
+
+    /// The hold ends with the definition's line, not with the stream.
+    func testAReferenceDefinitionResolvesWhileStreamingOnceItsLineEnds() {
+        let document = GlimmerStreamingDocument(composer: composer)
+        _ = document.update(markdown: "![six][ref]\n\n[ref]: https://a.example/6.png", isStreaming: true)
+        XCTAssertEqual(destinations(in: document.text), [])
+        XCTAssertEqual(document.text.string, "![six][ref]", "the reference stays literal text")
+        _ = document.update(markdown: "![six][ref]\n\n[ref]: https://a.example/6.png\n", isStreaming: true)
+        XCTAssertEqual(destinations(in: document.text), ["https://a.example/6.png"])
+    }
+
+    /// Every URL `text` would load or open: image sources, inline and block, and link destinations.
+    private func destinations(in text: NSAttributedString) -> Set<String> {
+        var found: Set<String> = []
+        let range = NSRange(location: 0, length: text.length)
+        text.enumerateAttribute(.attachment, in: range) { value, _, _ in
+            if let image = value as? GlimmerInlineImageAttachment { found.insert(image.source.absoluteString) }
+            if let block = value as? GlimmerBlockAttachment, case .image(let source, _) = block.embed {
+                found.insert(source.absoluteString)
+            }
+        }
+        text.enumerateAttribute(.link, in: range) { value, _, _ in
+            if let link = value as? URL { found.insert(link.absoluteString) }
+        }
+        return found
+    }
+
     func testUnchangedMarkdownReturnsNil() {
         let document = GlimmerStreamingDocument(composer: composer)
         _ = document.update(markdown: "Same", isStreaming: true)
