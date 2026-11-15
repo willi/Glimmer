@@ -133,17 +133,30 @@ final class GlimmerStreamingDocumentTests: XCTestCase {
             "![six][ref]\n\n[other]: https://a.example/1.png\n[ref]: \(url)",
             "> ![six][ref]\n>\n> [ref]: \(url)",
         ] {
-            let document = GlimmerStreamingDocument(composer: composer)
-            var seen: Set<String> = []
-            let characters = Array(markdown)
-            for end in 1...characters.count {
-                _ = document.update(markdown: String(characters[..<end]), isStreaming: true)
-                seen.formUnion(destinations(in: document.text))
-            }
-            _ = document.update(markdown: markdown, isStreaming: false)
-            seen.formUnion(destinations(in: document.text))
-            XCTAssertEqual(seen, [url], markdown.debugDescription)
+            XCTAssertEqual(destinationsSeenWhileStreaming(markdown), [url], markdown.debugDescription)
         }
+    }
+
+    /// A finished definition is not inline text. Healed like the paragraph it sits in, a lone `_` or `*` in its URL
+    /// was closed or dropped, and references resolved to a URL nobody wrote until the paragraph ended.
+    func testAFinishedReferenceDefinitionKeepsItsURLWhileStreaming() {
+        for url in ["https://a.example/_next/6.png", "https://a.example/wiki/Six_(number)", "https://a.example/6.png?size=*"] {
+            let markdown = "![six][ref]\n\n[ref]: \(url)\n[other]: https://a.example/1.png\n"
+            XCTAssertEqual(destinationsSeenWhileStreaming(markdown), [url], markdown.debugDescription)
+        }
+    }
+
+    /// Every URL the document would load or open while `markdown` streams one character at a time, then settles.
+    private func destinationsSeenWhileStreaming(_ markdown: String) -> Set<String> {
+        let document = GlimmerStreamingDocument(composer: composer)
+        var seen: Set<String> = []
+        let characters = Array(markdown)
+        for end in 1...characters.count {
+            _ = document.update(markdown: String(characters[..<end]), isStreaming: true)
+            seen.formUnion(destinations(in: document.text))
+        }
+        _ = document.update(markdown: markdown, isStreaming: false)
+        return seen.union(destinations(in: document.text))
     }
 
     /// The hold ends with the definition's line, not with the stream.
