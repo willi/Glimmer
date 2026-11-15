@@ -14,6 +14,7 @@ final class ImageTestServer: @unchecked Sendable {
     private let queue = DispatchQueue(label: "Glimmer.ImageTestServer")
     private let lock = NSLock()
     private var reply: Reply
+    private var pathReplies: [String: Reply] = [:]
     private var requests: [String] = []
     private var connections: [NWConnection] = []
 
@@ -28,6 +29,9 @@ final class ImageTestServer: @unchecked Sendable {
     var receivedRequests: [String] { lock.withLock { requests } }
 
     func setReply(_ reply: Reply) { lock.withLock { self.reply = reply } }
+
+    /// Answers requests for `path` with `reply` instead of the default one, for example with a redirect.
+    func setReply(_ reply: Reply, forPath path: String) { lock.withLock { pathReplies[path] = reply } }
 
     func start() async throws -> URL {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
@@ -72,12 +76,19 @@ final class ImageTestServer: @unchecked Sendable {
                 if !complete && error == nil { self.receive(connection, bytes: bytes) }
                 return
             }
+            let path = request.split(separator: " ").dropFirst().first.map(String.init) ?? ""
             let reply = self.lock.withLock {
                 self.requests.append(request)
-                return self.reply
+                return self.pathReplies[path] ?? self.reply
             }
             self.queue.asyncAfter(deadline: .now() + reply.delay) {
-                let reason = reply.status == 200 ? "OK" : reply.status == 304 ? "Not Modified" : "Error"
+                let reason = switch reply.status {
+                case 200: "OK"
+                case 301: "Moved Permanently"
+                case 302: "Found"
+                case 304: "Not Modified"
+                default: "Error"
+                }
                 var response = "HTTP/1.1 \(reply.status) \(reason)\r\nContent-Length: \(reply.data.count)\r\nContent-Type: image/png\r\nConnection: close\r\n"
                 for (name, value) in reply.headers { response += "\(name): \(value)\r\n" }
                 response += "\r\n"

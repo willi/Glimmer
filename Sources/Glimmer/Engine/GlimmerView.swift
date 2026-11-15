@@ -167,8 +167,16 @@ public final class GlimmerView: UIView {
 
     /// The markdown for `range` of the shown text (UTF-16 offsets, as in `UITextView.selectedRange`), or — for nil —
     /// the whole answer exactly as last given to `update`. Backs "Copy answer" buttons.
+    ///
+    /// With an image policy set, nil gives the markdown of the shown text instead (while an answer streams, of the
+    /// text composed so far). The answer as given can hold the URL of an image the policy refused, and a paste into
+    /// another app would request it.
     public func markdownSource(for range: NSRange? = nil) -> String {
-        guard let range else { return markdown }
+        guard let range else {
+            guard configuration.imagePolicy != nil else { return markdown }
+            let all = NSRange(location: 0, length: textView.textStorage.length)
+            return GlimmerMarkdownSerializer.markdown(from: textView.textStorage, range: all)
+        }
         return GlimmerMarkdownSerializer.markdown(from: textView.textStorage, range: range)
     }
 
@@ -405,6 +413,7 @@ public final class GlimmerView: UIView {
             theme: configuration.theme.scaled(for: traitCollection),
             highlighter: configuration.highlighter,
             imageLoader: configuration.imageLoader,
+            imagePolicy: configuration.imagePolicy,
             inlineImageShape: configuration.inlineImageShape,
             extensions: configuration.extensions,
             linksImagesForTaps: onImageTap != nil
@@ -421,6 +430,7 @@ public final class GlimmerView: UIView {
             extensions: configuration.extensions.map { String(reflecting: type(of: $0)) },
             highlighter: String(reflecting: type(of: configuration.highlighter)),
             imageLoader: configuration.imageLoader.map { String(reflecting: type(of: $0)) },
+            imagePolicy: configuration.imagePolicy.map { GlimmerImagePolicyKey(policy: $0) },
             inlineImageShape: configuration.inlineImageShape,
             linksImagesForTaps: onImageTap != nil
         )

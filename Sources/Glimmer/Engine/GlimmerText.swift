@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// SwiftUI wrapper for `GlimmerView`. Markdown, `onLinkTap`, `onTokenTap` and `onImageTap` update in place; the configuration is read once, when
-/// the view is created. To apply a different configuration (theme, extensions, image loader), give the view a new
-/// identity, for example `.id(themeVersion)`.
+/// SwiftUI wrapper for `GlimmerView`. Markdown, `onLinkTap`, `onTokenTap` and `onImageTap` update in place; the
+/// configuration is read once, when the view is created. To apply a different configuration (theme, extensions,
+/// image loader, image policy), give the view a new identity, for example `.id(themeVersion)`.
 public struct GlimmerText: UIViewRepresentable {
     public var markdown: String
     public var isStreaming: Bool

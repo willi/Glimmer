@@ -6,23 +6,39 @@ final class GlimmerImageViewLoader {
     private let source: URL
     private let loader: any GlimmerImageLoader
     private let contentMode: GlimmerImageRequest.ContentMode
+    private let gate: GlimmerImageGate?
     private var requestedSize: CGSize?
     private var loadTask: Task<Void, Never>?
 
-    init(source: URL, loader: any GlimmerImageLoader, contentMode: GlimmerImageRequest.ContentMode) {
+    init(
+        source: URL, loader: any GlimmerImageLoader, contentMode: GlimmerImageRequest.ContentMode, gate: GlimmerImageGate? = nil
+    ) {
         self.source = source
         self.loader = loader
         self.contentMode = contentMode
+        self.gate = gate
     }
 
-    func load(size: CGSize, scale: CGFloat, completion: @escaping @MainActor (Result<UIImage, Error>) -> Void) {
+    /// `hostPolicy` is the image policy of the `GlimmerView` the image is shown in, if it has one.
+    func load(
+        size: CGSize, scale: CGFloat, hostPolicy: (any GlimmerImagePolicy)? = nil,
+        completion: @escaping @MainActor (Result<UIImage, Error>) -> Void
+    ) {
         guard size.width.isFinite, size.height.isFinite, scale.isFinite,
               size.width > 0, size.height > 0, scale > 0 else { return }
         let pixels = CGSize(width: ceil(size.width * scale), height: ceil(size.height * scale))
         if let requestedSize, requestedSize.width >= pixels.width, requestedSize.height >= pixels.height { return }
         requestedSize = pixels
         loadTask?.cancel()
-        let request = GlimmerImageRequest(url: source, targetPixelSize: pixels, contentMode: contentMode)
+        // The policy allowed this image when the text was composed. It is asked again here, where every load starts,
+        // so a refusal does not rest on the composer alone. An image with no gate inside a host that has a policy
+        // was never put to that policy: it is refused, not trusted.
+        guard gate != nil || hostPolicy == nil, gate?.permits(source) ?? true else {
+            completion(.failure(GlimmerImageRefused()))
+            return
+        }
+        var request = GlimmerImageRequest(url: source, targetPixelSize: pixels, contentMode: contentMode)
+        request.gate = gate
         loadTask = Task { [loader] in
             do {
                 let image = try await loader.loadImage(for: request)

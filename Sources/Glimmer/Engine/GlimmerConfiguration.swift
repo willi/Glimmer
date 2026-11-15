@@ -7,6 +7,9 @@ public struct GlimmerConfiguration: Sendable {
     /// Loads images: standalone ones, in a reserved box, and ones inside a paragraph, in a line-height square. `nil`
     /// shows a standalone image's alt text in its box and leaves an inline placeholder.
     public var imageLoader: (any GlimmerImageLoader)?
+    /// Decides which images load. `nil` loads every image. Set one when the markdown is written by a language model
+    /// or by other people: see `GlimmerImagePolicy`.
+    public var imagePolicy: (any GlimmerImagePolicy)?
     /// The shape of images inside text. Defaults to a circle; the reserved line-height square never changes size.
     public var inlineImageShape: GlimmerInlineImageShape
     public var highlighter: any GlimmerHighlighter
@@ -24,6 +27,7 @@ public struct GlimmerConfiguration: Sendable {
         theme: GlimmerTheme = .default,
         extensions: [any GlimmerExtension] = [],
         imageLoader: (any GlimmerImageLoader)? = GlimmerURLSessionImageLoader(),
+        imagePolicy: (any GlimmerImagePolicy)? = nil,
         inlineImageShape: GlimmerInlineImageShape = .circle,
         highlighter: any GlimmerHighlighter = GlimmerBasicHighlighter(),
         reveal: GlimmerReveal = .smooth(GlimmerRevealOptions()),
@@ -34,6 +38,7 @@ public struct GlimmerConfiguration: Sendable {
         self.theme = theme
         self.extensions = extensions
         self.imageLoader = imageLoader
+        self.imagePolicy = imagePolicy
         self.inlineImageShape = inlineImageShape
         self.highlighter = highlighter
         self.reveal = reveal

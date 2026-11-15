@@ -12,11 +12,19 @@ public actor GlimmerImageCache {
         let permitsStorage: Bool
     }
 
+    /// Requests share a download only for the same image under equal policies. Its redirects are put to the policy
+    /// for the request that started it, so a request with a policy must never ride on one made without it, nor on
+    /// one for an image the policy might answer differently about: another alt text, title or origin.
+    private struct DownloadKey: Hashable, Sendable {
+        let url: URL
+        let gate: GlimmerImageGate?
+    }
+
     private let session: URLSession
     private let ownsSession: Bool
     private let images = NSCache<NSString, UIImage>()
     private let preparedImageMemoryCapacity: Int
-    private let downloads = GlimmerImageTaskPool<URL, Download>()
+    private let downloads = GlimmerImageTaskPool<DownloadKey, Download>()
     private let preparations = GlimmerImageTaskPool<String, UIImage>()
     private let decoder = GlimmerImageDecoder()
     private(set) var generation = 0
@@ -60,8 +68,16 @@ public actor GlimmerImageCache {
         observeMemoryWarningsIfNeeded()
         let generation = self.generation
         let invalidation = self.invalidation
-        let download = try await downloads.value(for: request.url) { [session] in
-            let (data, response) = try await session.data(from: request.url)
+        let downloadKey = DownloadKey(url: request.url, gate: request.gate)
+        let download = try await downloads.value(for: downloadKey) { [session] in
+            let (data, response): (Data, URLResponse)
+            if request.gate == nil {
+                (data, response) = try await session.data(from: request.url)
+            } else {
+                // A refused redirect is not followed. The task then ends with the redirect's own response, which the
+                // status check below rejects like any other answer that is not an image.
+                (data, response) = try await session.data(from: request.url, delegate: GlimmerRedirectGuard(request: request))
+            }
             if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                 throw URLError(.badServerResponse)
             }
@@ -134,5 +150,23 @@ public actor GlimmerImageCache {
     isolated deinit {
         if let memoryWarning { NotificationCenter.default.removeObserver(memoryWarning) }
         if ownsSession { session.invalidateAndCancel() }
+    }
+}
+
+/// Puts each redirect of a download to the host's image policy before it is followed. An allowed image host that
+/// redirects anywhere would otherwise carry a request, and whatever its URL holds, to a host the policy refuses.
+private final class GlimmerRedirectGuard: NSObject, URLSessionTaskDelegate {
+    private let request: GlimmerImageRequest
+
+    init(request: GlimmerImageRequest) {
+        self.request = request
+    }
+
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest: URLRequest
+    ) async -> URLRequest? {
+        guard let url = newRequest.url, request.permitsRedirect(to: url) else { return nil }
+        return newRequest
     }
 }

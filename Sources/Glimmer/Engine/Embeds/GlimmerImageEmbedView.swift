@@ -13,11 +13,11 @@ final class GlimmerImageEmbedView: UIView, GlimmerEmbedView {
     private let imageLoader: GlimmerImageViewLoader?
     private lazy var tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(handleTap))
 
-    init(source: URL, alt: String, theme: GlimmerTheme, loader: (any GlimmerImageLoader)?) {
+    init(source: URL, alt: String, theme: GlimmerTheme, loader: (any GlimmerImageLoader)?, gate: GlimmerImageGate? = nil) {
         self.theme = theme
         self.source = source
         self.alt = alt
-        imageLoader = loader.map { GlimmerImageViewLoader(source: source, loader: $0, contentMode: .aspectFit) }
+        imageLoader = loader.map { GlimmerImageViewLoader(source: source, loader: $0, contentMode: .aspectFit, gate: gate) }
         super.init(frame: .zero)
         backgroundColor = theme.codeBlockBackground
         layer.cornerRadius = theme.embedCornerRadius
@@ -86,7 +86,7 @@ final class GlimmerImageEmbedView: UIView, GlimmerEmbedView {
         super.layoutSubviews()
         imageView.frame = bounds
         altLabel.frame = bounds.insetBy(dx: theme.embedPadding, dy: theme.embedPadding)
-        imageLoader?.load(size: bounds.size, scale: traitCollection.displayScale) { [weak self] result in
+        imageLoader?.load(size: bounds.size, scale: traitCollection.displayScale, hostPolicy: glimmerHostImagePolicy) { [weak self] result in
             switch result {
             case .success(let image):
                 self?.imageView.image = image

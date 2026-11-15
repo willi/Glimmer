@@ -9,6 +9,8 @@ final class GlimmerInlineImageAttachment: NSTextAttachment {
     let theme: GlimmerTheme
     let loader: (any GlimmerImageLoader)?
     let shape: GlimmerInlineImageShape
+    /// The image policy that allowed this image, asked again before it loads. Nil without a policy.
+    let gate: GlimmerImageGate?
     /// Built once and reused when TextKit asks for a fresh provider.
     private var cachedView: GlimmerInlineImageView?
 
@@ -17,7 +19,7 @@ final class GlimmerInlineImageAttachment: NSTextAttachment {
 
     init(
         source: URL, alt: String, isLinked: Bool = false, theme: GlimmerTheme, loader: (any GlimmerImageLoader)?,
-        shape: GlimmerInlineImageShape = .circle
+        shape: GlimmerInlineImageShape = .circle, gate: GlimmerImageGate? = nil
     ) {
         self.source = source
         self.alt = alt
@@ -25,6 +27,7 @@ final class GlimmerInlineImageAttachment: NSTextAttachment {
         self.theme = theme
         self.loader = loader
         self.shape = shape
+        self.gate = gate
         super.init(data: nil, ofType: nil)
     }
 
@@ -32,7 +35,9 @@ final class GlimmerInlineImageAttachment: NSTextAttachment {
 
     /// A new attachment for the same image, without a view: for a cached text shown by another view.
     func freshCopy() -> GlimmerInlineImageAttachment {
-        GlimmerInlineImageAttachment(source: source, alt: alt, isLinked: isLinked, theme: theme, loader: loader, shape: shape)
+        GlimmerInlineImageAttachment(
+            source: source, alt: alt, isLinked: isLinked, theme: theme, loader: loader, shape: shape, gate: gate
+        )
     }
 
     @MainActor
@@ -41,7 +46,9 @@ final class GlimmerInlineImageAttachment: NSTextAttachment {
     @MainActor
     func imageView() -> UIImageView {
         if let cachedView { return cachedView }
-        let view = GlimmerInlineImageView(source: source, alt: alt, isLinked: isLinked, theme: theme, loader: loader, shape: shape)
+        let view = GlimmerInlineImageView(
+            source: source, alt: alt, isLinked: isLinked, theme: theme, loader: loader, shape: shape, gate: gate
+        )
         cachedView = view
         return view
     }

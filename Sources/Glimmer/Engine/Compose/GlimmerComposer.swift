@@ -8,6 +8,8 @@ struct GlimmerComposer {
     var theme: GlimmerTheme
     var highlighter: any GlimmerHighlighter = GlimmerBasicHighlighter()
     var imageLoader: (any GlimmerImageLoader)? = nil
+    /// The host's say over which images load. Nil loads every image.
+    var imagePolicy: (any GlimmerImagePolicy)? = nil
     var inlineImageShape: GlimmerInlineImageShape = .circle
     var extensions: [any GlimmerExtension] = []
     /// Whether the host takes image taps: an inline image's spoken alt text then links to the image for VoiceOver.
@@ -45,9 +47,47 @@ struct GlimmerComposer {
 
     func compose(_ blocks: [GlimmerBlock]) -> NSAttributedString {
         let output = NSMutableAttributedString()
-        for (index, block) in blocks.enumerated() { output.append(composeBlock(block, isFirst: index == 0)) }
+        for (index, block) in blocks.enumerated() {
+            let isFirst = startsDocument(index: index, in: blocks, precedingLength: output.length)
+            output.append(composeBlock(block, isFirst: isFirst))
+        }
         if output.length > 0 { output.deleteCharacters(in: NSRange(location: output.length - 1, length: 1)) }
         return output
+    }
+
+    /// Whether the block at `index` of `blocks` opens the document, with `precedingLength` characters composed before
+    /// it. Under an image policy the blocks before it may all have been left out, and the first block that shows text
+    /// is then the one with no heading space above it. A block that shows nothing with or without a policy, such as
+    /// an empty quote, is not one the policy left out: what follows it is spaced as it is with no policy.
+    func startsDocument(index: Int, in blocks: [GlimmerBlock], precedingLength: Int) -> Bool {
+        if index == 0 { return true }
+        guard imagePolicy != nil, precedingLength == 0 else { return false }
+        return !blocks[..<index].contains(where: Self.showsNothingByItself)
+    }
+
+    /// Whether a block composes to nothing whatever the image policy says.
+    private static func showsNothingByItself(_ block: GlimmerBlock) -> Bool {
+        switch block {
+        case .blockQuote(let blocks): blocks.allSatisfy(showsNothingByItself)
+        // Notes compose to nothing only when they are not rendered here at all.
+        case .footnoteDefinitions: true
+        default: false
+        }
+    }
+
+    /// The policy bound to an image it decided to load, for the check before the load. Nil without a policy.
+    func imageGate(url: URL, alt: String, title: String?, origin: GlimmerImageCandidate.Origin) -> GlimmerImageGate? {
+        imagePolicy.map {
+            GlimmerImageGate(policy: $0, candidate: GlimmerImageCandidate(url: url, alt: alt, title: title, origin: origin))
+        }
+    }
+
+    /// What to do with an image. With no policy every image loads, as it did before policies existed. A policy that
+    /// cannot be asked, because the URL does not parse, fails closed to the alt text.
+    func imageDecision(url: URL?, alt: String, title: String?, origin: GlimmerImageCandidate.Origin) -> GlimmerImageDecision {
+        guard let imagePolicy else { return .load }
+        guard let url else { return .showAltText }
+        return imagePolicy.decision(for: GlimmerImageCandidate(url: url, alt: alt, title: title, origin: origin))
     }
 
     /// One top-level block, ending in "\n". `compose(_:)` is exactly these joined with the final "\n" removed, which
@@ -78,12 +118,17 @@ struct GlimmerComposer {
     private func append(_ block: GlimmerBlock, context: Context, marker: NSAttributedString?, to output: NSMutableAttributedString) {
         switch block {
         case .paragraph(let inlines):
-            if let image = standaloneImage(inlines) {
+            let image = standaloneImage(inlines)
+            if let image, image.decision == .load {
                 appendEmbed(.image(source: image.url, alt: image.alt),
                             source: GlimmerMarkdownSerializer.imageSource(source: image.url.absoluteString, alt: image.alt),
-                            context: context, marker: marker, to: output)
+                            context: context, marker: marker,
+                            imageGate: imageGate(url: image.url, alt: image.alt, title: image.title, origin: .markdown), to: output)
             } else {
-                appendTextParagraph(inlines, font: theme.bodyFont, context: context, marker: marker, to: output)
+                // One the policy does not load composes as text like any other paragraph, so no image box is
+                // reserved for it. The answer it already gave goes along, so it is asked once.
+                appendTextParagraph(inlines, font: theme.bodyFont, context: context, marker: marker,
+                                    soleImageDecision: image?.decision, to: output)
             }
         case .heading(let level, let inlines):
             appendTextParagraph(inlines, font: theme.headingFont(level: level), context: context, marker: marker,
@@ -190,12 +235,22 @@ struct GlimmerComposer {
 
     private func appendTextParagraph(
         _ inlines: [GlimmerInline], font: UIFont, context: Context, marker: NSAttributedString?,
-        headingLevel: Int? = nil, spacingBefore: CGFloat = 0, to output: NSMutableAttributedString
+        headingLevel: Int? = nil, spacingBefore: CGFloat = 0, soleImageDecision: GlimmerImageDecision? = nil,
+        to output: NSMutableAttributedString
     ) {
         let start = output.length
         let attributes = baseAttributes(font: font, context: context)
         if let marker { output.append(marker) }
-        appendInlines(inlines, attributes: attributes, reuse: context.reuse, to: output)
+        let contentStart = output.length
+        let keptAnImageFromShowing = appendInlines(
+            inlines, attributes: attributes, reuse: context.reuse, soleImageDecision: soleImageDecision, to: output
+        )
+        // A paragraph that held only images the policy did not load is left out, so no blank line stands in for them.
+        // A list item keeps its marker.
+        if keptAnImageFromShowing, marker == nil, Self.isBlank(output, from: contentStart) {
+            output.deleteCharacters(in: NSRange(location: start, length: output.length - start))
+            return
+        }
         output.append(NSAttributedString(string: "\n", attributes: attributes))
         let range = NSRange(location: start, length: output.length - start)
         let style = paragraphStyle(context: context, marker: marker)
@@ -208,12 +263,14 @@ struct GlimmerComposer {
 
     private func appendEmbed(
         _ embed: GlimmerEmbed, source: String, context: Context, marker: NSAttributedString?,
-        to output: NSMutableAttributedString
+        imageGate: GlimmerImageGate? = nil, to output: NSMutableAttributedString
     ) {
         if let marker { appendTextParagraph([], font: theme.bodyFont, context: context, marker: marker, to: output) }
         let start = output.length
         let attachment = context.reuse?.attachment(for: embed)
-            ?? GlimmerBlockAttachment(embed: embed, theme: theme, highlighter: highlighter, imageLoader: imageLoader)
+            ?? GlimmerBlockAttachment(
+                embed: embed, theme: theme, highlighter: highlighter, imageLoader: imageLoader, imageGate: imageGate
+            )
         context.reuse?.record(attachment, embed: embed, at: output.length)
         output.append(NSAttributedString(attachment: attachment))
         output.append(NSAttributedString(string: "\n"))
@@ -334,7 +391,11 @@ struct GlimmerComposer {
 
     // MARK: - Embeds
 
-    private func standaloneImage(_ inlines: [GlimmerInline]) -> (url: URL, alt: String)? {
+    /// The image of a paragraph that holds nothing else, with the policy's decision for it. Nil when the paragraph
+    /// holds more, or the image's URL does not parse.
+    private func standaloneImage(
+        _ inlines: [GlimmerInline]
+    ) -> (url: URL, alt: String, title: String?, decision: GlimmerImageDecision)? {
         let meaningful = inlines.filter { inline in
             switch inline {
             case .softBreak, .lineBreak: false
@@ -342,10 +403,16 @@ struct GlimmerComposer {
             default: true
             }
         }
-        guard meaningful.count == 1, case .image(let source, _, let alt) = meaningful[0], let url = URL(string: source) else {
+        guard meaningful.count == 1, case .image(let source, let title, let alt) = meaningful[0],
+              let url = URL(string: source) else {
             return nil
         }
-        return (url, alt)
+        return (url, alt, title, imageDecision(url: url, alt: alt, title: title, origin: .markdown))
+    }
+
+    /// Whether everything from `location` on is spaces, tabs and line breaks.
+    private static func isBlank(_ text: NSAttributedString, from location: Int) -> Bool {
+        (text.string as NSString).substring(from: location).allSatisfy { $0 == " " || $0 == "\t" || $0 == "\u{2028}" }
     }
 
     private func tableEmbed(_ table: GlimmerTable) -> GlimmerEmbed {

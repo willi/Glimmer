@@ -16,12 +16,22 @@ public struct GlimmerImageRequest: Sendable {
     public var targetPixelSize: CGSize?
     /// Whether the image will fit inside or fill the requested size.
     public var contentMode: ContentMode
+    /// The host's image policy bound to this image, when one is set.
+    var gate: GlimmerImageGate?
 
     /// Creates a request. Invalid or empty dimensions are treated as an original-size request.
     public init(url: URL, targetPixelSize: CGSize? = nil, contentMode: ContentMode = .aspectFit) {
         self.url = url
         self.targetPixelSize = targetPixelSize
         self.contentMode = contentMode
+    }
+
+    /// Whether the host's image policy allows following a redirect to `url`. Always true when no policy is set.
+    ///
+    /// The built-in loader asks before each redirect and fails the load when the answer is false. A custom loader
+    /// that follows redirects itself should do the same; otherwise its redirects are not checked.
+    public func permitsRedirect(to url: URL) -> Bool {
+        gate?.permits(url) ?? true
     }
 
     var validPixelSize: CGSize? {

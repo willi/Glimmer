@@ -102,7 +102,10 @@ final class GlimmerStreamingDocument: @unchecked Sendable {
             // Only this block's own previous attachments are offered back, so an unchanged block never loses one.
             let reuse = GlimmerAttachmentReuse(index < blockAttachments.count ? blockAttachments[index] : [],
                                                inlineImages: index < blockInlineImages.count ? blockInlineImages[index] : [])
-            let fragment = composer.composeBlock(parsed.blocks[index], isFirst: index == 0, reusing: reuse)
+            let fragment = composer.composeBlock(
+                parsed.blocks[index],
+                isFirst: composer.startsDocument(index: index, in: parsed.blocks, precedingLength: running), reusing: reuse
+            )
             newFragments.append(fragment)
             newOffsets.append(running)
             newAttachments.append(reuse.emitted)

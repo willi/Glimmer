@@ -2,6 +2,22 @@ import UIKit
 import XCTest
 @testable import Glimmer
 
+/// Loads images whose URL has one of the given paths and hides the rest.
+private struct AllowPaths: GlimmerImagePolicy {
+    var paths: Set<String>
+    func decision(for image: GlimmerImageCandidate) -> GlimmerImageDecision {
+        paths.contains(image.url.path()) ? .load : .hide
+    }
+}
+
+/// Follows a redirect only for the image with the given alt text. Any image may load `/image.png` itself.
+private struct RedirectsForAlt: GlimmerImagePolicy {
+    var alt: String
+    func decision(for image: GlimmerImageCandidate) -> GlimmerImageDecision {
+        image.alt == alt || image.url.path() == "/image.png" ? .load : .hide
+    }
+}
+
 @MainActor
 final class GlimmerImageCacheTests: XCTestCase {
     private func png(color: UIColor = .red, size: CGSize = CGSize(width: 40, height: 20)) throws -> Data {
@@ -272,5 +288,113 @@ final class GlimmerImageCacheTests: XCTestCase {
         let second = GlimmerURLSessionImageLoader(cache: GlimmerImageCache(session: secondSession))
         _ = try await second.loadImage(from: url)
         XCTAssertEqual(server.requestCount, 1, "the new session reads the persisted response")
+    }
+
+    // MARK: - Redirects under an image policy
+
+    private func request(_ url: URL, policy: (any GlimmerImagePolicy)?, alt: String = "") -> GlimmerImageRequest {
+        var request = GlimmerImageRequest(url: url)
+        request.gate = policy.map {
+            GlimmerImageGate(policy: $0, candidate: GlimmerImageCandidate(url: url, alt: alt, origin: .markdown))
+        }
+        return request
+    }
+
+    /// `/image.png` redirects to `/hop.png`, which redirects to `/moved.png`, which is the image.
+    private func redirectingServer(delay: TimeInterval = 0) async throws -> (ImageTestServer, URL) {
+        let server = try ImageTestServer(reply: .init(data: png()))
+        server.setReply(.init(data: Data(), headers: ["Location": "/hop.png"], status: 302, delay: delay), forPath: "/image.png")
+        server.setReply(.init(data: Data(), headers: ["Location": "/moved.png"], status: 302), forPath: "/hop.png")
+        return (server, try await server.start())
+    }
+
+    private func requests(for path: String, on server: ImageTestServer) -> Int {
+        server.receivedRequests.count { $0.hasPrefix("GET \(path) ") }
+    }
+
+    func testARefusedRedirectIsNeverRequested() async throws {
+        let (server, url) = try await redirectingServer()
+        defer { server.stop() }
+        let loader = GlimmerURLSessionImageLoader(cache: isolatedCache())
+        do {
+            _ = try await loader.loadImage(for: request(url, policy: AllowPaths(paths: ["/image.png", "/hop.png"])))
+            XCTFail("a refused redirect fails the load")
+        } catch {}
+        XCTAssertEqual(requests(for: "/hop.png", on: server), 1, "the permitted hop is followed")
+        XCTAssertEqual(requests(for: "/moved.png", on: server), 0, "the refused hop is never requested")
+    }
+
+    func testAPermittedRedirectLoads() async throws {
+        let (server, url) = try await redirectingServer()
+        defer { server.stop() }
+        let loader = GlimmerURLSessionImageLoader(cache: isolatedCache())
+        let image = try await loader.loadImage(
+            for: request(url, policy: AllowPaths(paths: ["/image.png", "/hop.png", "/moved.png"]))
+        )
+        XCTAssertEqual(image.size, CGSize(width: 40, height: 20))
+        XCTAssertEqual(requests(for: "/moved.png", on: server), 1)
+    }
+
+    func testWithNoPolicyARedirectIsFollowed() async throws {
+        let (server, url) = try await redirectingServer()
+        defer { server.stop() }
+        let image = try await GlimmerURLSessionImageLoader(cache: isolatedCache()).loadImage(for: request(url, policy: nil))
+        XCTAssertEqual(image.size, CGSize(width: 40, height: 20))
+        XCTAssertEqual(requests(for: "/moved.png", on: server), 1)
+    }
+
+    func testAPolicedRequestDoesNotRideOnAnUnpolicedDownload() async throws {
+        let (server, url) = try await redirectingServer(delay: 0.3)
+        defer { server.stop() }
+        let loader = GlimmerURLSessionImageLoader(cache: isolatedCache())
+        let open = request(url, policy: nil)
+        let unpoliced = Task { try await loader.loadImage(for: open) }
+        let started = await waitUntil { server.requestCount == 1 }
+        XCTAssertTrue(started)
+        do {
+            _ = try await loader.loadImage(for: request(url, policy: AllowPaths(paths: ["/image.png"])))
+            XCTFail("a policed load never receives an image fetched through a redirect its policy refuses")
+        } catch {}
+        let image = try await unpoliced.value
+        XCTAssertEqual(image.size, CGSize(width: 40, height: 20))
+    }
+
+    /// A shared download's redirects are put to the policy for the image that started it. Another image with the
+    /// same URL is a different question, so it gets its own download and its own answer.
+    func testADifferentImageDoesNotRideOnADownloadOfTheSameURL() async throws {
+        let (server, url) = try await redirectingServer(delay: 0.3)
+        defer { server.stop() }
+        let loader = GlimmerURLSessionImageLoader(cache: isolatedCache())
+        let policy = RedirectsForAlt(alt: "trusted")
+        let trusted = request(url, policy: policy, alt: "trusted")
+        let first = Task { try await loader.loadImage(for: trusted) }
+        let started = await waitUntil { server.requestCount == 1 }
+        XCTAssertTrue(started)
+        do {
+            _ = try await loader.loadImage(for: request(url, policy: policy, alt: "other"))
+            XCTFail("an image never receives a download that followed a redirect its policy refuses for it")
+        } catch {}
+        let image = try await first.value
+        XCTAssertEqual(image.size, CGSize(width: 40, height: 20))
+    }
+
+    func testACachedRedirectIsStillPutToThePolicy() async throws {
+        // The redirect may be cached; its target may not, so a second trip to it would show on the server.
+        let server = try ImageTestServer(reply: .init(data: png(), headers: ["Cache-Control": "no-store"]))
+        server.setReply(
+            .init(data: Data(), headers: ["Location": "/moved.png", "Cache-Control": "max-age=3600"], status: 301),
+            forPath: "/image.png"
+        )
+        defer { server.stop() }
+        let url = try await server.start()
+        let loader = GlimmerURLSessionImageLoader(cache: isolatedCache())
+        _ = try await loader.loadImage(for: request(url, policy: nil))
+        XCTAssertEqual(requests(for: "/moved.png", on: server), 1)
+        do {
+            _ = try await loader.loadImage(for: request(url, policy: AllowPaths(paths: ["/image.png"])))
+            XCTFail("a refused redirect fails the load, cached or not")
+        } catch {}
+        XCTAssertEqual(requests(for: "/moved.png", on: server), 1, "the refused target is not requested again")
+        XCTAssertEqual(requests(for: "/image.png", on: server), 1, "the second redirect came from the cache")
     }
 }
