@@ -257,6 +257,12 @@ extension GlimmerComposer {
             var chip = attributes
             chip[.attachment] = GlimmerInlineAttachment(token: token, glimmerExtension: glimmerExtension, theme: theme)
             chip[.glimmerSource] = token.source
+            if token.isTappable {
+                // The link covers the chip's glyph too, so its frame is the chip's rect: VoiceOver's touch exploration,
+                // Switch Control and Voice Control find the chip, not a sliver at its edge.
+                chip[.glimmerToken] = GlimmerTokenBox(token)
+                chip[.link] = GlimmerTokenBox.link(kind: token.kind, at: output.length)
+            }
             output.append(NSAttributedString(string: "\u{FFFC}", attributes: chip))
             if token.isTappable { appendSpokenLink(for: token, attributes: attributes, to: output) }
             return false
@@ -289,7 +295,8 @@ extension GlimmerComposer {
         spoken[.foregroundColor] = UIColor.clear
         spoken[.glimmerSpokenOnly] = true
         spoken[.glimmerToken] = GlimmerTokenBox(token)
-        spoken[.link] = GlimmerTokenBox.link(kind: token.kind, at: output.length)
+        // The same URL as the chip's glyph before it, so the two are one link.
+        spoken[.link] = GlimmerTokenBox.link(kind: token.kind, at: output.length - 1)
         output.append(NSAttributedString(string: token.accessibilityLabel ?? token.displayText, attributes: spoken))
     }
 

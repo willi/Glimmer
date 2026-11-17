@@ -16,7 +16,7 @@ struct DemoCitations: GlimmerExtension {
     }
 
     @MainActor func makeInlineView(for token: GlimmerInlineToken, theme: GlimmerTheme) -> UIView? {
-        let label = UILabel()
+        let label = DemoCitationLabel()
         label.text = token.displayText
         label.font = .preferredFont(forTextStyle: .caption1)
         label.textColor = .white
@@ -28,9 +28,18 @@ struct DemoCitations: GlimmerExtension {
     }
 }
 
+/// A citation chip with room around its number, so a tap on its body is easy to aim.
+private final class DemoCitationLabel: UILabel {
+    override func sizeThatFits(_ size: CGSize) -> CGSize {
+        let text = super.sizeThatFits(size)
+        return CGSize(width: max(text.width + 16, 32), height: text.height + 4)
+    }
+}
+
 /// Tappable chips: a citation chip reports its tap through the banner.
 struct TappableChipExample: View {
     @State private var lastTap: String?
+    @State private var taps = 0
 
     private var configuration: GlimmerConfiguration {
         var configuration = GlimmerConfiguration()
@@ -43,7 +52,10 @@ struct TappableChipExample: View {
             GlimmerText(
                 "Glimmer lays text out once with TextKit 2 [1] and reveals it phrase by phrase [2].",
                 configuration: configuration,
-                onTokenTap: { lastTap = "Citation \($0.payload["number"] ?? "")" }
+                onTokenTap: {
+                    taps += 1
+                    lastTap = "Citation \($0.payload["number"] ?? "") x\(taps)"
+                }
             )
             .padding()
         }

@@ -114,9 +114,12 @@ final class GlimmerExtensionTests: XCTestCase {
             if let url = value as? URL, GlimmerTokenBox.isTokenLink(url) { linkRange = range }
         }
         let range = try XCTUnwrap(linkRange)
-        XCTAssertEqual((text.string as NSString).substring(with: range), "[1]")
-        XCTAssertNotNil(text.attribute(.glimmerSpokenOnly, at: range.location, effectiveRange: nil))
+        // The link covers the chip's glyph and its spoken text, so its frame is the chip's rect.
+        XCTAssertEqual((text.string as NSString).substring(with: range), "\u{FFFC}[1]")
+        XCTAssertNil(text.attribute(.glimmerSpokenOnly, at: range.location, effectiveRange: nil))
+        XCTAssertNotNil(text.attribute(.glimmerSpokenOnly, at: range.location + 1, effectiveRange: nil))
         XCTAssertNotNil(text.attribute(.glimmerToken, at: range.location, effectiveRange: nil))
+        XCTAssertNotNil(text.attribute(.glimmerToken, at: range.location + 1, effectiveRange: nil))
     }
 
     func testAnUntappableChipHasNoLinkAndNoTapHost() {

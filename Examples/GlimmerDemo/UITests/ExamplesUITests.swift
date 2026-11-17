@@ -67,21 +67,27 @@ final class ExamplesUITests: XCTestCase {
         app.buttons["Basic"].tap()
     }
 
-    /// A tappable `.chip` token is one VoiceOver link (no second element reading the same label, whatever its type), and
-    /// a real tap on its view reaches the host's `onTokenTap`.
+    /// A tappable `.chip` token is one VoiceOver link (no second element reading the same label, whatever its type)
+    /// whose frame is the chip's, and a real tap on the chip's body reaches the host's `onTokenTap` exactly once.
     @MainActor
     func testTappableChipIsOneLinkAndReportsItsTap() {
         let app = launch("tappable-chips")
         XCTAssertTrue(app.navigationBars["Tappable Chips"].waitForExistence(timeout: 15))
         let chip = app.links["Source 1"].firstMatch
         XCTAssertTrue(chip.waitForExistence(timeout: 10), "the chip is exposed as a link")
-        let exposed = app.descendants(matching: .any).matching(NSPredicate(format: "label == '[1]' OR label == 'Source 1'"))
+        let exposed = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '[1]' OR label == 'Source 1'"))
         XCTAssertEqual(exposed.count, 1, "the chip is announced once, across all element types")
         XCTAssertEqual(exposed.firstMatch.elementType, .link)
-        chip.tap()
+        XCTAssertEqual(chip.label, "Source 1", "the link reads only its label")
+        XCTAssertGreaterThanOrEqual(chip.frame.width, 28, "the link's frame is the chip's, not a sliver at its edge")
+        XCTAssertGreaterThanOrEqual(chip.frame.height, 15)
+        // A real touch on the chip's body, left of the text it hides behind.
+        chip.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).tap()
         let banner = app.staticTexts["demo.lastTap"]
         XCTAssertTrue(banner.waitForExistence(timeout: 5), "a real tap reaches onTokenTap")
-        XCTAssertEqual(banner.label, "Citation 1")
+        XCTAssertEqual(banner.label, "Citation 1 x1", "one tap fires once")
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertEqual(banner.label, "Citation 1 x1", "no late second fire")
     }
 
     /// Linked table cells retain their native tap target and accessible link after wrapping or changing appearance.
