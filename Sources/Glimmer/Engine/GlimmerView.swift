@@ -22,6 +22,8 @@ public final class GlimmerView: UIView {
     public var findInteraction: UIFindInteraction? { configuration.allowsFind ? textView.findInteraction : nil }
 
     let textView = GlimmerTextView()
+    /// The last `fittingWidth(maximum:)` answer, valid while the text is unchanged.
+    private var fittedWidth: (version: Int, maximum: CGFloat, width: CGFloat)?
     let revealMask = GlimmerRevealMask()
     private let viewportTracker = GlimmerViewportTracker()
     /// The reveal's time source; tests substitute a manual clock.
@@ -127,6 +129,34 @@ public final class GlimmerView: UIView {
 
     public override func sizeThatFits(_ size: CGSize) -> CGSize {
         CGSize(width: size.width, height: height(forWidth: size.width))
+    }
+
+    /// The width of the longest laid-out line when the view is at most `maximum` wide, so a host can shrink a bubble to
+    /// its text. Includes the text container's insets and padding and never exceeds `maximum`. Text with a code block,
+    /// table, image or rule returns `maximum`, because those embeds fill the width.
+    public func fittingWidth(maximum: CGFloat) -> CGFloat {
+        guard maximum > 0 else { return 0 }
+        if let cached = fittedWidth, cached.version == textView.textVersion, cached.maximum == maximum { return cached.width }
+        let text = textView.textStorage
+        var hasBlockEmbed = false
+        text.enumerateAttribute(.attachment, in: NSRange(location: 0, length: text.length)) { value, _, stop in
+            if value is GlimmerBlockAttachment {
+                hasBlockEmbed = true
+                stop.pointee = true
+            }
+        }
+        let width: CGFloat
+        if hasBlockEmbed {
+            width = maximum
+        } else {
+            let measurer = GlimmerTextMeasurer(
+                text: NSAttributedString(attributedString: text), width: maximum, insets: textView.textContainerInset,
+                lineFragmentPadding: textView.textContainer.lineFragmentPadding
+            )
+            width = min(measurer.longestLineWidth, maximum)
+        }
+        fittedWidth = (textView.textVersion, maximum, width)
+        return width
     }
 
     public override var intrinsicContentSize: CGSize {
