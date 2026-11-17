@@ -102,7 +102,7 @@ final class GlimmerReadmeExampleTests: XCTestCase {
     func testLinkPolicy() {
         struct AppLinks: GlimmerLinkPolicy {
             func decision(for link: GlimmerLinkCandidate) -> GlimmerLinkDecision {
-                switch link.url?.scheme {
+                switch link.url?.scheme?.lowercased() {
                 case "https", "mailto": .link
                 default: .text
                 }
@@ -110,9 +110,9 @@ final class GlimmerReadmeExampleTests: XCTestCase {
         }
 
         let configuration = GlimmerConfiguration(linkPolicy: AppLinks())
-        let text = GlimmerView.attributedString(for: "[Pay](myapp://pay) or [read](https://example.com)",
+        let text = GlimmerView.attributedString(for: "[Pay](myapp://pay) or [read](HTTPS://example.com)",
                                                 configuration: configuration)
-        XCTAssertEqual(text.runs.compactMap(\.link), [URL(string: "https://example.com")].compactMap { $0 })
+        XCTAssertEqual(text.runs.compactMap(\.link), [URL(string: "HTTPS://example.com")].compactMap { $0 })
     }
 
     func testExtension() {

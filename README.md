@@ -186,8 +186,8 @@ let view = GlimmerView(configuration: configuration)
   with one set has each font's own line height plus the spacing between its lines, and nothing above its first line
   or below its last, so the gaps between blocks stay as `paragraphSpacing` and `blockSpacing` set them. Tables keep
   their own layout. All three scale with Dynamic Type. `looseListSpacing` is the space after an item in a loose list,
-  and between the paragraphs inside one loose item; `nil` uses `paragraphSpacing`. A chip or tappable text with a URL
-  takes `linkColor` in `attributedString` and `GlimmerStaticText`.
+  and between the paragraphs inside one loose item; `nil` uses `paragraphSpacing`. An attachment chip with a URL takes
+  `linkColor` in `attributedString` and `GlimmerStaticText`; tappable text keeps `mentionColor`.
 - **`extensions`**: custom syntax. See [Extensions](#extensions).
 - **`highlighter`** (`GlimmerHighlighter`): syntax highlighting for code blocks. The default,
   `GlimmerBasicHighlighter`, covers keywords, strings, comments and numbers in common languages.
@@ -315,7 +315,7 @@ whether it is a link:
 ```swift
 struct AppLinks: GlimmerLinkPolicy {
     func decision(for link: GlimmerLinkCandidate) -> GlimmerLinkDecision {
-        switch link.url?.scheme {
+        switch link.url?.scheme?.lowercased() {
         case "https", "mailto": .link
         default: .text
         }
@@ -329,7 +329,8 @@ The policy receives a `GlimmerLinkCandidate`: the link's `destination` as the pa
 `url` (`nil` when it does not parse), and its `title`. It answers `.link`, to show a link as without a policy, or
 `.text`, to show the link's text as ordinary text, styled like the text around it: no link colour, no underline,
 nothing to tap. Bold or italic text inside the link stays bold or italic. A refused link copies as its text alone, and
-that includes `markdownSource()`, so its URL is never handed out.
+that includes `markdownSource()`, so its URL is never handed out as a link; a link whose text is its URL still shows
+and copies that text.
 
 Extension tokens are still scanned inside a refused link's text, and an image inside a refused link is still an image:
 it takes `onImageTap` and your image policy.
@@ -340,7 +341,9 @@ The policy decides on the links the markdown parser finds, so it sees exactly wh
   URLs (`https://…`, and `www.…`, whose destination is `http://www.…`). Markdown that blurs where a link ends, such
   as `[y <span title="]">](myapp://pay)`, is decided on the links the parser reads, not on how the text looks.
 - **Not everything that can be tapped is a link.** An extension's tappable tokens go to `onTokenTap`, which the app
-  handles itself, and data detectors (`dataDetectors`) find their own links in the text, refused links included.
+  handles itself; an extension's token URLs, which your extension sets, are not asked about (in
+  `attributedString`/`GlimmerStaticText` they become links); and data detectors (`dataDetectors`) find their own links
+  in the text, refused links included.
 - **A policy is a `Hashable` value**, asked from any thread and more than once for the same link. Views with equal
   policies share composed answers, so two policies that compare equal must decide equally. It applies to
   `GlimmerView`, `GlimmerText`, `GlimmerStaticText` and `GlimmerView.attributedString(for:configuration:)`.
@@ -397,7 +400,8 @@ keeps its own selection inside. While an answer reveals, the selection stops at 
 Copy writes plain text and markdown (`net.daringfireball.markdown`), so a paste into a markdown-aware app keeps
 lists, code, emphasis and links. `markdownSource(for:)` gives the markdown for any range, or, with no range, the whole
 answer as given; `plainText(for:)` gives the plain text copy writes. With an [image policy](#image-policy) or a [link policy](#link-policy) set,
-`markdownSource()` gives the markdown of the shown text instead, so the URL of a refused image or link is never handed out.
+`markdownSource()` gives the markdown of the shown text instead, so the URL of a refused image or link is never handed
+out as a link; a link whose text is its URL still shows and copies that text.
 Hosts can add their own edit-menu and link-menu items:
 
 ```swift
