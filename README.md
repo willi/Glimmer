@@ -53,7 +53,8 @@ view.update(markdown: received, isStreaming: false, revealID: messageID)
 ```
 
 While an answer reveals, the view's height ends at the last revealed line and never shrinks: if an edit moves revealed
-text up, the view keeps its height (with space below the text) until the reveal ends, then reports the true height.
+text up, the view keeps its height (with space below the text) until the answer finishes revealing, then reports the
+true height. A new width, theme or text size starts afresh, with no height to hold.
 `onHeightChange` fires whenever the height may have changed, even once per streamed chunk with the same height: compare
 against the last height before relaying out.
 

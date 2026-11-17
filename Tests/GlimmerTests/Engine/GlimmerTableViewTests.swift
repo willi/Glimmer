@@ -400,9 +400,13 @@ final class GlimmerTableViewTests: XCTestCase {
         let window = hostInWindow(table, width: width, height: table.embedHeight(forWidth: width))
         table.layoutIfNeeded()
         XCTAssertGreaterThan(table.scrollView.contentSize.width, table.bounds.width, "the streaming table scrolls")
+        let scrolled = table.scrollView.contentSize.width - table.bounds.width
+        table.scrollView.contentOffset.x = scrolled
+        XCTAssertEqual(table.scrollView.contentOffset.x, scrolled, "the reader scrolled it to the end")
         table.isStreaming = false
         table.layoutIfNeeded()
         XCTAssertEqual(table.scrollView.contentSize.width, width, accuracy: 0.001, "the settled table fits the box")
+        XCTAssertEqual(table.scrollView.contentOffset.x, 0, "the fitted table is not left shifted by the old scroll")
         _ = window
     }
 

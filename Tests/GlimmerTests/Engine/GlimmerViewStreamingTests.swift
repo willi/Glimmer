@@ -311,12 +311,15 @@ final class GlimmerViewStreamingTests: XCTestCase {
     func testAStreamedTableNeverShrinksTheHeightMidRevealAndFitsOnceTheRevealEnds() async throws {
         let (view, clock, window) = streamingView(width: 320)
         var heights: [CGFloat] = []
+        var reportedAfterReveal: CGFloat?
         func record() {
             guard view.isRevealing else { return }
             heights.append(view.intrinsicContentSize.height)
             heights.append(view.sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)).height)
         }
-        view.onHeightChange = { record() }
+        view.onHeightChange = {
+            if view.isRevealing { record() } else { reportedAfterReveal = view.intrinsicContentSize.height }
+        }
         let note = "a longer note that wraps when its column is narrow and fits on one line when it is wide"
         let rows = (1...6).map { "| row \($0) | item | \(note) |" }.joined(separator: "\n")
         let markdown = "Here is the comparison.\n\n| Name | Kind | Note |\n|---|---|---|\n" + rows
@@ -364,6 +367,8 @@ final class GlimmerViewStreamingTests: XCTestCase {
         let freshTable = try XCTUnwrap(blockAttachments(in: fresh.textView.textStorage).first?.existingView as? GlimmerTableView)
         XCTAssertEqual(table.cachedLayout?.layout, freshTable.cachedLayout?.layout, "the table fits as a fresh one does")
         XCTAssertEqual(view.intrinsicContentSize.height, fresh.intrinsicContentSize.height, accuracy: 0.5)
+        let reported = try XCTUnwrap(reportedAfterReveal, "the host hears the height once the reveal ends")
+        XCTAssertEqual(reported, fresh.intrinsicContentSize.height, accuracy: 0.5, "the reported height is the fitted one")
         _ = (window, freshWindow)
     }
 

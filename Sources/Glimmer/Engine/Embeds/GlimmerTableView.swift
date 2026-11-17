@@ -335,6 +335,12 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
         scrollView.frame = bounds
         // While revealing, this view is shorter than the table and clips the rows below; never scroll vertically.
         scrollView.contentSize = CGSize(width: layout.contentWidth, height: min(layout.height, bounds.height))
+        // A table scrolled sideways while streaming may fit when the reveal ends: never leave it shifted past its end.
+        // UIKit clamps an idle scroll view itself, but not one being dragged or decelerating.
+        let maxOffset: CGFloat = max(0, layout.contentWidth - bounds.width)
+        if scrollView.contentOffset.x > maxOffset {
+            UIView.performWithoutAnimation { scrollView.contentOffset.x = maxOffset }
+        }
         // A streaming table narrower than the box draws its last column to the edge; cells keep their measured widths.
         let drawnWidth = max(layout.contentWidth, bounds.width)
         content.frame = CGRect(x: 0, y: 0, width: drawnWidth, height: layout.height)
