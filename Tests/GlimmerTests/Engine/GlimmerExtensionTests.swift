@@ -137,6 +137,45 @@ final class GlimmerExtensionTests: XCTestCase {
         _ = window
     }
 
+    func testTheMeasurerSeesATallChipLikeTheHostedView() throws {
+        let configuration = GlimmerConfiguration(extensions: [TallChip()], imageLoader: nil, reveal: .none)
+        let view = GlimmerView(configuration: configuration)
+        view.update(markdown: "a [1] b")
+        let hosted = view.sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)).height
+        let window = hostInWindow(view, width: 320, height: hosted)
+        let inset = view.textView.textContainerInset
+        let measurer = GlimmerTextMeasurer(
+            text: compose("a [1] b", extensions: [TallChip()]), width: 320, insets: inset,
+            lineFragmentPadding: view.textView.textContainer.lineFragmentPadding
+        )
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(measurer.lineBottoms.first), 40 + inset.top)
+        XCTAssertEqual(view.height(forWidth: 320, notExceeding: 10_000), hosted, accuracy: 0.5)
+        _ = window
+    }
+
+    func testTheRevealMaskCoversATallChip() async throws {
+        let view = GlimmerView(configuration: GlimmerConfiguration(extensions: [TallChip()], imageLoader: nil))
+        let clock = ManualRevealClock()
+        view.clock = clock
+        let window = hostInWindow(view, width: 320, height: 200)
+        view.update(markdown: "Alpha beta [1] gamma delta epsilon zeta eta", isStreaming: true)
+        await view.pendingDocument?.value
+        var time = 0.0
+        while (view.engine?.revealedLength ?? 0) < 14, time < 1 {
+            time += 0.02
+            clock.advance(to: time)
+        }
+        settle(view)
+        let chip = try XCTUnwrap(findSubview(FixedSizeView.self, in: view))
+        let frame = chip.convert(chip.bounds, to: view.textView)
+        let phrases = try XCTUnwrap(view.engine).phrases
+        XCTAssertFalse(phrases.isEmpty, "a phrase is fading")
+        let layers = phrases.compactMap { view.revealMask.phraseLayer(startingAt: $0.range.location)?.path?.boundingBox }
+        let covered = layers.reduce(view.revealMask.settledRect) { $0.union($1) }
+        XCTAssertTrue(covered.insetBy(dx: -1.5, dy: -1.5).contains(frame), "\(covered) covers \(frame)")
+        _ = window
+    }
+
     func testAChipNoTallerThanTheLineKeepsItsBounds() throws {
         let bounds = try chipBounds(CitationExtension())
         XCTAssertEqual(bounds.height, ceil(theme.bodyFont.lineHeight))
