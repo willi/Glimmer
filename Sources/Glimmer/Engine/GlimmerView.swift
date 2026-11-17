@@ -5,7 +5,7 @@ import UIKit
 ///
 /// Size it with Auto Layout (a width constraint gives an intrinsic height) or call `sizeThatFits(_:)` with a finite
 /// width. While a reveal runs, the height ends at the last revealed line. `onHeightChange` fires whenever the height
-/// may have changed.
+/// may have changed, and also when a streamed update's layout settles, even if the height did not change.
 @MainActor
 public final class GlimmerView: UIView {
     public var configuration: GlimmerConfiguration {
@@ -22,6 +22,10 @@ public final class GlimmerView: UIView {
     public var findInteraction: UIFindInteraction? { configuration.allowsFind ? textView.findInteraction : nil }
 
     let textView = GlimmerTextView()
+    /// The last `fittingWidth(maximum:)` answer, valid while the text is unchanged.
+    private var fittedWidth: (version: Int, maximum: CGFloat, width: CGFloat)?
+    /// The last capped-height answer, valid while the text, width and cap are unchanged.
+    private var cappedHeight: (version: Int, width: CGFloat, maximum: CGFloat, height: CGFloat)?
     let revealMask = GlimmerRevealMask()
     private let viewportTracker = GlimmerViewportTracker()
     /// The reveal's time source; tests substitute a manual clock.
@@ -35,8 +39,19 @@ public final class GlimmerView: UIView {
             if isRevealing != (oldValue != nil) { accessibilityState.withLock { $0.isRevealing = isRevealing } }
         }
     }
+    /// Whether a reveal is running: the text is partly shown, and its height ends at the last revealed line. A host
+    /// uses it to tell a revealing answer from one shown in full.
+    public var isRevealing: Bool { engine != nil }
+    /// Set by `finishReveal()`: no reveal starts until a streamed update or a new `revealID`, so a worker result
+    /// requested before the finish still shows everything.
+    private var revealFinished = false
     /// The worker update in flight, if any. Tests await it.
     private(set) var pendingDocument: Task<Void, Never>?
+    /// Whether the layout is final for the latest `update`. It is `false` while an update waits for or runs on the
+    /// worker, and `true` otherwise. When it turns `true`, `onHeightChange` is called even if the height is unchanged.
+    /// A call to `onHeightChange` while an update is still composing can arrive with this `false`; exactly one call
+    /// arrives with it `true` for each settle.
+    public var isLayoutSettled: Bool { pendingDocument == nil }
     /// Main-thread time spent applying the last document change: the spec's "applying one network update" metric.
     private(set) var lastApplyDuration: Duration = .zero
 
@@ -93,8 +108,24 @@ public final class GlimmerView: UIView {
     /// finishes — new text is revealed per `configuration.reveal`. Pass the same `revealID` for the same message so a
     /// re-created view resumes instead of replaying.
     public func update(markdown: String, isStreaming: Bool, revealID: String? = nil) {
+        update(markdown: markdown, isStreaming: isStreaming, revealID: revealID, revealsFinishedText: false)
+    }
+
+    /// Shows `markdown` as `update(markdown:isStreaming:revealID:)` does. With `isStreaming` false and
+    /// `revealsFinishedText` true, a finished text that composes synchronously (so the host can size it at once) is
+    /// then revealed from the progress stored for `revealID`, or from the start, within `drainDuration`: an answer
+    /// whose stream ended before this view showed it, or one that arrived complete, still reveals. Nothing reveals
+    /// when the stored progress covers the whole text, when `revealID` is nil, or when the reveal is off (`.none` or
+    /// Reduce Motion). The flag is ignored when an earlier update is still composing (`isLayoutSettled` is false after
+    /// the call), and it does not count as a change for the early return above, so a host must pass it on a view's first
+    /// configure.
+    public func update(markdown: String, isStreaming: Bool, revealID: String?, revealsFinishedText: Bool) {
         guard markdown != self.markdown || isStreaming != self.isStreaming || revealID != self.revealID else { return }
-        if revealID != self.revealID { endReveal() }
+        if revealID != self.revealID {
+            endReveal()
+            revealFinished = false
+        }
+        if isStreaming { revealFinished = false }
         self.markdown = markdown
         self.isStreaming = isStreaming
         self.revealID = revealID
@@ -105,7 +136,7 @@ public final class GlimmerView: UIView {
         }
         if !isStreaming, engine == nil, pendingDocument == nil {
             // A settled answer: compose now, so the host can size it in this layout pass.
-            composeSynchronously()
+            composeSynchronously(revealingFinishedText: revealsFinishedText)
             return
         }
         requestedUpdate += 1
@@ -127,6 +158,57 @@ public final class GlimmerView: UIView {
 
     public override func sizeThatFits(_ size: CGSize) -> CGSize {
         CGSize(width: size.width, height: height(forWidth: size.width))
+    }
+
+    /// The width of the longest laid-out line when the view is at most `maximum` wide, so a host can shrink a bubble to
+    /// its text. Includes the text container's insets and padding and never exceeds `maximum`. Text with a code block,
+    /// table, image or rule returns `maximum`, because those embeds fill the width.
+    ///
+    /// It measures the text shown now. While `isLayoutSettled` is `false` that is the previous update, so ask again
+    /// after the settle.
+    public func fittingWidth(maximum: CGFloat) -> CGFloat {
+        guard maximum > 0, textView.textStorage.length > 0 else { return 0 }
+        if let cached = fittedWidth, cached.version == textView.textVersion, cached.maximum == maximum { return cached.width }
+        let text = textView.textStorage
+        var hasBlockEmbed = false
+        text.enumerateAttribute(.attachment, in: NSRange(location: 0, length: text.length)) { value, _, stop in
+            if value is GlimmerBlockAttachment {
+                hasBlockEmbed = true
+                stop.pointee = true
+            }
+        }
+        let width: CGFloat
+        if hasBlockEmbed {
+            width = maximum
+        } else {
+            let measurer = GlimmerTextMeasurer(
+                text: NSAttributedString(attributedString: text), width: maximum, insets: textView.textContainerInset,
+                lineFragmentPadding: textView.textContainer.lineFragmentPadding
+            )
+            width = min(measurer.longestLineWidth, maximum)
+        }
+        fittedWidth = (textView.textVersion, maximum, width)
+        return width
+    }
+
+    /// The height at `width` when it fits under `maximum`; otherwise the bottom of the last whole line that fits, plus
+    /// the bottom inset, so a collapsed answer never shows a cut line. An embed counts as one line. Returns 0 when not
+    /// even the first line fits.
+    public func height(forWidth width: CGFloat, notExceeding maximum: CGFloat) -> CGFloat {
+        let full = height(forWidth: width)
+        guard full > maximum, textView.textStorage.length > 0 else { return full }
+        if let cached = cappedHeight, cached.version == textView.textVersion, cached.width == width, cached.maximum == maximum {
+            return cached.height
+        }
+        let inset = textView.textContainerInset
+        let measurer = GlimmerTextMeasurer(
+            text: NSAttributedString(attributedString: textView.textStorage), width: width, insets: inset,
+            lineFragmentPadding: textView.textContainer.lineFragmentPadding, limit: maximum - inset.bottom
+        )
+        let limit = maximum - inset.bottom
+        let capped = measurer.lineBottoms.last(where: { $0 <= limit }).map { min(ceil($0 + inset.bottom), maximum) } ?? 0
+        cappedHeight = (textView.textVersion, width, maximum, capped)
+        return capped
     }
 
     public override var intrinsicContentSize: CGSize {
@@ -297,14 +379,34 @@ public final class GlimmerView: UIView {
         return (textView.textStorage.attribute(.glimmerToken, at: index, effectiveRange: nil) as? GlimmerTokenBox)?.token
     }
 
+    /// Whether the chip with this attachment is revealed. A chip the text doesn't hold counts as revealed.
+    func hasRevealed(_ attachment: NSTextAttachment) -> Bool {
+        guard let engine else { return true }
+        let storage = textView.textStorage
+        var location: Int?
+        storage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: storage.length)) { value, range, stop in
+            if (value as? NSTextAttachment) === attachment {
+                location = range.location
+                stop.pointee = true
+            }
+        }
+        return location.map { $0 < engine.revealedLength } ?? true
+    }
+
     /// What a tap on the token at `index` does, or nil when the host doesn't handle token taps.
     func tokenAction(atCharacter index: Int) -> UIAction? {
-        guard onTokenTap != nil, token(atCharacter: index) != nil else { return nil }
+        guard onTokenTap != nil, isRevealed(atCharacter: index), token(atCharacter: index) != nil else { return nil }
         return UIAction { [weak self] _ in self?.tapToken(atCharacter: index) }
     }
 
+    /// Whether the character is revealed: text still hidden mid-reveal can't be tapped.
+    private func isRevealed(atCharacter index: Int) -> Bool {
+        guard let engine else { return true }
+        return index < engine.revealedLength
+    }
+
     func tapToken(atCharacter index: Int) {
-        guard let token = token(atCharacter: index) else { return }
+        guard isRevealed(atCharacter: index), let token = token(atCharacter: index) else { return }
         onTokenTap?(token)
     }
 
@@ -314,6 +416,27 @@ public final class GlimmerView: UIView {
     }
 
     // MARK: - Reveal
+
+    /// Ends a running reveal now: all the text shows, the whole answer counts as revealed for `revealID` (a view
+    /// re-created for it resumes complete), and the host hears the new height. For an older answer that should stop
+    /// animating once a newer one starts. No reveal starts again until a streamed update or a new `revealID`, so a
+    /// result still being composed shows in full when it lands.
+    public func finishReveal() {
+        revealFinished = true
+        recordFullyRevealed()
+        guard engine != nil else { return }
+        endReveal()
+        reportHeightIfChanged()
+    }
+
+    /// Records the whole shown text as revealed for `revealID`.
+    private func recordFullyRevealed() {
+        guard let revealID else { return }
+        let text = textView.textStorage
+        GlimmerRevealStore.shared.record(
+            text.length, text: text.string as NSString, version: textView.textVersion, owner: textView.serial, for: revealID
+        )
+    }
 
     /// Starts due phrases, settles finished fades, redraws the mask and schedules the next wake-up.
     func advanceReveal() {
@@ -347,12 +470,16 @@ public final class GlimmerView: UIView {
         return options
     }
 
-    private func startRevealIfNeeded(isStreaming: Bool) {
-        guard engine == nil, isStreaming, let options = revealOptions else { return }
+    /// Starts a reveal for streamed text or, with `finishedText`, for a finished text that has a `revealID` and more
+    /// to show than its stored progress.
+    private func startRevealIfNeeded(isStreaming: Bool, finishedText: Bool = false) {
+        guard engine == nil, !revealFinished, isStreaming || finishedText, let options = revealOptions else { return }
+        let length = textView.textStorage.length
         let resumed = revealID.flatMap {
             GlimmerRevealStore.shared.revealedLength(for: $0, text: textView.textStorage.string as NSString)
         } ?? 0
-        engine = GlimmerRevealEngine(options: options, alreadyRevealed: min(resumed, textView.textStorage.length))
+        if !isStreaming, revealID == nil || resumed >= length { return }
+        engine = GlimmerRevealEngine(options: options, alreadyRevealed: min(resumed, length))
         revealMask.invalidateGeometry()
         revealedHeight = nil
         textView.layer.mask = revealMask.layer
@@ -421,22 +548,23 @@ public final class GlimmerView: UIView {
     }
 
     /// Composes the whole current markdown on the main thread and restarts the worker from that document. A settled
-    /// answer shown before (same source, theme and extensions) comes from `GlimmerDocumentCache` instead.
-    private func composeSynchronously() {
+    /// answer shown before (same source, theme and extensions) comes from `GlimmerDocumentCache` instead. With
+    /// `revealingFinishedText`, a finished text then reveals (see `update(markdown:isStreaming:revealID:revealsFinishedText:)`).
+    private func composeSynchronously(revealingFinishedText: Bool = false) {
         let theme = configuration.theme.scaled(for: traitCollection)
         let source = preprocessed(markdown)
-        let key = GlimmerDocumentCache.Key(
-            source: source, theme: theme,
-            extensions: configuration.extensions.map { String(reflecting: type(of: $0)) },
-            highlighter: String(reflecting: type(of: configuration.highlighter)),
-            imageLoader: configuration.imageLoader.map { String(reflecting: type(of: $0)) },
-            imagePolicy: configuration.imagePolicy.map { GlimmerImagePolicyKey(policy: $0) },
-            inlineImageShape: configuration.inlineImageShape,
-            linksImagesForTaps: onImageTap != nil
-        )
         // An empty answer (every new view starts with one) costs nothing to compose; keep it out of the cache.
-        let cacheable = !isStreaming && !source.isEmpty && GlimmerDocumentCache.supports(configuration)
-        if cacheable, let cached = GlimmerDocumentCache.shared.text(for: key) {
+        let identities = isStreaming || source.isEmpty ? nil : GlimmerDocumentCache.identities(of: configuration)
+        let key = identities.map {
+            GlimmerDocumentCache.Key(
+                source: source, theme: theme,
+                extensions: $0.extensions, highlighter: $0.highlighter, imageLoader: $0.imageLoader,
+                imagePolicy: configuration.imagePolicy.map { GlimmerImagePolicyKey(policy: $0) },
+                inlineImageShape: configuration.inlineImageShape,
+                linksImagesForTaps: onImageTap != nil
+            )
+        }
+        if let key, let cached = GlimmerDocumentCache.shared.text(for: key) {
             // The worker starts empty; its first result replaces the whole text (see `drainDocumentUpdates`).
             worker = GlimmerDocumentWorker(document: makeDocument(), extensions: configuration.extensions)
             viewHoldsWorkerText = false
@@ -444,19 +572,21 @@ public final class GlimmerView: UIView {
             appliedUpdate = requestedUpdate
             textView.renderScreenFirst()
             textView.replaceText(with: cached)
-            apply(GlimmerDocumentResult(edit: nil, embedUnits: [:], isStreaming: false), replacedText: true)
+            apply(GlimmerDocumentResult(edit: nil, embedUnits: [:], isStreaming: false), replacedText: true,
+                  revealingFinishedText: revealingFinishedText)
             return
         }
         let document = makeDocument()
         _ = document.update(markdown: source, isStreaming: isStreaming)
-        if cacheable { GlimmerDocumentCache.shared.store(document.text, for: key) }
-        cacheKey = cacheable ? key : nil
+        if let key { GlimmerDocumentCache.shared.store(document.text, for: key) }
+        cacheKey = key
         worker = GlimmerDocumentWorker(document: document, extensions: configuration.extensions)
         viewHoldsWorkerText = true
         appliedUpdate = requestedUpdate
         textView.renderScreenFirst()
         textView.replaceText(with: document.text)
-        apply(GlimmerDocumentResult(edit: nil, embedUnits: document.embedUnits, isStreaming: isStreaming), replacedText: true)
+        apply(GlimmerDocumentResult(edit: nil, embedUnits: document.embedUnits, isStreaming: isStreaming), replacedText: true,
+              revealingFinishedText: revealingFinishedText)
     }
 
     /// Applies worker results in request order. When one lands, only the latest request is computed next.
@@ -483,10 +613,13 @@ public final class GlimmerView: UIView {
             appliedUpdate = request
         }
         pendingDocument = nil
+        // Tell the host the layout is final, even when the height did not change.
+        if !reportHeightIfChanged() { onHeightChange?() }
     }
 
     /// Everything after the document changed: embed updates, the text edit, fitting, the reveal and the height.
-    private func apply(_ result: GlimmerDocumentResult, replacedText: Bool) {
+    /// `revealingFinishedText` starts a reveal of settled text, reporting only the revealed height.
+    private func apply(_ result: GlimmerDocumentResult, replacedText: Bool, revealingFinishedText: Bool = false) {
         let started = ContinuousClock.now
         embedUnits = result.embedUnits
         if let edit = result.edit {
@@ -508,7 +641,9 @@ public final class GlimmerView: UIView {
             revealMask.invalidateGeometry()
         }
         if replacedText || result.edit != nil { fitTextViewToContent() }
-        startRevealIfNeeded(isStreaming: result.isStreaming)
+        startRevealIfNeeded(isStreaming: result.isStreaming, finishedText: revealingFinishedText)
+        // Text that lands after `finishReveal()` shows in full, so it counts as revealed too.
+        if revealFinished { recordFullyRevealed() }
         engine?.textChanged(textView.textStorage.string as NSString, isStreaming: result.isStreaming,
                             now: clock.now, embedUnits: embedUnits)
         if engine != nil {
@@ -620,12 +755,15 @@ public final class GlimmerView: UIView {
         if let cacheKey, engine == nil { GlimmerDocumentCache.shared.storeHeight(height, for: cacheKey, width: textView.bounds.width) }
     }
 
-    private func reportHeightIfChanged() {
+    /// Reports a changed height to the host. Returns whether it called `onHeightChange`.
+    @discardableResult
+    private func reportHeightIfChanged() -> Bool {
         let height = height(forWidth: bounds.width)
-        guard abs(height - lastReportedHeight) > 0.01 else { return }
+        guard abs(height - lastReportedHeight) > 0.01 else { return false }
         lastReportedHeight = height
         invalidateIntrinsicContentSize()
         onHeightChange?()
+        return true
     }
 }
 

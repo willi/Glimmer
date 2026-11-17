@@ -24,6 +24,24 @@ final class GlimmerReadmeExampleTests: XCTestCase {
         view.update(markdown: received, isStreaming: false, revealID: messageID)
     }
 
+    func testStreamingControl() {
+        let view = GlimmerView()
+        view.update(markdown: "A finished answer.", isStreaming: false, revealID: "message-2", revealsFinishedText: true)
+        view.finishReveal() // a newer answer started: stop animating this one
+        XCTAssertFalse(view.isRevealing)
+    }
+
+    func testSizing() {
+        let view = GlimmerView()
+        view.update(markdown: "A short reply.")
+        let width = view.fittingWidth(maximum: 280)
+        let height = view.height(forWidth: width, notExceeding: 120)
+        XCTAssertGreaterThan(width, 0)
+        XCTAssertLessThanOrEqual(width, 280)
+        XCTAssertGreaterThan(height, 0)
+        XCTAssertTrue(view.isLayoutSettled)
+    }
+
     func testSwiftUI() {
         struct Answer: View {
             let text: String
@@ -36,6 +54,18 @@ final class GlimmerReadmeExampleTests: XCTestCase {
             }
         }
         _ = UIHostingController(rootView: Answer(text: "Hi", isStreaming: false))
+    }
+
+    func testPlainAttributedText() {
+        struct Summary: View {
+            let markdown: String
+            @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+            var body: some View {
+                Text(GlimmerView.attributedString(for: markdown, dynamicTypeSize: dynamicTypeSize))
+            }
+        }
+        _ = UIHostingController(rootView: Summary(markdown: "A **short** summary."))
+        XCTAssertEqual(String(GlimmerView.attributedString(for: "A **short** summary.").characters), "A short summary.")
     }
 
     func testConfiguration() {

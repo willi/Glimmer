@@ -9,10 +9,10 @@ final class GlimmerDocumentCache {
     struct Key: Hashable {
         let source: String
         let theme: GlimmerTheme
-        /// Only stateless built-in dependencies are shared, so their type names identify their behavior.
-        let extensions: [String]
-        let highlighter: String
-        let imageLoader: String?
+        /// Only stateless built-ins and `Hashable` dependencies are shared (see `identities(of:)`).
+        let extensions: [GlimmerCacheIdentity]
+        let highlighter: GlimmerCacheIdentity
+        let imageLoader: GlimmerCacheIdentity?
         /// Text composed under one policy holds only the images that policy loads, so it is never shown under another.
         var imagePolicy: GlimmerImagePolicyKey?
         var inlineImageShape: GlimmerInlineImageShape = .circle
@@ -20,13 +20,19 @@ final class GlimmerDocumentCache {
         var linksImagesForTaps = false
     }
 
-    /// Custom dependencies may carry configuration or mutable state, and cached attachments retain their instances.
-    /// Without an explicit equivalence contract, composing them afresh is the only safe way to use the current ones.
-    static func supports(_ configuration: GlimmerConfiguration) -> Bool {
-        configuration.extensions.allSatisfy { $0 is GlimmerMentions || $0 is GlimmerEmojiShortcodes }
-            && configuration.highlighter is GlimmerBasicHighlighter
-            && (configuration.imageLoader == nil
-                || (configuration.imageLoader as? GlimmerURLSessionImageLoader)?.cache === GlimmerImageCache.shared)
+    /// The key's dependency identities, or `nil` when one of them has no equivalence contract. Stateless built-ins
+    /// and `Hashable` values have one (equal values must render equally); any other custom dependency may carry
+    /// configuration or mutable state, and cached attachments retain their instances, so composing afresh is the
+    /// only safe way to use the current ones.
+    static func identities(
+        of configuration: GlimmerConfiguration
+    ) -> (extensions: [GlimmerCacheIdentity], highlighter: GlimmerCacheIdentity, imageLoader: GlimmerCacheIdentity?)? {
+        let extensions = configuration.extensions.compactMap { GlimmerCacheIdentity(extension: $0) }
+        guard extensions.count == configuration.extensions.count,
+              let highlighter = GlimmerCacheIdentity(highlighter: configuration.highlighter) else { return nil }
+        guard let loader = configuration.imageLoader else { return (extensions, highlighter, nil) }
+        guard let loaderIdentity = GlimmerCacheIdentity(imageLoader: loader) else { return nil }
+        return (extensions, highlighter, loaderIdentity)
     }
 
     private struct Entry {

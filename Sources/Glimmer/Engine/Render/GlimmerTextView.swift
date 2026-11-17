@@ -71,6 +71,7 @@ final class GlimmerTextView: UITextView {
     init() {
         // On iOS 16+, a nil text container gives a TextKit 2 text view.
         _ = Self.overridesInstalled
+        _ = Self.installViewportHooks
         super.init(frame: .zero, textContainer: nil)
         backgroundColor = .clear
         isEditable = false
@@ -161,9 +162,9 @@ final class GlimmerTextView: UITextView {
         forgetDrawnSurfaces()
         fragmentProvider.theme = theme
         dataDetectorTypes = dataDetectors
-        var link: [NSAttributedString.Key: Any] = [.foregroundColor: theme.linkColor]
-        if theme.underlinesLinks { link[.underlineStyle] = NSUnderlineStyle.single.rawValue }
-        linkTextAttributes = dataDetectors.isEmpty ? [:] : link
+        // Colour only: these attributes apply to every `.link` run, and a tappable chip's attachment character carries one,
+        // so an underline here would be drawn under the chip. Detected links are coloured, not underlined.
+        linkTextAttributes = dataDetectors.isEmpty ? [:] : [.foregroundColor: theme.linkColor]
     }
 
     /// Measured by `UITextView`: a full layout at `size.width`, so it is cached per text version and width. Use it only
@@ -366,9 +367,11 @@ final class GlimmerTextView: UITextView {
         return hasher.finalize()
     }
 
-    // The iOS 27 SDK's rendering-surface cache hooks (WWDC26: key rendering surfaces by NSTextLayoutFragment), declared
-    // by selector so they compile at the iOS 26 floor; iOS 26 never calls them. UITextView implements both, and its
-    // implementations are always called: UIKit asserts if the surface it made isn't stored.
+    // The iOS 27 SDK's rendering-surface cache hooks (WWDC26: key rendering surfaces by NSTextLayoutFragment) and its
+    // viewport hooks (will/did layout, viewport bounds) are reached by selector so they compile with the iOS 26 SDK: the
+    // cache hooks are declared by selector here, the viewport hooks are installed at runtime (`installViewportHooks`).
+    // iOS 26 never calls the cache hooks. UITextView implements all of them, and its implementations are always
+    // called. For the cache hooks that is required: UIKit asserts if the surface it made isn't stored.
     @objc(textViewportLayoutController:retrieveCachedRenderingSurfaceForKey:)
     func retrieveDrawnSurface(_ controller: NSTextViewportLayoutController, key: AnyObject) -> AnyObject? {
         if reusesDrawnText, let fragment = key as? NSTextLayoutFragment, let view = drawnSurfaces.object(forKey: fragment),
@@ -428,16 +431,13 @@ final class GlimmerTextView: UITextView {
     /// Every Glimmer text view's viewport passes so far, for `GlimmerDiagnostics`.
     private(set) static var allViewportPasses = 0
 
-    @available(iOS 27.0, *)
-    override func textViewportLayoutControllerWillLayout(_ controller: NSTextViewportLayoutController) {
+    /// Counts the pass, then runs UIKit's implementation. Installed by `installViewportHooks`.
+    fileprivate func glimmerViewportLayoutWillLayout() {
         viewportPasses += 1
         Self.allViewportPasses += 1
-        super.textViewportLayoutControllerWillLayout(controller)
     }
 
-    @available(iOS 27.0, *)
-    override func textViewportLayoutControllerDidLayout(_ controller: NSTextViewportLayoutController) {
-        super.textViewportLayoutControllerDidLayout(controller)
+    fileprivate func glimmerViewportLayoutDidLayout() {
         schedulePreload()
     }
 
@@ -601,16 +601,51 @@ final class GlimmerTextView: UITextView {
 
     /// TextKit renders whatever this returns. Public from iOS 27, where it is the band around the screen: without it,
     /// TextKit renders the whole bounds of this full-height view — every paragraph of a long answer, on every change.
-    @available(iOS 27.0, *)
-    override func viewportBounds(for textViewportLayoutController: NSTextViewportLayoutController) -> CGRect {
-        // UIKit calls this on older systems too (the text view has always been its viewport's delegate), where it is
-        // untested: keep TextKit's own viewport there.
+    /// Returns nil below iOS 27 (UIKit calls it there too, where it is untested): TextKit keeps its own viewport.
+    fileprivate func glimmerViewportBounds() -> CGRect? {
         guard ProcessInfo.processInfo.isOperatingSystemAtLeast(OperatingSystemVersion(majorVersion: 27, minorVersion: 0, patchVersion: 0)),
               let band = visibleBand() else {
             renderedBand = nil
-            return super.viewportBounds(for: textViewportLayoutController)
+            return nil
         }
         renderedBand = band
         return band
     }
+
+    /// Overrides the iOS 27 SDK's viewport hooks at runtime, by selector. They are public methods of `UITextView` in the
+    /// iOS 27 SDK and absent from the iOS 26 SDK, so a Swift `override` would build with only one of them. A hook is
+    /// installed only if `UITextView` has the method. Each replacement looks up and calls UITextView's implementation
+    /// per call, as `retrieveDrawnSurface` does.
+    private static let installViewportHooks: Void = {
+        typealias Layout = @convention(c) (AnyObject, Selector, AnyObject) -> Void
+        typealias Bounds = @convention(c) (AnyObject, Selector, AnyObject) -> CGRect
+        func install<Block>(_ selector: Selector, block: Block) {
+            guard let method = class_getInstanceMethod(UITextView.self, selector),
+                  let types = method_getTypeEncoding(method) else { return }
+            class_replaceMethod(GlimmerTextView.self, selector, imp_implementationWithBlock(block), types)
+        }
+        func superImplementation(_ selector: Selector) -> IMP? {
+            class_getMethodImplementation(UITextView.self, selector)
+        }
+        let will = NSSelectorFromString("textViewportLayoutControllerWillLayout:")
+        let did = NSSelectorFromString("textViewportLayoutControllerDidLayout:")
+        let bounds = NSSelectorFromString("viewportBoundsForTextViewportLayoutController:")
+        install(will, block: { (view: GlimmerTextView, controller: AnyObject) in
+            view.glimmerViewportLayoutWillLayout()
+            if let implementation = superImplementation(will) {
+                unsafeBitCast(implementation, to: Layout.self)(view, will, controller)
+            }
+        } as @convention(block) (GlimmerTextView, AnyObject) -> Void)
+        install(did, block: { (view: GlimmerTextView, controller: AnyObject) in
+            if let implementation = superImplementation(did) {
+                unsafeBitCast(implementation, to: Layout.self)(view, did, controller)
+            }
+            view.glimmerViewportLayoutDidLayout()
+        } as @convention(block) (GlimmerTextView, AnyObject) -> Void)
+        install(bounds, block: { (view: GlimmerTextView, controller: AnyObject) -> CGRect in
+            if let band = view.glimmerViewportBounds() { return band }
+            guard let implementation = superImplementation(bounds) else { return controller.viewportBounds }
+            return unsafeBitCast(implementation, to: Bounds.self)(view, bounds, controller)
+        } as @convention(block) (GlimmerTextView, AnyObject) -> CGRect)
+    }()
 }

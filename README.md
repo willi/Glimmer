@@ -10,8 +10,8 @@ Glimmer 2.0 is a rewrite. See [Migrating from 1.x](#migrating-from-1x).
 ## Requirements
 
 - iOS 26 or later to run
-- Xcode 27 or later (the iOS 27 SDK) to build: on iOS 27 Glimmer renders only the text near the screen through an
-  API that SDK introduced
+- Xcode 26.5 or later to build, with the iOS 26 SDK or later. On iOS 27 the visible-band rendering needs nothing extra,
+  because Glimmer installs the iOS 27 viewport methods at runtime, by selector
 - Swift 6
 
 ## Installation
@@ -20,7 +20,7 @@ Add Glimmer with Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/willi/Glimmer.git", from: "2.1.0"),
+    .package(url: "https://github.com/willi/Glimmer.git", from: "2.2.0"),
 ]
 ```
 
@@ -53,7 +53,21 @@ view.update(markdown: received, isStreaming: false, revealID: messageID)
 ```
 
 While an answer reveals, the view's height ends at the last revealed line and never shrinks. `onHeightChange` fires
-whenever the height may have changed.
+whenever the height may have changed, even once per streamed chunk with the same height: compare against the last
+height before relaying out.
+
+A reveal can be controlled by the host. `finishReveal()` ends a running reveal now, for an older answer that should stop
+animating once a newer one starts; the whole answer then counts as revealed for its `revealID`. `isRevealing` says
+whether one is running. An answer that arrives complete, or whose stream ended before the view showed it, shows at once
+by default. To reveal it anyway, pass `revealsFinishedText: true` on the view's first update:
+
+```swift
+let view = GlimmerView()
+view.update(markdown: "A finished answer.", isStreaming: false, revealID: "message-2", revealsFinishedText: true)
+view.finishReveal() // a newer answer started: stop animating this one
+```
+
+The flag is ignored when an earlier update is still composing, so pass it on a view's first configure.
 
 Footnotes render as the web renders them: superscript numbers in order of first reference, and the notes as a list
 after the last block. A marker shows as a number as soon as it arrives. The notes appear only once the answer
@@ -80,6 +94,28 @@ struct Answer: View {
 
 The configuration is read when the view is created. To apply a different one, give the view a new identity, for
 example with `.id(themeVersion)`.
+
+## Plain attributed text
+
+For a short summary in a `Text`, where a text view per row costs too much, compose the markdown into an
+`AttributedString`:
+
+```swift
+struct Summary: View {
+    let markdown: String
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        Text(GlimmerView.attributedString(for: markdown, dynamicTypeSize: dynamicTypeSize))
+    }
+}
+```
+
+The result is static, with its fonts at one fixed size: read `dynamicTypeSize` as above so the string is composed again
+when the text size changes. (The `traitCollection` overload is for UIKit hosts.) Images are left out with the space around them, a code block becomes its code in the theme's code
+font, a table becomes one line per row with tabs between cells, and a thematic break is dropped. An extension's chip or
+token becomes its `displayText`, linked to the token's `url` when it has one. Pass a `GlimmerConfiguration` for the theme
+and extensions.
 
 ## Configuration
 
@@ -113,11 +149,14 @@ let view = GlimmerView(configuration: configuration)
 - **`reveal`**: `.smooth(GlimmerRevealOptions())`, with fade duration, pacing and phrase-length options, or `.none`.
   When Reduce Motion is on, text always appears at once.
 - **`dataDetectors`**: phone numbers, addresses and so on. Off by default. While any are on, the text view styles every
-  link in the theme's `linkColor`, so tappable tokens are drawn in it too instead of `mentionColor`.
+  link in the theme's `linkColor`, so tappable tokens are drawn in it too instead of `mentionColor`. Detected links are
+  coloured but not underlined, even with `underlinesLinks`, because the underline would also be drawn under a tappable chip.
 - **`allowsFind`**: turns on the system Find interaction. Present it with
   `view.findInteraction?.presentFindNavigator(showingReplace: false)`.
 
 ## Image caching
+
+Make an extension, highlighter or image loader `Hashable` to let views with equal configurations share composed answers. Two that compare equal must render equally. An `NSObject` subclass is `Hashable` by identity, so it opts in too: its answers are cached per instance, and a re-shown answer comes from the cache even if the output depends on state that changed since. Don't use one whose output depends on mutable state. A custom loader that is not `Hashable` makes each view compose its settled answers itself.
 
 `GlimmerURLSessionImageLoader()` uses `GlimmerImageCache.shared` automatically for inline and standalone images.
 Its defaults are 32 MiB for prepared images, 16 MiB for HTTP responses in memory, and 128 MiB for HTTP responses on
@@ -236,6 +275,8 @@ text uses the theme's `mentionColor`, and `onTokenTap` (on `GlimmerView` and `Gl
 VoiceOver reaches it as a link. An extension can skip link text (`appliesInsideLinks`). It can also hold back a token
 still being typed at the end of a stream (`streamingHoldBack(in:)`), so `:rock` never turns into 🚀 after it was shown.
 
+Which configurations share composed answers is described under "Image caching", including how `NSObject` subclasses behave.
+
 Two extensions are built in, and both are opt-in:
 
 - `GlimmerEmojiShortcodes`: GitHub's shortcodes. `:rocket:` becomes 🚀, and GitHub's custom ones (`:octocat:`) inline
@@ -268,13 +309,35 @@ view.linkMenuActions = { url in [UIAction(title: "Copy Link") { _ in UIPasteboar
 
 `GlimmerText` takes the same two hooks.
 
+## Sizing
+
+`sizeThatFits(_:)` gives the height at a width. For a chat bubble, ask for the width the text needs and a height that
+never shows a cut line:
+
+```swift
+let view = GlimmerView()
+view.update(markdown: "A short reply.")
+let width = view.fittingWidth(maximum: 280)
+let height = view.height(forWidth: width, notExceeding: 120)
+```
+
+`fittingWidth(maximum:)` is the width of the longest line, never above `maximum`; text with a code block, table, image
+or rule fills `maximum`. `height(forWidth:notExceeding:)` returns the full height when it fits, otherwise the bottom of
+the last whole line that fits (0 when not even the first does), for a collapsed answer with a "Show more" button.
+A streamed update composes off the main thread: `isLayoutSettled` is `false` until it lands, and `onHeightChange` then
+fires once with it `true`, even if the height did not change. Calls during the update can arrive with it `false`.
+Compare against the last height before relaying out, so a callback that changed nothing costs nothing.
+`fittingWidth(maximum:)` and `height(forWidth:notExceeding:)` measure the text shown now, which while `isLayoutSettled`
+is `false` is the previous update, so ask again after the settle.
+
 ## Accessibility
 
 - While an answer reveals, VoiceOver reads it as one element whose label is the text revealed so far. When the
   reveal settles, the text view takes over, with line and word navigation and the links rotor.
 - Code blocks read "Code, swift", then the code, then a Copy button.
 - Tables are data tables with column headers.
-- Chips read their extension's `accessibilityLabel`.
+- Chips read their extension's `accessibilityLabel`. A chip whose token has `isTappable` set (or a `.text(tappable: true)`
+  token) is a link for VoiceOver, and activating it reports the token through `onTokenTap`.
 - Task-list items say whether they are checked.
 - Headings carry their level. A host can group a settled answer into one element by setting
   `isAccessibilityElement`.

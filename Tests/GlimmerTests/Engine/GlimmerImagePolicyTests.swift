@@ -540,8 +540,9 @@ final class GlimmerImagePolicyTests: XCTestCase {
         let policy = AllowHosts(hosts: ["ok.example"])
         let text = compose("Inline ![a](https://ok.example/a.png).\n\n![b](https://ok.example/b.png)", policy: policy)
         let cache = GlimmerDocumentCache()
+        let highlighter = try XCTUnwrap(GlimmerCacheIdentity(highlighter: GlimmerBasicHighlighter()))
         let key = GlimmerDocumentCache.Key(
-            source: "answer", theme: .default, extensions: [], highlighter: "none", imageLoader: nil,
+            source: "answer", theme: .default, extensions: [], highlighter: highlighter, imageLoader: nil,
             imagePolicy: GlimmerImagePolicyKey(policy: policy)
         )
         cache.store(text, for: key)

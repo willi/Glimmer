@@ -1,0 +1,39 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ios-26-sdk:
+    name: Build (Xcode 26.5, iOS 26 SDK)
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+        run: xcodebuild -scheme Glimmer -destination 'generic/platform=iOS Simulator' build
+
+  ios-27-sdk:
+    name: Build (newest Xcode 27, iOS 27 SDK)
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select the newest Xcode 27
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -n 1)
+          if [ -z "$XCODE" ]; then
+            echo "::error::No Xcode 27 on this image. Installed:"
+            ls -d /Applications/Xcode*.app
+            exit 1
+          fi
+          echo "DEVELOPER_DIR=$XCODE/Contents/Developer" >> "$GITHUB_ENV"
+      - name: Build
+        run: xcodebuild -scheme Glimmer -destination 'generic/platform=iOS Simulator' build

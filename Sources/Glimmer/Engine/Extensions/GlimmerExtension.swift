@@ -14,6 +14,15 @@ public struct GlimmerInlineToken: Equatable, Sendable {
     public var accessibilityLabel: String?
     /// How the token shows: a chip (the default), text, or an inline image.
     public var presentation: Presentation
+    /// Whether a `.chip` token reports its tap through `GlimmerView.onTokenTap` and VoiceOver reaches it as a link.
+    /// `.text(tappable:)` keeps its own flag; this one is ignored for it and for `.image`.
+    ///
+    /// A tappable chip's view takes the tap as a whole, so its subviews get no touches: put controls that must respond
+    /// in a chip that is not tappable.
+    public var isTappable: Bool
+    /// Where the token leads when it is rendered as plain attributed text
+    /// (`GlimmerView.attributedString(for:configuration:traitCollection:)`). `GlimmerView` ignores it; a tap reports the token through `onTokenTap`.
+    public var url: URL?
 
     public enum Presentation: Sendable, Equatable {
         /// The extension's view, or a label with `displayText`.
@@ -27,7 +36,8 @@ public struct GlimmerInlineToken: Equatable, Sendable {
 
     public init(
         range: Range<String.Index>, kind: String, payload: [String: String] = [:], displayText: String, source: String,
-        accessibilityLabel: String? = nil, presentation: Presentation = .chip
+        accessibilityLabel: String? = nil, presentation: Presentation = .chip, isTappable: Bool = false,
+        url: URL? = nil
     ) {
         self.range = range
         self.kind = kind
@@ -36,6 +46,8 @@ public struct GlimmerInlineToken: Equatable, Sendable {
         self.source = source
         self.accessibilityLabel = accessibilityLabel
         self.presentation = presentation
+        self.isTappable = isTappable
+        self.url = url
     }
 }
 

@@ -257,7 +257,14 @@ extension GlimmerComposer {
             var chip = attributes
             chip[.attachment] = GlimmerInlineAttachment(token: token, glimmerExtension: glimmerExtension, theme: theme)
             chip[.glimmerSource] = token.source
+            if token.isTappable {
+                // The link covers the chip's glyph too, so its frame is the chip's rect: VoiceOver's touch exploration,
+                // Switch Control and Voice Control find the chip, not a sliver at its edge.
+                chip[.glimmerToken] = GlimmerTokenBox(token)
+                chip[.link] = GlimmerTokenBox.link(kind: token.kind, at: output.length)
+            }
             output.append(NSAttributedString(string: "\u{FFFC}", attributes: chip))
+            if token.isTappable { appendSpokenLink(for: token, attributes: attributes, to: output) }
             return false
         case .text(let tappable):
             appendTokenText(token, tappable: tappable, attributes: attributes, to: output)
@@ -276,6 +283,21 @@ extension GlimmerComposer {
             if output.length == end { Self.markImageGap(in: output) }
             return true
         }
+    }
+
+    /// The chip's spoken-only text, a link: VoiceOver and the links rotor reach the chip through it, and activating it
+    /// reports the token. The chip view itself stays hidden from VoiceOver. Copy skips it.
+    private func appendSpokenLink(
+        for token: GlimmerInlineToken, attributes: [NSAttributedString.Key: Any], to output: NSMutableAttributedString
+    ) {
+        var spoken = attributes
+        spoken[.font] = (attributes[.font] as? UIFont ?? theme.bodyFont).withSize(0.01)
+        spoken[.foregroundColor] = UIColor.clear
+        spoken[.glimmerSpokenOnly] = true
+        spoken[.glimmerToken] = GlimmerTokenBox(token)
+        // The same URL as the chip's glyph before it, so the two are one link.
+        spoken[.link] = GlimmerTokenBox.link(kind: token.kind, at: output.length - 1)
+        output.append(NSAttributedString(string: token.accessibilityLabel ?? token.displayText, attributes: spoken))
     }
 
     /// Text like any other: it wraps and selects as words do. Copy writes the source; a tap reports the token.
