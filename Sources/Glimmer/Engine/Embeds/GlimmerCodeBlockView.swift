@@ -204,6 +204,23 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView, UITextViewDelegate {
         return runs
     }
 
+    /// The UTF-16 offset where the colours of `new` first differ from `old`. Kept out of `update(to:)`: as one
+    /// expression there, Swift 6.2 (Xcode 26.5) could not type-check it in reasonable time.
+    private static func firstColorChange(from old: [ColorRun], to new: [ColorRun]) -> Int {
+        let shared = min(old.count, new.count)
+        if let index = (0..<shared).first(where: { old[$0] != new[$0] }) {
+            // Runs before it match, so both start here: a new colour changes from the start, a longer or shorter run
+            // from where the shorter one ends (plain code is one run that grows with every update).
+            if old[index].color == new[index].color {
+                return min(NSMaxRange(old[index].range), NSMaxRange(new[index].range))
+            }
+            return old[index].range.location
+        }
+        let oldEnd: Int = old.last.map { NSMaxRange($0.range) } ?? 0
+        let newEnd: Int = new.last.map { NSMaxRange($0.range) } ?? 0
+        return min(oldEnd, newEnd)
+    }
+
     /// Streams in place. The composer highlights the whole code on the worker (a closing `*/` can recolor earlier
     /// lines, and hosts bring their own highlighters); only the lines from the first one whose text or colours changed
     /// reach TextKit and are measured.
@@ -225,13 +242,7 @@ final class GlimmerCodeBlockView: UIView, GlimmerEmbedView, UITextViewDelegate {
         // earlier lines). Colour is the only attribute that varies inside code, and comparing runs is much cheaper
         // than comparing attributed strings.
         let textChange = (old.string as NSString).commonPrefix(with: newString as String, options: .literal).utf16.count
-        let colorChange = (0..<min(runs.count, newRuns.count)).first { runs[$0] != newRuns[$0] }.map { index in
-            // Runs before it match, so both start here: a new colour changes from the start, a longer or shorter run
-            // from where the shorter one ends (plain code is one run that grows with every update).
-            runs[index].color == newRuns[index].color
-                ? min(NSMaxRange(runs[index].range), NSMaxRange(newRuns[index].range))
-                : runs[index].range.location
-        } ?? min(runs.last.map { NSMaxRange($0.range) } ?? 0, newRuns.last.map { NSMaxRange($0.range) } ?? 0)
+        let colorChange = Self.firstColorChange(from: runs, to: newRuns)
         runs = newRuns
         let change = min(textChange, colorChange)
         // Replace from the start of the line holding the change to the end.
