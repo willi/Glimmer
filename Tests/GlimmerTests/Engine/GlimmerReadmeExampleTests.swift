@@ -84,6 +84,10 @@ final class GlimmerReadmeExampleTests: XCTestCase {
     func testConfiguration() {
         var configuration = GlimmerConfiguration()
         configuration.theme.linkColor = .systemPurple
+        configuration.theme.lineSpacing = 1.4 * 17 - UIFont.systemFont(ofSize: 17).lineHeight
+        configuration.theme.headingLineSpacing = 2
+        configuration.theme.codeLineSpacing = 2
+        configuration.theme.looseListSpacing = 8
         configuration.reveal = .smooth(GlimmerRevealOptions())
         configuration.dataDetectors = [.phoneNumber]
         configuration.allowsFind = true
@@ -93,6 +97,22 @@ final class GlimmerReadmeExampleTests: XCTestCase {
         }
         view.linkMenuActions = { url in [UIAction(title: "Copy Link") { _ in UIPasteboard.general.url = url }] }
         _ = view.markdownSource()
+    }
+
+    func testLinkPolicy() {
+        struct AppLinks: GlimmerLinkPolicy {
+            func decision(for link: GlimmerLinkCandidate) -> GlimmerLinkDecision {
+                switch link.url?.scheme?.lowercased() {
+                case "https", "mailto": .link
+                default: .text
+                }
+            }
+        }
+
+        let configuration = GlimmerConfiguration(linkPolicy: AppLinks())
+        let text = GlimmerView.attributedString(for: "[Pay](myapp://pay) or [read](HTTPS://example.com)",
+                                                configuration: configuration)
+        XCTAssertEqual(text.runs.compactMap(\.link), [URL(string: "HTTPS://example.com")].compactMap { $0 })
     }
 
     func testExtension() {

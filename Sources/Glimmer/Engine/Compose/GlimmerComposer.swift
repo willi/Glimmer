@@ -11,6 +11,8 @@ struct GlimmerComposer {
     /// The host's say over which images load. Nil loads every image.
     var imagePolicy: (any GlimmerImagePolicy)? = nil
     var inlineImageShape: GlimmerInlineImageShape = .circle
+    /// The host's say over which links are links. Nil links every one.
+    var linkPolicy: (any GlimmerLinkPolicy)? = nil
     var extensions: [any GlimmerExtension] = []
     /// Whether the host takes image taps: an inline image's spoken alt text then links to the image for VoiceOver.
     var linksImagesForTaps = false
@@ -90,6 +92,15 @@ struct GlimmerComposer {
         guard let imagePolicy else { return .load }
         guard let url else { return .showAltText }
         return imagePolicy.decision(for: GlimmerImageCandidate(url: url, alt: alt, title: title, origin: origin))
+    }
+
+    /// Where a link goes, or nil to compose it as text: its destination does not parse, or the link policy refuses it.
+    /// With no policy every link that parses is a link, as it was before policies existed.
+    func linkURL(destination: String, title: String?) -> URL? {
+        let url = URL(string: destination)
+        guard let linkPolicy, url != nil else { return url }
+        let candidate = GlimmerLinkCandidate(destination: destination, title: title)
+        return linkPolicy.decision(for: candidate) == .link ? url : nil
     }
 
     /// One top-level block, ending in "\n". `compose(_:)` is these joined with the final "\n" removed, which is
@@ -236,7 +247,7 @@ struct GlimmerComposer {
         inner.listStep = max(theme.listIndent, ceil(widestMarker + markerGap))
         inner.indent += inner.listStep
         if case .ordered = list.kind { inner.alignsMarkersToText = true } else { inner.alignsMarkersToText = false }
-        inner.paragraphSpacing = list.isTight ? theme.tightListSpacing : nil
+        inner.paragraphSpacing = list.isTight ? theme.tightListSpacing : theme.looseListSpacing
         for (offset, item) in list.items.enumerated() {
             let marker = markers[offset]
             // The item's later lines are indented to its content column, which is what continuation lines need.
@@ -253,7 +264,7 @@ struct GlimmerComposer {
                 append(block, context: itemContext, marker: index == 0 ? marker : nil, to: output)
             }
         }
-        if list.isTight { setSpacingOfLastParagraph(context.paragraphSpacing ?? theme.paragraphSpacing, in: output) }
+        if list.isTight || theme.looseListSpacing != nil { setSpacingOfLastParagraph(context.paragraphSpacing ?? theme.paragraphSpacing, in: output) }
     }
 
     private func appendTextParagraph(
@@ -278,6 +289,7 @@ struct GlimmerComposer {
         let range = NSRange(location: start, length: output.length - start)
         let style = paragraphStyle(context: context, marker: marker)
         style.paragraphSpacingBefore = spacingBefore
+        applyLineSpacing(headingLevel == nil ? theme.lineSpacing : theme.headingLineSpacing, to: style)
         output.addAttribute(.paragraphStyle, value: style, range: range)
         if context.quoteDepth > 0 { output.addAttribute(.glimmerQuoteDepth, value: context.quoteDepth, range: range) }
         if let headingLevel { output.addAttribute(.accessibilityTextHeadingLevel, value: headingLevel, range: range) }
@@ -338,6 +350,19 @@ struct GlimmerComposer {
         }
         style.paragraphSpacing = context.paragraphSpacing ?? theme.paragraphSpacing
         return style
+    }
+
+    /// A role's additive line spacing, or nothing for `nil`, which keeps `lineHeightMultiple`.
+    ///
+    /// TextKit 2 puts `lineSpacing` above each of the paragraph's lines, its first line too unless that starts the
+    /// text, and none below its last line. Taking the same amount off the space above the paragraph leaves it only
+    /// between the paragraph's own lines, so the gaps between blocks (paragraph spacing, a heading's collapsed space
+    /// above) stay as they are. At the start of the text TextKit adds none, and ignores the negative space above.
+    private func applyLineSpacing(_ spacing: CGFloat?, to style: NSMutableParagraphStyle) {
+        guard let spacing else { return }
+        style.lineHeightMultiple = 1
+        style.lineSpacing = spacing
+        style.paragraphSpacingBefore -= spacing
     }
 
     /// Marks the paragraph that closes a quote with how many enclosing quote levels continue past it, so the

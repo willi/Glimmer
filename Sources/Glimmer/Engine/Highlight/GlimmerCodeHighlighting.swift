@@ -8,6 +8,12 @@ enum GlimmerCodeHighlighting {
     ) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineHeightMultiple = theme.lineHeightMultiple
+        // Each code line is a paragraph, so TextKit puts the spacing above every line but the first and none below the
+        // last: exactly the space between lines.
+        if let spacing = theme.codeLineSpacing {
+            paragraph.lineHeightMultiple = 1
+            paragraph.lineSpacing = spacing
+        }
         let result = NSMutableAttributedString(string: code, attributes: [
             .font: theme.codeFont,
             .foregroundColor: theme.textColor,

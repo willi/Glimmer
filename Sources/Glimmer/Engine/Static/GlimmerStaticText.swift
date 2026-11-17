@@ -12,10 +12,12 @@ import SwiftUI
 /// - A table is one line of text per row, with its cells separated by tabs. A thematic break is a 1 pt rule.
 /// - Images are left out, and an extension's chip or token becomes its `displayText`, as in `attributedString`.
 ///
-/// Links are tappable: they go to `onLinkTap`, or without one to the environment's `openURL`. Modifiers that apply to
-/// `Text` through the environment, such as `.lineLimit(_:)`, apply to each block's `Text`, so a one-paragraph document
-/// truncates as a `Text` does. VoiceOver reads a list item's marker with its first block, as `GlimmerView` reads the
-/// line, and a heading as a heading of its level.
+/// Links are tappable: they go to `onLinkTap`, or without one to the environment's `openURL`. The configuration's
+/// `linkPolicy` decides which links are links, as in `GlimmerView`. Modifiers that apply to `Text` through the
+/// environment, such as `.lineLimit(_:)`, apply to each block's `Text`, so a one-paragraph document truncates as a
+/// `Text` does. A block whose role has a line spacing in the theme (`lineSpacing`, `headingLineSpacing`,
+/// `codeLineSpacing`) uses it in place of the environment's `lineSpacing`. VoiceOver reads a list item's marker with
+/// its first block, as `GlimmerView` reads the line, and a heading as a heading of its level.
 ///
 /// Every run of text carries the theme's font and colour, so `.font(_:)` and `.foregroundStyle(_:)` on this view
 /// change nothing: set them in the configuration's theme. A document of paragraphs, headings and tables is as wide as
@@ -25,8 +27,8 @@ import SwiftUI
 /// marker beside that block, where `GlimmerView` puts the marker on a line above it; and the space above a heading
 /// that follows an empty quote at the start of a document differs from `GlimmerView`'s.
 ///
-/// Documents are built once per markdown, theme, text size, extensions and highlighter, and shared between views
-/// (least recently used out). As with `GlimmerView`'s settled answers, only built-in and `Hashable` extensions and
+/// Documents are built once per markdown, theme, text size, extensions, highlighter and link policy, and shared
+/// between views (least recently used out). As with `GlimmerView`'s settled answers, only built-in and `Hashable` extensions and
 /// highlighters can be shared: with any other, each view builds its own document, and a change to that dependency
 /// alone needs a new view identity, for example `.id(extensionVersion)`.
 public struct GlimmerStaticText: View {

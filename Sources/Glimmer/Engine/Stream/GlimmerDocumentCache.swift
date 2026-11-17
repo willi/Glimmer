@@ -14,7 +14,11 @@ final class GlimmerDocumentCache {
         let highlighter: GlimmerCacheIdentity
         let imageLoader: GlimmerCacheIdentity?
         /// Text composed under one policy holds only the images that policy loads, so it is never shown under another.
-        var imagePolicy: GlimmerImagePolicyKey?
+        /// No default, so every key says which policy, if any, composed its text.
+        let imagePolicy: GlimmerImagePolicyKey?
+        /// Text composed under one link policy links only what that policy allows, so it is never shown under another.
+        /// No default, as for `imagePolicy`.
+        let linkPolicy: GlimmerLinkPolicyKey?
         var inlineImageShape: GlimmerInlineImageShape = .circle
         /// Whether inline images' alt text links to them (the host takes image taps).
         var linksImagesForTaps = false

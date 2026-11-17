@@ -20,7 +20,7 @@ Add Glimmer with Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/willi/Glimmer.git", from: "2.3.0"),
+    .package(url: "https://github.com/willi/Glimmer.git", from: "2.4.0"),
 ]
 ```
 
@@ -116,8 +116,8 @@ struct Summary: View {
 The result is static, with its fonts at one fixed size: read `dynamicTypeSize` as above so the string is composed again
 when the text size changes. (The `traitCollection` overload is for UIKit hosts.) Images are left out with the space around them, a code block becomes its code in the theme's code
 font, a table becomes one line per row with tabs between cells, and a thematic break is dropped. An extension's chip or
-token becomes its `displayText`, linked to the token's `url` when it has one. Pass a `GlimmerConfiguration` for the theme
-and extensions.
+token becomes its `displayText`, linked to the token's `url` when it has one. Pass a `GlimmerConfiguration` for the theme,
+extensions and [link policy](#link-policy).
 
 ## Static text in SwiftUI
 
@@ -141,12 +141,14 @@ beside a bar, a code block is its code on the code block background, a table is 
 cells, and a thematic break is a rule. Images are left out, as in `attributedString`. Links are tappable: the closure
 gets the URL, and without one the environment's `openURL` does (a handler you installed higher up, or the system).
 `.lineLimit` applies to each block's `Text`. The theme's `lineHeightMultiple` isn't applied, since `Text` has no line
-height multiple: add `.lineSpacing(_:)` for more space between lines. Every run carries the theme's font and colour, so
+height multiple, but its line spacing fields are: a paragraph, list item or quote (inline code included) takes
+`lineSpacing`, a heading `headingLineSpacing` and a code block `codeLineSpacing`, and `Text` puts it only between
+lines. A role whose field is `nil` keeps the environment's spacing, so `.lineSpacing(_:)` on the view spaces it. Every run carries the theme's font and colour, so
 `.font(_:)` and `.foregroundStyle(_:)` on the view change nothing: set them in the theme. Paragraphs, headings and
 tables are as wide as their text; a document with a list, quote, code block or rule fills the width it's offered.
 
-The view reads `dynamicTypeSize` itself. Documents are built once per markdown, theme, text size, extensions and
-highlighter, and shared between views, so a cell and a sizing view showing the same summary build it once. An
+The view reads `dynamicTypeSize` itself. Documents are built once per markdown, theme, text size, extensions,
+highlighter and link policy, and shared between views, so a cell and a sizing view showing the same summary build it once. An
 extension or highlighter that isn't `Hashable` can't be shared: each view then builds its own, and a change to that
 dependency alone needs a new view identity (`.id(extensionVersion)`). Two edge cases differ from `GlimmerView`: a list
 item that starts with a code block, table or rule shows its marker beside it rather than above it, and the space above a
@@ -159,6 +161,10 @@ heading that follows an empty quote at the start differs.
 ```swift
 var configuration = GlimmerConfiguration()
 configuration.theme.linkColor = .systemPurple
+configuration.theme.lineSpacing = 1.4 * 17 - UIFont.systemFont(ofSize: 17).lineHeight
+configuration.theme.headingLineSpacing = 2
+configuration.theme.codeLineSpacing = 2
+configuration.theme.looseListSpacing = 8
 configuration.reveal = .smooth(GlimmerRevealOptions())
 configuration.dataDetectors = [.phoneNumber]
 configuration.allowsFind = true
@@ -174,6 +180,14 @@ let view = GlimmerView(configuration: configuration)
   columns and wrapping cell text, and scroll sideways only when every column is at this width and still doesn't fit.
   While an answer streams, a table's columns take their content's width instead (scrolling sideways if that is too
   wide), and the table fits the width once the reveal ends.
+  `lineSpacing`, `headingLineSpacing` and `codeLineSpacing` space lines additively, by role: `lineSpacing` body text
+  (paragraphs, list items, quotes and footnotes, with inline code following the body), `headingLineSpacing` headings
+  and `codeLineSpacing` code blocks. Each is `nil` by default, and the role then keeps `lineHeightMultiple`. A role
+  with one set has each font's own line height plus the spacing between its lines, and nothing above its first line
+  or below its last, so the gaps between blocks stay as `paragraphSpacing` and `blockSpacing` set them. Tables keep
+  their own layout. All three scale with Dynamic Type. `looseListSpacing` is the space after an item in a loose list,
+  and between the paragraphs inside one loose item; `nil` uses `paragraphSpacing`. An attachment chip with a URL takes
+  `linkColor` in `attributedString` and `GlimmerStaticText`; tappable text keeps `mentionColor`.
 - **`extensions`**: custom syntax. See [Extensions](#extensions).
 - **`highlighter`** (`GlimmerHighlighter`): syntax highlighting for code blocks. The default,
   `GlimmerBasicHighlighter`, covers keywords, strings, comments and numbers in common languages.
@@ -185,6 +199,8 @@ let view = GlimmerView(configuration: configuration)
   prepares images at their display size. See [Image caching](#image-caching) for budgets and custom sessions.
 - **`imagePolicy`** (`GlimmerImagePolicy`): decides which images load. `nil`, the default, loads every image. Set one
   when the markdown is written by a language model or by other people. See [Image policy](#image-policy).
+- **`linkPolicy`** (`GlimmerLinkPolicy`): decides which links are links. `nil`, the default, makes every link a link.
+  Set one when the markdown is written by a language model or by other people. See [Link policy](#link-policy).
 - **`inlineImageShape`** (`GlimmerInlineImageShape`): `.circle` by default, cropping the image to fill the circle.
   Use `.roundedRectangle(cornerRadius: 3)` for the previous aspect-fitted appearance, or a radius of `0` for square
   corners. Applies to images inside text, including extension images; standalone images use the theme's styling.
@@ -290,6 +306,48 @@ When writing a policy:
 
 With no policy set, nothing changes.
 
+## Link policy
+
+A link in markdown written by a language model can do more than open a web page: a custom URL scheme can pay, post or
+open another app with one tap (`[Read more](myapp://transfer?to=…)`). A link policy lets the app decide, for each link,
+whether it is a link:
+
+```swift
+struct AppLinks: GlimmerLinkPolicy {
+    func decision(for link: GlimmerLinkCandidate) -> GlimmerLinkDecision {
+        switch link.url?.scheme?.lowercased() {
+        case "https", "mailto": .link
+        default: .text
+        }
+    }
+}
+
+let configuration = GlimmerConfiguration(linkPolicy: AppLinks())
+```
+
+The policy receives a `GlimmerLinkCandidate`: the link's `destination` as the parser read it, that destination as a
+`url` (`nil` when it does not parse), and its `title`. It answers `.link`, to show a link as without a policy, or
+`.text`, to show the link's text as ordinary text, styled like the text around it: no link colour, no underline,
+nothing to tap. Bold or italic text inside the link stays bold or italic. A refused link copies as its text alone, and
+that includes `markdownSource()`, so its URL is never handed out as a link; a link whose text is its URL still shows
+and copies that text.
+
+Extension tokens are still scanned inside a refused link's text, and an image inside a refused link is still an image:
+it takes `onImageTap` and your image policy.
+
+The policy decides on the links the markdown parser finds, so it sees exactly what would otherwise be tapped:
+
+- **Every kind of link is asked about**: inline and reference links (`[text](url)`), autolinks (`<url>`) and bare
+  URLs (`https://…`, and `www.…`, whose destination is `http://www.…`). Markdown that blurs where a link ends, such
+  as `[y <span title="]">](myapp://pay)`, is decided on the links the parser reads, not on how the text looks.
+- **Not everything that can be tapped is a link.** An extension's tappable tokens go to `onTokenTap`, which the app
+  handles itself; an extension's token URLs, which your extension sets, are not asked about (in
+  `attributedString`/`GlimmerStaticText` they become links); and data detectors (`dataDetectors`) find their own links
+  in the text, refused links included.
+- **A policy is a `Hashable` value**, asked from any thread and more than once for the same link. Views with equal
+  policies share composed answers, so two policies that compare equal must decide equally. It applies to
+  `GlimmerView`, `GlimmerText`, `GlimmerStaticText` and `GlimmerView.attributedString(for:configuration:)`.
+
 ## Extensions
 
 A `GlimmerExtension` can rewrite the markdown before parsing (`preprocess(_:)`) and turn tokens in plain text into
@@ -341,8 +399,9 @@ keeps its own selection inside. While an answer reveals, the selection stops at 
 
 Copy writes plain text and markdown (`net.daringfireball.markdown`), so a paste into a markdown-aware app keeps
 lists, code, emphasis and links. `markdownSource(for:)` gives the markdown for any range, or, with no range, the whole
-answer as given; `plainText(for:)` gives the plain text copy writes. With an [image policy](#image-policy) set,
-`markdownSource()` gives the markdown of the shown text instead, so the URL of a refused image is never handed out.
+answer as given; `plainText(for:)` gives the plain text copy writes. With an [image policy](#image-policy) or a [link policy](#link-policy) set,
+`markdownSource()` gives the markdown of the shown text instead, so the URL of a refused image or link is never handed
+out as a link; a link whose text is its URL still shows and copies that text.
 Hosts can add their own edit-menu and link-menu items:
 
 ```swift

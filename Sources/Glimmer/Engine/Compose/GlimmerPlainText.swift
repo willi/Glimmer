@@ -5,11 +5,12 @@ import UIKit
 /// that stands alone.
 enum GlimmerPlainText {
     /// The composer for text that stands alone: images are hidden, since nothing here can load them, and the hidden
-    /// ones close the space around them.
+    /// ones close the space around them. The configuration's link policy applies, as it does in a `GlimmerView`.
     static func composer(theme: GlimmerTheme, configuration: GlimmerConfiguration) -> GlimmerComposer {
         GlimmerComposer(
             theme: theme, highlighter: configuration.highlighter, imageLoader: nil,
-            imagePolicy: GlimmerHideImagesPolicy(), extensions: configuration.extensions
+            imagePolicy: GlimmerHideImagesPolicy(), linkPolicy: configuration.linkPolicy,
+            extensions: configuration.extensions
         )
     }
 
@@ -85,9 +86,13 @@ enum GlimmerPlainText {
             if let block = attachment as? GlimmerBlockAttachment {
                 replace(block, at: range, in: text, attributes: attributes, theme: theme)
             } else if let chip = attachment as? GlimmerInlineAttachment {
-                // A tappable chip's run carries its token, and `fixLinks` links its URL; this covers a chip that isn't
+                // A chip with a URL takes the link colour, as a link does; text presented as a token keeps the colour the
+                // composer gave it. A tappable chip's run carries its token, and `fixLinks` links its URL; this covers a chip that isn't
                 // tappable, whose run carries the token only as the attachment.
-                if let url = chip.token.url { attributes[.link] = url }
+                if let url = chip.token.url {
+                    attributes[.link] = url
+                    attributes[.foregroundColor] = theme.linkColor
+                }
                 text.replaceCharacters(in: range, with: NSAttributedString(string: chip.token.displayText, attributes: attributes))
             } else if attachment.image != nil {
                 // A task-list checkbox. Its state is in the spoken-only text that follows.

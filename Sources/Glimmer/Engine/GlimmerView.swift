@@ -256,12 +256,12 @@ public final class GlimmerView: UIView {
     /// The markdown for `range` of the shown text (UTF-16 offsets, as in `UITextView.selectedRange`), or — for nil —
     /// the whole answer exactly as last given to `update`. Backs "Copy answer" buttons.
     ///
-    /// With an image policy set, nil gives the markdown of the shown text instead (while an answer streams, of the
-    /// text composed so far). The answer as given can hold the URL of an image the policy refused, and a paste into
-    /// another app would request it.
+    /// With an image or link policy set, nil gives the markdown of the shown text instead (while an answer streams, of
+    /// the text composed so far). The answer as given can hold the URL of an image or a link the policy refused, and a
+    /// paste into another app would request the image or make the link a link again.
     public func markdownSource(for range: NSRange? = nil) -> String {
         guard let range else {
-            guard configuration.imagePolicy != nil else { return markdown }
+            guard configuration.imagePolicy != nil || configuration.linkPolicy != nil else { return markdown }
             let all = NSRange(location: 0, length: textView.textStorage.length)
             return GlimmerMarkdownSerializer.markdown(from: textView.textStorage, range: all)
         }
@@ -574,6 +574,7 @@ public final class GlimmerView: UIView {
             imageLoader: configuration.imageLoader,
             imagePolicy: configuration.imagePolicy,
             inlineImageShape: configuration.inlineImageShape,
+            linkPolicy: configuration.linkPolicy,
             extensions: configuration.extensions,
             linksImagesForTaps: onImageTap != nil
         ))
@@ -592,6 +593,7 @@ public final class GlimmerView: UIView {
                 source: source, theme: theme,
                 extensions: $0.extensions, highlighter: $0.highlighter, imageLoader: $0.imageLoader,
                 imagePolicy: configuration.imagePolicy.map { GlimmerImagePolicyKey(policy: $0) },
+                linkPolicy: configuration.linkPolicy.map { GlimmerLinkPolicyKey(policy: $0) },
                 inlineImageShape: configuration.inlineImageShape,
                 linksImagesForTaps: onImageTap != nil
             )

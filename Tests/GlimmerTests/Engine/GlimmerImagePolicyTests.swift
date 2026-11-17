@@ -543,7 +543,7 @@ final class GlimmerImagePolicyTests: XCTestCase {
         let highlighter = try XCTUnwrap(GlimmerCacheIdentity(highlighter: GlimmerBasicHighlighter()))
         let key = GlimmerDocumentCache.Key(
             source: "answer", theme: .default, extensions: [], highlighter: highlighter, imageLoader: nil,
-            imagePolicy: GlimmerImagePolicyKey(policy: policy)
+            imagePolicy: GlimmerImagePolicyKey(policy: policy), linkPolicy: nil
         )
         cache.store(text, for: key)
         let cached = try XCTUnwrap(cache.text(for: key))
