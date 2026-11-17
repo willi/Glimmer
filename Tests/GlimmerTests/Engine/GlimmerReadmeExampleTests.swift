@@ -68,6 +68,19 @@ final class GlimmerReadmeExampleTests: XCTestCase {
         XCTAssertEqual(String(GlimmerView.attributedString(for: "A **short** summary.").characters), "A short summary.")
     }
 
+    func testStaticText() {
+        struct Summary: View {
+            let markdown: String
+
+            var body: some View {
+                GlimmerStaticText(markdown) { url in print(url) }
+                    .lineLimit(6)
+            }
+        }
+        let host = UIHostingController(rootView: Summary(markdown: "- One\n- Two"))
+        XCTAssertGreaterThan(host.sizeThatFits(in: CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)).height, 0)
+    }
+
     func testConfiguration() {
         var configuration = GlimmerConfiguration()
         configuration.theme.linkColor = .systemPurple

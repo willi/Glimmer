@@ -320,7 +320,7 @@ struct GlimmerComposer {
     }
 
     /// The space between a list marker and its item's text.
-    private var markerGap: CGFloat { ceil(theme.bodyFont.pointSize * 0.4) }
+    var markerGap: CGFloat { ceil(theme.bodyFont.pointSize * 0.4) }
 
     private func paragraphStyle(context: Context, marker: NSAttributedString?) -> NSMutableParagraphStyle {
         let style = NSMutableParagraphStyle()
@@ -369,11 +369,14 @@ struct GlimmerComposer {
     }
 
     /// The width of the widest `digits`-digit number marker in the body font, such as "88.".
-    private func reservedNumberWidth(digits: Int) -> CGFloat {
+    func reservedNumberWidth(digits: Int) -> CGFloat {
         let attributes: [NSAttributedString.Key: Any] = [.font: theme.bodyFont]
         let widestDigit = (0...9).map { NSAttributedString(string: "\($0)", attributes: attributes).size().width }.max() ?? 0
         return widestDigit * CGFloat(digits) + NSAttributedString(string: ".", attributes: attributes).size().width
     }
+
+    /// Bullet markers by list depth, repeating after the last.
+    static let bullets = ["•", "◦", "▪︎"]
 
     private func listMarker(kind: GlimmerList.Kind, index: Int, checkbox: Bool?, context: Context) -> NSAttributedString {
         let color = context.quoteDepth > 0 ? theme.secondaryTextColor : theme.textColor
@@ -395,7 +398,7 @@ struct GlimmerComposer {
         } else {
             switch kind {
             case .bullet:
-                let bullets = ["•", "◦", "▪︎"]
+                let bullets = Self.bullets
                 // One color for every marker, like a browser's ::marker: the text's, dimmed inside quotes.
                 marker.append(NSAttributedString(string: bullets[(context.listDepth - 1) % bullets.count], attributes: [
                     .font: theme.bodyFont, .foregroundColor: color,

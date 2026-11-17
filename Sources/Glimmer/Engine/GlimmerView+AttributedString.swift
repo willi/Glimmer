@@ -27,14 +27,9 @@ extension GlimmerView {
         for markdown: String, configuration: GlimmerConfiguration = .default, traitCollection: UITraitCollection = .current
     ) -> AttributedString {
         let theme = configuration.theme.scaled(for: traitCollection)
-        let composer = GlimmerComposer(
-            theme: theme, highlighter: configuration.highlighter, imageLoader: nil,
-            imagePolicy: GlimmerHideImagesPolicy(), extensions: configuration.extensions
-        )
+        let composer = GlimmerPlainText.composer(theme: theme, configuration: configuration)
         let source = configuration.extensions.prepared(markdown, isStreaming: false)
-        let composed = NSMutableAttributedString(attributedString: composer.compose(GlimmerParser.parse(source)))
-        GlimmerPlainText.flatten(composed, theme: theme)
-        return GlimmerPlainText.attributedString(from: composed)
+        return GlimmerPlainText.standalone(composer.compose(GlimmerParser.parse(source)), theme: theme)
     }
 
     /// Markdown composed into an `AttributedString`, scaled for a SwiftUI Dynamic Type size.
@@ -55,26 +50,5 @@ extension GlimmerView {
             for: markdown, configuration: configuration,
             traitCollection: UITraitCollection(preferredContentSizeCategory: dynamicTypeSize.contentSizeCategory)
         )
-    }
-}
-
-private extension DynamicTypeSize {
-    /// Mapped case by case: SwiftUI offers no public conversion from `DynamicTypeSize` to `UIContentSizeCategory`.
-    var contentSizeCategory: UIContentSizeCategory {
-        switch self {
-        case .xSmall: .extraSmall
-        case .small: .small
-        case .medium: .medium
-        case .large: .large
-        case .xLarge: .extraLarge
-        case .xxLarge: .extraExtraLarge
-        case .xxxLarge: .extraExtraExtraLarge
-        case .accessibility1: .accessibilityMedium
-        case .accessibility2: .accessibilityLarge
-        case .accessibility3: .accessibilityExtraLarge
-        case .accessibility4: .accessibilityExtraExtraLarge
-        case .accessibility5: .accessibilityExtraExtraExtraLarge
-        @unknown default: .large
-        }
     }
 }

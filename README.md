@@ -117,6 +117,31 @@ font, a table becomes one line per row with tabs between cells, and a thematic b
 token becomes its `displayText`, linked to the token's `url` when it has one. Pass a `GlimmerConfiguration` for the theme
 and extensions.
 
+## Static text in SwiftUI
+
+`Text` ignores paragraph indents and tab stops, so a list in an attributed string loses its hanging indent. For short,
+finished markdown with lists, use `GlimmerStaticText`, which lays the blocks out in SwiftUI without a text view:
+
+```swift
+struct Summary: View {
+    let markdown: String
+
+    var body: some View {
+        GlimmerStaticText(markdown) { url in print(url) }
+            .lineLimit(6)
+    }
+}
+```
+
+Paragraphs and headings are `Text`s, spaced like `GlimmerView`. A list's items sit beside their markers with every line
+indented by the theme's `listIndent`; nested lists indent again and task items show ☑︎ or ☐. A quote's text is dimmed
+beside a bar, a code block is its code on the code block background, a table is one line per row with tabs between
+cells, and a thematic break is a rule. Images are left out, as in `attributedString`. Links are tappable: the closure
+gets the URL, and without one the system opens it. `.lineLimit` applies to each block's `Text`.
+
+The view reads `dynamicTypeSize` itself and builds its blocks once per markdown and text size. It reads the
+configuration with them, so give the view a new identity (`.id(themeVersion)`) to apply a different one.
+
 ## Configuration
 
 `GlimmerConfiguration` holds everything besides the markdown:
