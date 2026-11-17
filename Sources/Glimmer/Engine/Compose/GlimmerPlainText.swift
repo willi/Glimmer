@@ -7,9 +7,11 @@ enum GlimmerPlainText {
     /// Replaces attachments with text, drops spoken-only text, and rewrites links: internal ones go, and a token with a
     /// URL links to it.
     static func flatten(_ text: NSMutableAttributedString, theme: GlimmerTheme) {
-        removeSpokenOnly(from: text)
+        // Attachments first: a task checkbox's state is the spoken-only text after it.
         replaceAttachments(in: text, theme: theme)
+        removeSpokenOnly(from: text)
         fixLinks(in: text)
+        fillMissingFontAndColor(in: text, theme: theme)
     }
 
     /// The text as an `AttributedString` whose runs carry the SwiftUI attributes beside the UIKit ones.
@@ -31,6 +33,18 @@ enum GlimmerPlainText {
         return result
     }
 
+    /// The composer styles a list marker's tab and a task checkbox with a paragraph style alone; plain text needs a font
+    /// and colour on every run, so the body's are filled in, dimmed inside a quote.
+    private static func fillMissingFontAndColor(in text: NSMutableAttributedString, theme: GlimmerTheme) {
+        text.enumerateAttributes(in: NSRange(location: 0, length: text.length)) { attributes, range, _ in
+            if attributes[.font] == nil { text.addAttribute(.font, value: theme.bodyFont, range: range) }
+            if attributes[.foregroundColor] == nil {
+                let color = attributes[.glimmerQuoteDepth] == nil ? theme.textColor : theme.secondaryTextColor
+                text.addAttribute(.foregroundColor, value: color, range: range)
+            }
+        }
+    }
+
     private static func removeSpokenOnly(from text: NSMutableAttributedString) {
         var ranges: [NSRange] = []
         text.enumerateAttribute(.glimmerSpokenOnly, in: NSRange(location: 0, length: text.length)) { value, range, _ in
@@ -48,12 +62,24 @@ enum GlimmerPlainText {
         for (range, attachment) in found.reversed() {
             var attributes = text.attributes(at: range.location, effectiveRange: nil)
             attributes[.attachment] = nil
+            // Prose colour for text that replaces an attachment, dimmed inside a quote like the text around it.
+            if attributes[.foregroundColor] == nil {
+                attributes[.foregroundColor] = attributes[.glimmerQuoteDepth] == nil ? theme.textColor : theme.secondaryTextColor
+            }
             if let block = attachment as? GlimmerBlockAttachment {
                 replace(block, at: range, in: text, attributes: attributes, theme: theme)
             } else if let chip = attachment as? GlimmerInlineAttachment {
                 // The chip's run carries the token only as the attachment, so its URL is linked here.
                 if let url = chip.token.url { attributes[.link] = url }
                 text.replaceCharacters(in: range, with: NSAttributedString(string: chip.token.displayText, attributes: attributes))
+            } else if attachment.image != nil {
+                // A task-list checkbox. Its state is in the spoken-only text that follows.
+                let next = range.location + range.length
+                var spoken = NSRange()
+                let isChecked = next < text.length
+                    && text.attribute(.glimmerSpokenOnly, at: next, effectiveRange: &spoken) != nil
+                    && (text.string as NSString).substring(with: spoken).hasPrefix(GlimmerStrings.checked)
+                text.replaceCharacters(in: range, with: NSAttributedString(string: isChecked ? "\u{2611}\u{FE0E}" : "\u{2610}", attributes: attributes))
             } else {
                 text.deleteCharacters(in: range)
             }
@@ -68,14 +94,31 @@ enum GlimmerPlainText {
         case .codeBlock(_, let code, _):
             var codeAttributes = attributes
             codeAttributes[.font] = theme.codeFont
-            codeAttributes[.foregroundColor] = theme.textColor
+            codeAttributes[.foregroundColor] = attributes[.foregroundColor]
             let trimmed = code.hasSuffix("\n") ? String(code.dropLast()) : code
             text.replaceCharacters(in: range, with: NSAttributedString(string: trimmed, attributes: codeAttributes))
         case .table(let header, let rows, _):
-            let lines = ([header] + rows).map { row in
-                row.map { $0.string.replacingOccurrences(of: "\n", with: " ") }.joined(separator: "\t")
+            // Each cell is flattened like the text around it, so a chip, a link or bold text survives. Cells are
+            // styled by the composer, not by the paragraph, so they get the surrounding text colour when they have none.
+            let table = NSMutableAttributedString()
+            for (rowIndex, row) in ([header] + rows).enumerated() {
+                if rowIndex > 0 { table.append(NSAttributedString(string: "\n", attributes: attributes)) }
+                for (cellIndex, cell) in row.enumerated() {
+                    if cellIndex > 0 { table.append(NSAttributedString(string: "\t", attributes: attributes)) }
+                    let flat = NSMutableAttributedString(attributedString: cell)
+                    flatten(flat, theme: theme)
+                    flat.mutableString.replaceOccurrences(
+                        of: "\n", with: " ", range: NSRange(location: 0, length: flat.length))
+                    for key in [NSAttributedString.Key.font, .foregroundColor] {
+                        guard let fallback = attributes[key] else { continue }
+                        flat.enumerateAttribute(key, in: NSRange(location: 0, length: flat.length)) { value, range, _ in
+                            if value == nil { flat.addAttribute(key, value: fallback, range: range) }
+                        }
+                    }
+                    table.append(flat)
+                }
             }
-            text.replaceCharacters(in: range, with: NSAttributedString(string: lines.joined(separator: "\n"), attributes: attributes))
+            text.replaceCharacters(in: range, with: table)
         case .image, .thematicBreak:
             // The break's own line ends in "\n". Take it too, or the line it leaves would be a blank paragraph.
             var removal = range

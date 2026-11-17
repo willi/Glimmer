@@ -49,6 +49,44 @@ final class GlimmerAttributedStringTests: XCTestCase {
     func testATableBecomesTabbedRows() {
         let text = GlimmerView.attributedString(for: "| a | b |\n|---|---|\n| 1 | 2 |")
         XCTAssertEqual(String(text.characters), "a\tb\n1\t2")
+        XCTAssertTrue(text.runs.allSatisfy { $0.uiKit.foregroundColor != nil && $0.swiftUI.foregroundColor != nil })
+    }
+
+    func testTableCellsKeepChipsLinksAndStyling() throws {
+        var configuration = GlimmerConfiguration()
+        configuration.extensions = [LinkedCitations()]
+        let text = GlimmerView.attributedString(
+            for: "| a | b |\n|---|---|\n| see [3] | **bold** [x](https://a.example) |", configuration: configuration)
+        XCTAssertEqual(String(text.characters), "a\tb\nsee [3]\tbold x")
+        let chip = try XCTUnwrap(text.range(of: "[3]"))
+        XCTAssertEqual(text[chip].link, URL(string: "https://a.example/cite"))
+        let link = try XCTUnwrap(text.range(of: "x"))
+        XCTAssertEqual(text[link].link, URL(string: "https://a.example"))
+        let bold = try XCTUnwrap(text.range(of: "bold"))
+        XCTAssertTrue(text[bold].uiKit.font?.fontDescriptor.symbolicTraits.contains(.traitBold) ?? false)
+        XCTAssertTrue(text.runs.allSatisfy { $0.swiftUI.font != nil && $0.swiftUI.foregroundColor != nil })
+    }
+
+    func testEveryRunHasFontAndColor() {
+        var configuration = GlimmerConfiguration()
+        configuration.extensions = [LinkedCitations(), GlimmerMentions()]
+        let markdown = "> quoted [3] @grace\n\n```\ncode\n```\n\n- [x] done\n- [ ] todo\n\n| a |\n|---|\n| b |"
+        let text = GlimmerView.attributedString(for: markdown, configuration: configuration)
+        for run in text.runs {
+            let shown = String(text[run.range].characters)
+            XCTAssertNotNil(run.uiKit.font, "font: \(shown)")
+            XCTAssertNotNil(run.uiKit.foregroundColor, "color: \(shown)")
+            XCTAssertNotNil(run.swiftUI.font, "swiftUI font: \(shown)")
+            XCTAssertNotNil(run.swiftUI.foregroundColor, "swiftUI color: \(shown)")
+        }
+    }
+
+    func testTaskCheckboxesBecomeText() {
+        let text = String(GlimmerView.attributedString(for: "- [x] done\n- [ ] todo").characters)
+        XCTAssertTrue(text.contains("\u{2611}\u{FE0E}"))
+        XCTAssertTrue(text.contains("\u{2610}"))
+        XCTAssertFalse(text.contains("Checked"))
+        XCTAssertFalse(text.contains("\u{FFFC}"))
     }
 
     func testAThematicBreakIsDropped() {
