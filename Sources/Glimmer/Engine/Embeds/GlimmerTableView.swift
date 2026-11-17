@@ -2,7 +2,8 @@ import Synchronization
 import UIKit
 
 /// A GFM table. Columns size to their content, capped at `maxTableColumnWidth`, and expand to fill the width when
-/// the table is narrower than the text. Wider tables scroll horizontally.
+/// the table is narrower than the text. Wider tables shrink their columns toward `minTableColumnWidth` and wrap
+/// cells; only when that is not enough do they scroll horizontally.
 @MainActor
 final class GlimmerTableView: UIView, GlimmerEmbedView {
     struct Layout: Equatable {
@@ -206,6 +207,20 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
         return extendingLastVisibleUnit(rects, in: box)
     }
 
+    /// Column widths for `width`: narrower tables stretch to fill it, wider ones shrink the columns above `minimum`
+    /// in proportion to how far each is above it, and only columns that are all at `minimum` still scroll.
+    private static func fit(_ natural: [CGFloat], to width: CGFloat, minimum: CGFloat) -> [CGFloat] {
+        let total = natural.reduce(0, +)
+        guard total > 0 else { return natural }
+        if total <= width { return total < width ? natural.map { $0 * width / total } : natural }
+        let floors = natural.map { min($0, minimum) }
+        let slack = zip(natural, floors).map { $0 - $1 }
+        let slackTotal = slack.reduce(0, +)
+        guard slackTotal > 0 else { return natural }
+        let shrink = min(total - width, slackTotal)
+        return zip(natural, slack).map { $0 - shrink * $1 / slackTotal }
+    }
+
     func layout(forWidth width: CGFloat) -> Layout {
         if let cachedLayout, cachedLayout.width == width { return cachedLayout.layout }
         let padding = Self.cellPadding
@@ -218,8 +233,7 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
         for row in naturalRowWidths {
             for (column, width) in row.enumerated() { natural[column] = max(natural[column], width) }
         }
-        let total = natural.reduce(0, +)
-        let widths = total > 0 && total < width ? natural.map { $0 * width / total } : natural
+        let widths = Self.fit(natural, to: width, minimum: theme.minTableColumnWidth)
         // Heights measured at these column widths stay valid; any other widths measure every row again.
         var heights = measuredRows?.columnWidths == widths ? measuredRows?.heights ?? [] : []
         while heights.count < cells.count {

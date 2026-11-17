@@ -53,6 +53,59 @@ final class GlimmerTableViewTests: XCTestCase {
         XCTAssertGreaterThan(layout.rowHeights[1], theme.tableFont.lineHeight * 2, "the long cell wraps onto several lines")
     }
 
+    func testColumnsShrinkToFitAndWrap() {
+        let long = String(repeating: "word ", count: 20)
+        let table = GlimmerTableView(
+            header: [cell("a", header: true), cell("b", header: true)],
+            rows: [[cell("x"), cell("y")], [cell(long), cell(long)]],
+            alignments: [.none, .none],
+            theme: theme
+        )
+        let layout = table.layout(forWidth: 320)
+        XCTAssertLessThanOrEqual(layout.contentWidth, 320.5)
+        XCTAssertGreaterThan(layout.rowHeights[2], layout.rowHeights[1] * 2, "the long cell wraps")
+        let window = hostInWindow(table, width: 320, height: table.embedHeight(forWidth: 320))
+        XCTAssertLessThanOrEqual(table.scrollView.contentSize.width, table.bounds.width + 0.5)
+        _ = window
+    }
+
+    func testATableThatFitsIsUnchanged() {
+        let table = GlimmerTableView(
+            header: [cell("a", header: true), cell("bb", header: true)],
+            rows: [[cell("1"), cell("22")]],
+            alignments: [.none, .none],
+            theme: theme
+        )
+        let wide = table.layout(forWidth: 600)
+        XCTAssertEqual(wide.contentWidth, 600, accuracy: 0.5)
+        XCTAssertEqual(wide.columnWidths[1] / wide.columnWidths[0], 1, accuracy: 0.01, "both columns sit at the 44 pt floor")
+    }
+
+    func testManyColumnsStillScroll() {
+        let header = (0..<8).map { cell("Column number \($0)", header: true) }
+        let table = GlimmerTableView(header: header, rows: [], alignments: Array(repeating: .none, count: 8), theme: theme)
+        let layout = table.layout(forWidth: 320)
+        for width in layout.columnWidths { XCTAssertEqual(width, theme.minTableColumnWidth, accuracy: 0.01) }
+        let window = hostInWindow(table, width: 320, height: layout.height)
+        XCTAssertGreaterThan(table.scrollView.contentSize.width, 320)
+        _ = window
+    }
+
+    func testALongUnbrokenWordWrapsWithoutOverlap() {
+        let table = GlimmerTableView(
+            header: [cell("h", header: true)],
+            rows: [[cell(String(repeating: "x", count: 300))]],
+            alignments: [.none],
+            theme: theme
+        )
+        let layout = table.layout(forWidth: 200)
+        let window = hostInWindow(table, width: 200, height: layout.height)
+        let label = table.cellLabels[1][0]
+        XCTAssertLessThanOrEqual(label.frame.maxY, layout.height + 0.5)
+        XCTAssertGreaterThanOrEqual(layout.rowHeights[1], label.frame.height)
+        _ = window
+    }
+
     func testAlignmentsMapToLabels() {
         let table = GlimmerTableView(
             header: [cell("a", header: true), cell("b", header: true), cell("c", header: true)],
