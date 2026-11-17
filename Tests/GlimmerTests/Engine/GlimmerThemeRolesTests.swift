@@ -16,6 +16,34 @@ private struct LinkedChip: GlimmerExtension {
     @MainActor func makeInlineView(for token: GlimmerInlineToken, theme: GlimmerTheme) -> UIView? { UILabel() }
 }
 
+/// `[n]` as tappable text (no chip), with a URL.
+private struct TextToken: GlimmerExtension {
+    func scan(_ text: String) -> [GlimmerInlineToken] {
+        text.ranges(of: #/\[\d+\]/#).map { range in
+            let label = String(text[range])
+            var token = GlimmerInlineToken(
+                range: range, kind: "text", displayText: label, source: label, presentation: .text(tappable: true)
+            )
+            token.url = URL(string: "https://a.example/cite")
+            return token
+        }
+    }
+
+    @MainActor func makeInlineView(for token: GlimmerInlineToken, theme: GlimmerTheme) -> UIView? { nil }
+}
+
+/// `[n]` as a chip without a URL.
+private struct BareChip: GlimmerExtension {
+    func scan(_ text: String) -> [GlimmerInlineToken] {
+        text.ranges(of: #/\[\d+\]/#).map { range in
+            let label = String(text[range])
+            return GlimmerInlineToken(range: range, kind: "bare", displayText: label, source: label)
+        }
+    }
+
+    @MainActor func makeInlineView(for token: GlimmerInlineToken, theme: GlimmerTheme) -> UIView? { UILabel() }
+}
+
 private struct RefuseAll: GlimmerLinkPolicy {
     func decision(for link: GlimmerLinkCandidate) -> GlimmerLinkDecision { .text }
 }
@@ -85,11 +113,61 @@ final class GlimmerThemeRolesTests: XCTestCase {
         XCTAssertEqual(spacing(of: "one", in: compose("- one\n\n- two", theme)), theme.paragraphSpacing)
     }
 
-    func testNilFieldsComposeLikeTheDefaults() {
-        let markdown = "# H\n\n- a\n\n- b\n\n```\ncode\n```"
-        var plain = GlimmerTheme.default
-        plain.lineHeightMultiple = 1.4
-        assertEquivalent(compose(markdown, theme()), compose(markdown, plain), "nil fields")
+    func testNilFieldsKeepTheBodyBehaviour() {
+        let theme = theme()
+        let composed = compose("# H\n\n- a\n\n- b\n\n```\ncode\n```", theme)
+        XCTAssertEqual(multiple(of: "H", in: composed), 1.4)
+        XCTAssertEqual(spacing(of: "a", in: composed), theme.paragraphSpacing)
+        XCTAssertEqual(spacing(of: "b", in: composed), theme.paragraphSpacing)
+        let code = GlimmerCodeHighlighting.highlightedCode(
+            "x", language: nil, theme: theme, highlighter: GlimmerBasicHighlighter()
+        )
+        let style = code.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
+        XCTAssertEqual(style?.lineHeightMultiple, 1.4)
+        let document = GlimmerStaticDocument(
+            markdown: "- a\n\n- b", configuration: configuration(theme), dynamicTypeSize: .large
+        )
+        let scaled = theme.scaled(for: UITraitCollection(preferredContentSizeCategory: .large))
+        guard case .list(let list) = document.blocks.first?.content else { return XCTFail("not a list") }
+        XCTAssertEqual(list.items.map(\.spacingAbove), [0, scaled.paragraphSpacing])
+    }
+
+    private func configuration(_ theme: GlimmerTheme) -> GlimmerConfiguration {
+        var configuration = GlimmerConfiguration.default
+        configuration.theme = theme
+        return configuration
+    }
+
+    func testHeadingInsideAListItemAndAQuoteUsesTheHeadingMultiple() {
+        let theme = theme(heading: 1.1)
+        XCTAssertEqual(multiple(of: "Item", in: compose("- # Item", theme)), 1.1)
+        XCTAssertEqual(multiple(of: "Quoted", in: compose("> # Quoted", theme)), 1.1)
+    }
+
+    func testTheLastLooseItemAndNestedLooseListGetTheExpectedSpacing() throws {
+        let theme = theme(loose: 10)
+        let composed = compose("- tight\n  - one\n\n  - two\n\nAfter", theme)
+        XCTAssertEqual(spacing(of: "one", in: composed), 10)
+        // The tight outer list ends, so its last paragraph takes the paragraph spacing.
+        XCTAssertEqual(spacing(of: "two", in: composed), theme.paragraphSpacing)
+        XCTAssertEqual(spacing(of: "tight", in: composed), theme.tightListSpacing)
+        let loose = compose("- a\n\n- b\n\nAfter", theme)
+        XCTAssertEqual(spacing(of: "b", in: loose), theme.paragraphSpacing)
+
+        let scaled = theme.scaled(for: UITraitCollection(preferredContentSizeCategory: .large))
+        let document = GlimmerStaticDocument(
+            markdown: "- a\n\n- b\n\nAfter", configuration: configuration(theme), dynamicTypeSize: .large
+        )
+        XCTAssertEqual(document.blocks.map(\.spacingAbove), [0, scaled.paragraphSpacing])
+        let nested = GlimmerStaticDocument(
+            markdown: "- tight\n  - one\n\n  - two\n\nAfter", configuration: configuration(theme), dynamicTypeSize: .large
+        )
+        XCTAssertEqual(nested.blocks.map(\.spacingAbove), [0, scaled.paragraphSpacing])
+        guard case .list(let outer) = try XCTUnwrap(nested.blocks.first).content,
+              case .list(let inner) = try XCTUnwrap(outer.items.first?.blocks.last).content else {
+            return XCTFail("not nested lists")
+        }
+        XCTAssertEqual(inner.items.map(\.spacingAbove), [0, scaled.looseListSpacing])
     }
 
     func testLooseListSpacingScalesWithDynamicTypeButMultiplesDoNot() {
@@ -111,15 +189,30 @@ final class GlimmerThemeRolesTests: XCTestCase {
         XCTAssertEqual(list.items.map(\.spacingAbove), [0, scaled.looseListSpacing])
     }
 
-    func testALinkedChipTakesTheLinkColour() throws {
+    private func chipColors(_ glimmerExtension: any GlimmerExtension) throws -> (chip: UIColor?, prose: UIColor?, theme: GlimmerTheme) {
         var configuration = GlimmerConfiguration()
-        configuration.extensions = [LinkedChip()]
+        configuration.extensions = [glimmerExtension]
         configuration.theme.linkColor = .systemRed
+        configuration.theme.mentionColor = .systemGreen
+        configuration.theme.textColor = .systemBlue
         let text = GlimmerView.attributedString(for: "see [3] now", configuration: configuration, traitCollection: .init())
         let chip = try XCTUnwrap(text.range(of: "[3]"))
-        XCTAssertEqual(text[chip].uiKit.foregroundColor, .systemRed)
         let prose = try XCTUnwrap(text.range(of: "see"))
-        XCTAssertNotEqual(text[prose].uiKit.foregroundColor, .systemRed)
+        return (text[chip].uiKit.foregroundColor, text[prose].uiKit.foregroundColor, configuration.theme)
+    }
+
+    func testALinkedChipTakesTheLinkColour() throws {
+        let colors = try chipColors(LinkedChip())
+        XCTAssertEqual(colors.chip, .systemRed)
+        XCTAssertEqual(colors.prose, .systemBlue)
+    }
+
+    func testTappableTextKeepsTheMentionColour() throws {
+        XCTAssertEqual(try chipColors(TextToken()).chip, .systemGreen)
+    }
+
+    func testAChipWithoutAURLKeepsTheProseColour() throws {
+        XCTAssertEqual(try chipColors(BareChip()).chip, .systemBlue)
     }
 
     func testARefusedLinkInATableCellComposesWithoutALink() {

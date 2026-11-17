@@ -27,7 +27,7 @@ enum GlimmerPlainText {
         // Attachments first: a task checkbox's state is the spoken-only text after it.
         replaceAttachments(in: text, theme: theme)
         removeSpokenOnly(from: text)
-        fixLinks(in: text, theme: theme)
+        fixLinks(in: text)
         fillMissingFontAndColor(in: text, theme: theme)
     }
 
@@ -86,7 +86,8 @@ enum GlimmerPlainText {
             if let block = attachment as? GlimmerBlockAttachment {
                 replace(block, at: range, in: text, attributes: attributes, theme: theme)
             } else if let chip = attachment as? GlimmerInlineAttachment {
-                // A tappable chip's run carries its token, and `fixLinks` links its URL; this covers a chip that isn't
+                // A chip with a URL takes the link colour, as a link does; text presented as a token keeps the colour the
+                // composer gave it. A tappable chip's run carries its token, and `fixLinks` links its URL; this covers a chip that isn't
                 // tappable, whose run carries the token only as the attachment.
                 if let url = chip.token.url {
                     attributes[.link] = url
@@ -153,7 +154,7 @@ enum GlimmerPlainText {
         }
     }
 
-    private static func fixLinks(in text: NSMutableAttributedString, theme: GlimmerTheme) {
+    private static func fixLinks(in text: NSMutableAttributedString) {
         let whole = NSRange(location: 0, length: text.length)
         var internalLinks: [NSRange] = []
         text.enumerateAttribute(.link, in: whole) { value, range, _ in
@@ -162,9 +163,7 @@ enum GlimmerPlainText {
         }
         for range in internalLinks { text.removeAttribute(.link, range: range) }
         text.enumerateAttribute(.glimmerToken, in: whole) { value, range, _ in
-            guard let url = (value as? GlimmerTokenBox)?.token.url else { return }
-            text.addAttribute(.link, value: url, range: range)
-            text.addAttribute(.foregroundColor, value: theme.linkColor, range: range)
+            if let url = (value as? GlimmerTokenBox)?.token.url { text.addAttribute(.link, value: url, range: range) }
         }
     }
 }
