@@ -139,7 +139,9 @@ struct GlimmerStaticDocumentBuilder {
                 gap = trailing ?? 0
                 trailing = inner.paragraphSpacing ?? theme.paragraphSpacing
             }
-            items.append(GlimmerStaticListItem(marker: marker.text, spacingAbove: gap, blocks: children))
+            items.append(GlimmerStaticListItem(
+                marker: marker.text, markerAccessibilityLabel: marker.accessibilityLabel, spacingAbove: gap, blocks: children
+            ))
         }
         guard !items.isEmpty else { return [] }
         let listGap = items[0].spacingAbove
@@ -188,15 +190,19 @@ struct GlimmerStaticDocumentBuilder {
 
     // MARK: - Markers
 
-    /// A marker's text and its drawn width.
-    private typealias Marker = (text: AttributedString, width: CGFloat)
+    /// A marker's text, its drawn width, and what VoiceOver reads for it when that isn't the text.
+    private typealias Marker = (text: AttributedString, width: CGFloat, accessibilityLabel: String?)
 
     private func marker(kind: GlimmerList.Kind, index: Int, checkbox: Bool?, context: Context) -> Marker {
         let styled = composer(for: context).theme
         if let checkbox {
-            // The characters `GlimmerView.attributedString` uses, tinted as the engine tints its boxes.
-            return marker(checkbox ? "\u{2611}\u{FE0E}" : "\u{2610}", font: styled.bodyFont,
-                          color: checkbox ? theme.linkColor : theme.secondaryTextColor)
+            // The characters `GlimmerView.attributedString` uses, tinted as the engine tints its boxes. VoiceOver
+            // reads the state as `GlimmerView` does, not the character's Unicode name.
+            var box = marker(GlimmerTaskBox.character(isChecked: checkbox), font: styled.bodyFont,
+                             color: checkbox ? theme.linkColor : theme.secondaryTextColor)
+            let spoken = checkbox ? GlimmerStrings.checked : GlimmerStrings.unchecked
+            box.accessibilityLabel = spoken.trimmingCharacters(in: CharacterSet(charactersIn: ", ").union(.whitespaces))
+            return box
         }
         switch kind {
         case .bullet:
@@ -209,6 +215,7 @@ struct GlimmerStaticDocumentBuilder {
 
     private func marker(_ symbol: String, font: UIFont, color: UIColor) -> Marker {
         let styled = NSAttributedString(string: symbol, attributes: [.font: font, .foregroundColor: color])
-        return (GlimmerPlainText.attributedString(from: styled), styled.size().width)
+        // Bullets and numbers are read as their text, as `GlimmerView` reads them.
+        return (GlimmerPlainText.attributedString(from: styled), styled.size().width, nil)
     }
 }

@@ -96,7 +96,7 @@ enum GlimmerPlainText {
                 let isChecked = next < text.length
                     && text.attribute(.glimmerSpokenOnly, at: next, effectiveRange: &spoken) != nil
                     && (text.string as NSString).substring(with: spoken).hasPrefix(GlimmerStrings.checked)
-                text.replaceCharacters(in: range, with: NSAttributedString(string: isChecked ? "\u{2611}\u{FE0E}" : "\u{2610}", attributes: attributes))
+                text.replaceCharacters(in: range, with: NSAttributedString(string: GlimmerTaskBox.character(isChecked: isChecked), attributes: attributes))
             } else {
                 text.deleteCharacters(in: range)
             }

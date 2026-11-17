@@ -91,11 +91,40 @@ final class GlimmerStaticTextTests: XCTestCase {
         XCTAssertFalse(cache.document(markdown: "b", configuration: .default, dynamicTypeSize: .xLarge) === first)
     }
 
+    func testTaskBoxesReadTheirStateAndOtherMarkersTheirText() throws {
+        let tasks = try XCTUnwrap(lists(document("- [x] done\n- [ ] todo").blocks).first)
+        XCTAssertEqual(tasks.items.map(\.markerAccessibilityLabel), ["Checked", "Unchecked"])
+        let bullets = try XCTUnwrap(lists(document("- a").blocks).first)
+        XCTAssertEqual(bullets.items.map(\.markerAccessibilityLabel), [nil])
+        let numbers = try XCTUnwrap(lists(document("3. x").blocks).first)
+        XCTAssertEqual(numbers.items.map(\.markerAccessibilityLabel), [nil])
+    }
+
+    func testAnItemsMarkerIsReadWithItsFirstBlockUnlessThatIsAList() throws {
+        let nested = try XCTUnwrap(lists(document("- a\n  - b").blocks).first)
+        XCTAssertTrue(nested.items[0].groupsMarkerWithFirstBlock)
+        guard case .list(let inner) = nested.items[0].blocks[1].content else { return XCTFail("no nested list") }
+        XCTAssertTrue(inner.items[0].groupsMarkerWithFirstBlock)
+        let listFirst = try XCTUnwrap(lists(document("- - a").blocks).first)
+        XCTAssertFalse(listFirst.items[0].groupsMarkerWithFirstBlock)
+        let empty = try XCTUnwrap(lists(document("-\n- b").blocks).first)
+        XCTAssertFalse(empty.items[0].groupsMarkerWithFirstBlock)
+    }
+
     func testLinkTapsGoToTheHandler() throws {
-        var tapped: URL?
         let url = try XCTUnwrap(URL(string: "https://a.example"))
-        GlimmerStaticText.openURLAction(onLinkTap: { tapped = $0 })(url)
+        var tapped: URL?
+        var ancestor: URL?
+        openLink(url, routing: GlimmerStaticLinkRouting(onLinkTap: { tapped = $0 }), ancestor: { ancestor = $0 })
         XCTAssertEqual(tapped, url)
+        XCTAssertNil(ancestor)
+    }
+
+    func testWithoutAHandlerLinkTapsGoToTheHostsOpenURL() throws {
+        let url = try XCTUnwrap(URL(string: "https://a.example"))
+        var ancestor: URL?
+        openLink(url, routing: GlimmerStaticLinkRouting(onLinkTap: nil), ancestor: { ancestor = $0 })
+        XCTAssertEqual(ancestor, url)
     }
 
     // MARK: - Hosted layout
@@ -114,13 +143,33 @@ final class GlimmerStaticTextTests: XCTestCase {
         let words = Array(repeating: "word", count: 60).joined(separator: " ")
         let limited = height(of: GlimmerStaticText(words).lineLimit(2), width: width)
         let full = height(of: GlimmerStaticText(words), width: width)
-        let line = theme.bodyFont.lineHeight * theme.lineHeightMultiple
+        // `Text` has no line height multiple, so a line is the font's line height.
+        let line = theme.bodyFont.lineHeight
         XCTAssertLessThanOrEqual(limited, 2 * line + 2)
         XCTAssertGreaterThan(limited, line)
         XCTAssertGreaterThan(full, limited)
     }
 
     // MARK: - Helpers
+
+    /// Opens `url` from inside `routing`, below an ancestor `openURL` handler, the way a tapped link in a `Text` does.
+    private func openLink(_ url: URL, routing: GlimmerStaticLinkRouting, ancestor: @escaping (URL) -> Void) {
+        let probe = LinkProbe(url: url)
+            .modifier(routing)
+            .environment(\.openURL, OpenURLAction { url in
+                ancestor(url)
+                return .handled
+            })
+        let host = UIHostingController(rootView: probe)
+        let window = hostInWindow(host.view, width: width, height: 100)
+        withExtendedLifetime(window) { settle(host.view) }
+    }
+
+    private func lists(_ blocks: [GlimmerStaticBlock]) -> [GlimmerStaticList] {
+        blocks.compactMap { block in
+            if case .list(let list) = block.content { list } else { nil }
+        }
+    }
 
     private func height(of view: some View, width: CGFloat) -> CGFloat {
         let host = UIHostingController(rootView: view.environment(\.dynamicTypeSize, .large))
@@ -151,5 +200,15 @@ final class GlimmerStaticTextTests: XCTestCase {
                 return [(depth, String(item.marker.characters), own)] + flattenedItems(item.blocks, depth: depth + 1)
             }
         }
+    }
+}
+
+/// Opens a URL with the environment's `openURL` once it appears.
+private struct LinkProbe: View {
+    let url: URL
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        Color.clear.frame(width: 10, height: 10).onAppear { openURL(url) }
     }
 }

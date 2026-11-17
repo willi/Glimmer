@@ -137,7 +137,9 @@ Paragraphs and headings are `Text`s, spaced like `GlimmerView`. A list's items s
 indented by the theme's `listIndent`; nested lists indent again and task items show ☑︎ or ☐. A quote's text is dimmed
 beside a bar, a code block is its code on the code block background, a table is one line per row with tabs between
 cells, and a thematic break is a rule. Images are left out, as in `attributedString`. Links are tappable: the closure
-gets the URL, and without one the system opens it. `.lineLimit` applies to each block's `Text`.
+gets the URL, and without one the environment's `openURL` does (a handler you installed higher up, or the system).
+`.lineLimit` applies to each block's `Text`. The theme's `lineHeightMultiple` isn't applied, since `Text` has no line
+height multiple: add `.lineSpacing(_:)` for more space between lines.
 
 The view reads `dynamicTypeSize` itself and builds its blocks once per markdown and text size. It reads the
 configuration with them, so give the view a new identity (`.id(themeVersion)`) to apply a different one.
