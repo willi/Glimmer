@@ -195,6 +195,7 @@ final class GlimmerSurfaceReuseTests: XCTestCase {
         // Content below the block moves, and a fragment whose size changes redraws whatever this does. Of the rest,
         // only the block's own fragment may redraw: the band is not redrawn.
         let unchanged = fragmentViews(in: textView).filter { sizes[ObjectIdentifier($0)] == $0.bounds.size }
+        XCTAssertGreaterThan(unchanged.count, 5, "fragments that kept their size were recorded, so the check below is not vacuous")
         let redrawn = unchanged.filter { $0.layer.needsDisplay() }
         XCTAssertLessThanOrEqual(redrawn.count, 1, "a revealed code line redraws its own fragment, not the band")
         _ = window

@@ -20,7 +20,7 @@ Add Glimmer with Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/willi/Glimmer.git", from: "2.2.0"),
+    .package(url: "https://github.com/willi/Glimmer.git", from: "2.2.1"),
 ]
 ```
 
@@ -159,6 +159,11 @@ let view = GlimmerView(configuration: configuration)
 
 - **`theme`** (`GlimmerTheme`): fonts per role (body, H1–H6, code, table, table header, caption), dynamic colors,
   spacing, and options such as link underlines and the code-block header. Fonts scale with Dynamic Type.
+  `blockSpacing` is the gap between blocks. A heading's space above is the larger of that gap and the space the
+  block before it already leaves, like CSS margin collapsing, so with the default theme a heading after a paragraph
+  has 16 pt above it, not 28. A heading at the start has none. `minTableColumnWidth` (72 pt by default, scaling with
+  Dynamic Type) is the narrowest a table column gets: tables fit the available width by narrowing their widest
+  columns and wrapping cell text, and scroll sideways only when every column is at this width and still doesn't fit.
 - **`extensions`**: custom syntax. See [Extensions](#extensions).
 - **`highlighter`** (`GlimmerHighlighter`): syntax highlighting for code blocks. The default,
   `GlimmerBasicHighlighter`, covers keywords, strings, comments and numbers in common languages.
@@ -296,6 +301,9 @@ var configuration = GlimmerConfiguration()
 configuration.extensions = [Citations()]
 GlimmerView(configuration: configuration).update(markdown: "As shown [1].")
 ```
+
+A chip view taller than its line makes the line taller, with its bounds centred on the cap height. A shorter chip
+keeps its place on the line and doesn't change the line's height.
 
 A token can also show as text or as an image: set its `presentation` to `.text(tappable:)` or `.image(url)`. Tappable
 text uses the theme's `mentionColor`, and `onTokenTap` (on `GlimmerView` and `GlimmerText`) reports the token;

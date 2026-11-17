@@ -212,13 +212,27 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
     private static func fit(_ natural: [CGFloat], to width: CGFloat, minimum: CGFloat) -> [CGFloat] {
         let total = natural.reduce(0, +)
         guard total > 0 else { return natural }
-        if total <= width { return total < width ? natural.map { $0 * width / total } : natural }
+        if total <= width {
+            guard total < width else { return natural }
+            return snapped(natural.map { $0 * width / total }, to: width, at: natural.count - 1)
+        }
         let floors = natural.map { min($0, minimum) }
         let slack = zip(natural, floors).map { $0 - $1 }
         let slackTotal = slack.reduce(0, +)
         guard slackTotal > 0 else { return natural }
         let shrink = min(total - width, slackTotal)
-        return zip(natural, slack).map { $0 - shrink * $1 / slackTotal }
+        let shrunk = zip(natural, slack).map { $0 - shrink * $1 / slackTotal }
+        // Rounding drift must not leave a table that fits a hair wider than its box, which would let it scroll.
+        guard shrink == total - width, let last = slack.lastIndex(where: { $0 > 0 }) else { return shrunk }
+        return snapped(shrunk, to: width, at: last)
+    }
+
+    /// `widths` with the column at `index` taking whatever makes the sum exactly `width`.
+    private static func snapped(_ widths: [CGFloat], to width: CGFloat, at index: Int) -> [CGFloat] {
+        var result = widths
+        let others = result.enumerated().reduce(CGFloat(0)) { $1.offset == index ? $0 : $0 + $1.element }
+        result[index] = width - others
+        return result
     }
 
     func layout(forWidth width: CGFloat) -> Layout {

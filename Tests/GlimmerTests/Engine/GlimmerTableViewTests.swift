@@ -69,6 +69,22 @@ final class GlimmerTableViewTests: XCTestCase {
         _ = window
     }
 
+    func testATableThatFitsAfterShrinkingNeverScrolls() {
+        let long = "alpha beta gamma delta epsilon zeta eta theta"
+        for width in [CGFloat(301.3), 333.7, 287.1, 320] {
+            let table = GlimmerTableView(
+                header: [cell("a", header: true), cell("b", header: true), cell("c", header: true)],
+                rows: [[cell(long), cell(long + " iota"), cell("x")]],
+                alignments: [.none, .none, .none],
+                theme: theme
+            )
+            let window = hostInWindow(table, width: width, height: table.embedHeight(forWidth: width))
+            XCTAssertLessThanOrEqual(table.layout(forWidth: width).contentWidth, width)
+            XCTAssertLessThanOrEqual(table.scrollView.contentSize.width, table.bounds.width, "no slack at width \(width)")
+            _ = window
+        }
+    }
+
     func testATableThatFitsIsUnchanged() {
         let table = GlimmerTableView(
             header: [cell("a", header: true), cell("bb", header: true)],
