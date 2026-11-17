@@ -65,4 +65,32 @@ final class GlimmerViewSizingTests: XCTestCase {
         XCTAssertEqual(measurer.lineBottoms, measurer.lineBottoms.sorted())
         XCTAssertGreaterThan(measurer.lineBottoms[0], 5)
     }
+
+    func testWrappedLinesHaveEvenlySpacedIncreasingBottoms() {
+        let font = UIFont.systemFont(ofSize: 17)
+        let measurer = GlimmerTextMeasurer(
+            text: NSAttributedString(string: String(repeating: "word ", count: 80), attributes: [.font: font]),
+            width: 200, insets: UIEdgeInsets(top: 5, left: 0, bottom: 0, right: 0), lineFragmentPadding: 0
+        )
+        let bottoms = measurer.lineBottoms
+        XCTAssertGreaterThan(bottoms.count, 3)
+        XCTAssertEqual(bottoms[0], 5 + ceil(font.lineHeight), accuracy: 1.5)
+        let step = bottoms[1] - bottoms[0]
+        XCTAssertGreaterThan(step, 0)
+        for index in 1..<bottoms.count {
+            XCTAssertEqual(bottoms[index] - bottoms[index - 1], step, accuracy: 1.5)
+        }
+    }
+
+    func testEmptyTextFitsZeroWidth() {
+        XCTAssertEqual(settledView("").fittingWidth(maximum: 320), 0)
+    }
+
+    func testFittingWidthFollowsATextSizeChange() {
+        let view = settledView("Hello there")
+        let before = view.fittingWidth(maximum: 320)
+        view.traitOverrides.preferredContentSizeCategory = .accessibilityExtraLarge
+        settle(view)
+        XCTAssertGreaterThan(view.fittingWidth(maximum: 320), before)
+    }
 }

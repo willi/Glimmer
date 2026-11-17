@@ -135,7 +135,7 @@ public final class GlimmerView: UIView {
     /// its text. Includes the text container's insets and padding and never exceeds `maximum`. Text with a code block,
     /// table, image or rule returns `maximum`, because those embeds fill the width.
     public func fittingWidth(maximum: CGFloat) -> CGFloat {
-        guard maximum > 0 else { return 0 }
+        guard maximum > 0, textView.textStorage.length > 0 else { return 0 }
         if let cached = fittedWidth, cached.version == textView.textVersion, cached.maximum == maximum { return cached.width }
         let text = textView.textStorage
         var hasBlockEmbed = false
