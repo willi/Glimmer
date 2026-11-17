@@ -20,7 +20,7 @@ Add Glimmer with Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/willi/Glimmer.git", from: "2.2.1"),
+    .package(url: "https://github.com/willi/Glimmer.git", from: "2.3.0"),
 ]
 ```
 
@@ -139,10 +139,16 @@ beside a bar, a code block is its code on the code block background, a table is 
 cells, and a thematic break is a rule. Images are left out, as in `attributedString`. Links are tappable: the closure
 gets the URL, and without one the environment's `openURL` does (a handler you installed higher up, or the system).
 `.lineLimit` applies to each block's `Text`. The theme's `lineHeightMultiple` isn't applied, since `Text` has no line
-height multiple: add `.lineSpacing(_:)` for more space between lines.
+height multiple: add `.lineSpacing(_:)` for more space between lines. Every run carries the theme's font and colour, so
+`.font(_:)` and `.foregroundStyle(_:)` on the view change nothing: set them in the theme. Paragraphs, headings and
+tables are as wide as their text; a document with a list, quote, code block or rule fills the width it's offered.
 
-The view reads `dynamicTypeSize` itself and builds its blocks once per markdown and text size. It reads the
-configuration with them, so give the view a new identity (`.id(themeVersion)`) to apply a different one.
+The view reads `dynamicTypeSize` itself. Documents are built once per markdown, theme, text size, extensions and
+highlighter, and shared between views, so a cell and a sizing view showing the same summary build it once. An
+extension or highlighter that isn't `Hashable` can't be shared: each view then builds its own, and a change to that
+dependency alone needs a new view identity (`.id(extensionVersion)`). Two edge cases differ from `GlimmerView`: a list
+item that starts with a code block, table or rule shows its marker beside it rather than above it, and the space above a
+heading that follows an empty quote at the start differs.
 
 ## Configuration
 
@@ -402,7 +408,8 @@ How it stays fast:
 - **Core Animation fades.** The reveal is a mask of phrase layers that Core Animation animates, so the main thread
   only starts phrases.
 - **Streaming embeds update in place.** A code block applies only its changed lines, and a table keeps the rows it
-  already measured.
+  already measured. While an answer streams, a table's columns never narrow, so rows already shown never re-wrap; the
+  table fits its columns to the width once when the answer settles.
 
 ## Demo app
 
