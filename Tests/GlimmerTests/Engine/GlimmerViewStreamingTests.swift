@@ -319,4 +319,162 @@ final class GlimmerViewStreamingTests: XCTestCase {
         XCTAssertEqual(view.intrinsicContentSize.height, before, accuracy: 0.5)
         _ = window
     }
+
+    // MARK: - Reveal control after a stream ends
+
+    /// Forty words of plain prose, long enough that a reveal takes several phrases.
+    private let longAnswer = "The first sentence of this answer arrives right now. A second sentence follows it closely and keeps going. "
+        + "Then a third sentence wraps onto more lines of the view. A fourth one closes the paragraph with a few more words "
+        + "to read."
+
+    func testFinishRevealShowsEverythingAtOnceAndRecordsIt() async throws {
+        let id = "finish-reveal-test"
+        GlimmerRevealStore.shared.clear(id)
+        let (view, clock, window) = streamingView()
+        view.update(markdown: longAnswer, isStreaming: true, revealID: id)
+        await view.pendingDocument?.value
+        clock.advance(to: 0.3)
+        XCTAssertLessThan(try XCTUnwrap(view.engine).revealedLength, view.textView.textStorage.length)
+        var reports = 0
+        view.onHeightChange = { reports += 1 }
+        view.finishReveal()
+        XCTAssertNil(view.engine)
+        XCTAssertNil(view.textView.layer.mask)
+        XCTAssertEqual(view.intrinsicContentSize.height, fullHeight(view), accuracy: 0.5)
+        XCTAssertGreaterThan(reports, 0, "the host hears about the full height")
+
+        let (second, _, secondWindow) = streamingView()
+        second.update(markdown: longAnswer, isStreaming: true, revealID: id)
+        await second.pendingDocument?.value
+        XCTAssertEqual(try XCTUnwrap(second.engine).revealedLength, second.textView.textStorage.length, "resumes complete")
+        _ = window
+        _ = secondWindow
+    }
+
+    func testALateWorkerResultDoesNotRestartAFinishedReveal() async {
+        let id = "late-worker-test"
+        GlimmerRevealStore.shared.clear(id)
+        let (view, clock, window) = streamingView()
+        view.update(markdown: longAnswer, isStreaming: true, revealID: id)
+        await view.pendingDocument?.value
+        clock.advance(to: 0.3)
+        view.update(markdown: longAnswer, isStreaming: false, revealID: id)
+        XCTAssertNotNil(view.pendingDocument, "goes to the worker")
+        view.finishReveal()
+        await view.pendingDocument?.value
+        XCTAssertNil(view.engine)
+        XCTAssertNil(view.textView.layer.mask)
+        _ = window
+    }
+
+    func testAStreamedResultInFlightDoesNotRestartAFinishedRevealUntilTheNextStreamedUpdate() async {
+        let id = "late-streamed-worker-test"
+        GlimmerRevealStore.shared.clear(id)
+        let (view, clock, window) = streamingView()
+        view.update(markdown: "The first sentence of this answer arrives right now.", isStreaming: true, revealID: id)
+        await view.pendingDocument?.value
+        clock.advance(to: 0.3)
+        view.update(markdown: longAnswer, isStreaming: true, revealID: id)
+        view.finishReveal()
+        await view.pendingDocument?.value
+        XCTAssertNil(view.engine, "a result requested before finishReveal starts no reveal")
+        XCTAssertEqual(view.plainText(), longAnswer)
+        XCTAssertEqual(
+            GlimmerRevealStore.shared.revealedLength(for: id, text: view.textView.textStorage.string as NSString),
+            view.textView.textStorage.length, "the text that landed counts as revealed"
+        )
+
+        view.update(markdown: longAnswer + " More text arrives after that.", isStreaming: true, revealID: id)
+        await view.pendingDocument?.value
+        XCTAssertNotNil(view.engine, "the next streamed update reveals again")
+        _ = window
+    }
+
+    func testFinishedTextRevealsWhenAsked() throws {
+        let id = "finished-text-test"
+        GlimmerRevealStore.shared.clear(id)
+        let (view, clock, window) = streamingView()
+        view.update(markdown: longAnswer, isStreaming: false, revealID: id, revealsFinishedText: true)
+        XCTAssertTrue(view.isLayoutSettled, "composed synchronously")
+        XCTAssertEqual(view.plainText(), longAnswer)
+        let engine = try XCTUnwrap(view.engine)
+        XCTAssertLessThan(engine.revealedLength, view.textView.textStorage.length)
+        XCTAssertNotNil(view.textView.layer.mask)
+        XCTAssertLessThan(view.intrinsicContentSize.height, fullHeight(view))
+        let options = GlimmerRevealOptions()
+        clock.advance(to: options.drainDuration + options.fadeDuration + 0.1)
+        XCTAssertNil(view.engine, "drains within drainDuration")
+        XCTAssertNil(view.textView.layer.mask)
+
+        let (second, _, secondWindow) = streamingView()
+        second.update(markdown: longAnswer, isStreaming: false, revealID: id, revealsFinishedText: true)
+        XCTAssertNil(second.engine, "stored progress covers the whole text: nothing reveals")
+        _ = window
+        _ = secondWindow
+    }
+
+    func testFinishedTextResumesStoredProgress() async throws {
+        let id = "finished-text-resume-test"
+        GlimmerRevealStore.shared.clear(id)
+        let (first, firstClock, firstWindow) = streamingView()
+        first.update(markdown: longAnswer, isStreaming: true, revealID: id)
+        await first.pendingDocument?.value
+        firstClock.advance(to: 0.3)
+        let stored = try XCTUnwrap(
+            GlimmerRevealStore.shared.revealedLength(for: id, text: first.textView.textStorage.string as NSString)
+        )
+        XCTAssertGreaterThan(stored, 0)
+        XCTAssertLessThan(stored, first.textView.textStorage.length)
+
+        let (second, _, secondWindow) = streamingView()
+        second.update(markdown: longAnswer, isStreaming: false, revealID: id, revealsFinishedText: true)
+        let engine = try XCTUnwrap(second.engine)
+        // The next phrase starts at once, where the stored progress ended.
+        XCTAssertEqual(engine.settledLength, stored, "what was revealed shows without fading in again")
+        XCTAssertEqual(engine.phrases.first?.range.location, stored)
+        _ = firstWindow
+        _ = secondWindow
+    }
+
+    func testFinishedTextWithoutTheFlagShowsAtOnce() {
+        let id = "finished-text-no-flag-test"
+        GlimmerRevealStore.shared.clear(id)
+        let (view, _, window) = streamingView()
+        view.update(markdown: longAnswer, isStreaming: false, revealID: id, revealsFinishedText: false)
+        XCTAssertNil(view.engine)
+        view.update(markdown: answer, isStreaming: false, revealID: id)
+        XCTAssertNil(view.engine)
+        _ = window
+    }
+
+    func testFinishedTextWithoutARevealIDShowsAtOnce() {
+        let (view, _, window) = streamingView()
+        view.update(markdown: longAnswer, isStreaming: false, revealID: nil, revealsFinishedText: true)
+        XCTAssertNil(view.engine)
+        _ = window
+    }
+
+    func testFinishedTextDoesNotRevealWithRevealNone() {
+        let id = "finished-text-none-test"
+        GlimmerRevealStore.shared.clear(id)
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil, reveal: .none))
+        let window = hostInWindow(view, width: 320, height: 800)
+        view.update(markdown: longAnswer, isStreaming: false, revealID: id, revealsFinishedText: true)
+        XCTAssertNil(view.engine)
+        XCTAssertNil(view.textView.layer.mask)
+        _ = window
+    }
+
+    func testIsRevealingFollowsTheEngine() async {
+        let id = "is-revealing-test"
+        GlimmerRevealStore.shared.clear(id)
+        let (view, _, window) = streamingView()
+        XCTAssertFalse(view.isRevealing)
+        view.update(markdown: longAnswer, isStreaming: true, revealID: id)
+        await view.pendingDocument?.value
+        XCTAssertTrue(view.isRevealing)
+        view.finishReveal()
+        XCTAssertFalse(view.isRevealing)
+        _ = window
+    }
 }

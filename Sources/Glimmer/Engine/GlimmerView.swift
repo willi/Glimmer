@@ -39,6 +39,12 @@ public final class GlimmerView: UIView {
             if isRevealing != (oldValue != nil) { accessibilityState.withLock { $0.isRevealing = isRevealing } }
         }
     }
+    /// Whether a reveal is running: the text is partly shown, and its height ends at the last revealed line. A host
+    /// uses it to tell a revealing answer from one shown in full.
+    public var isRevealing: Bool { engine != nil }
+    /// Set by `finishReveal()`: no reveal starts until a streamed update or a new `revealID`, so a worker result
+    /// requested before the finish still shows everything.
+    private var revealFinished = false
     /// The worker update in flight, if any. Tests await it.
     private(set) var pendingDocument: Task<Void, Never>?
     /// Whether the layout is final for the latest `update`. It is `false` while an update waits for or runs on the
@@ -100,8 +106,22 @@ public final class GlimmerView: UIView {
     /// finishes — new text is revealed per `configuration.reveal`. Pass the same `revealID` for the same message so a
     /// re-created view resumes instead of replaying.
     public func update(markdown: String, isStreaming: Bool, revealID: String? = nil) {
+        update(markdown: markdown, isStreaming: isStreaming, revealID: revealID, revealsFinishedText: false)
+    }
+
+    /// Shows `markdown` as `update(markdown:isStreaming:revealID:)` does. With `isStreaming` false and
+    /// `revealsFinishedText` true, a finished text that composes synchronously (so the host can size it at once) is
+    /// then revealed from the progress stored for `revealID`, or from the start, within `drainDuration`: an answer
+    /// whose stream ended before this view showed it, or one that arrived complete, still reveals. Nothing reveals
+    /// when the stored progress covers the whole text, when `revealID` is nil, or when the reveal is off (`.none` or
+    /// Reduce Motion).
+    public func update(markdown: String, isStreaming: Bool, revealID: String?, revealsFinishedText: Bool) {
         guard markdown != self.markdown || isStreaming != self.isStreaming || revealID != self.revealID else { return }
-        if revealID != self.revealID { endReveal() }
+        if revealID != self.revealID {
+            endReveal()
+            revealFinished = false
+        }
+        if isStreaming { revealFinished = false }
         self.markdown = markdown
         self.isStreaming = isStreaming
         self.revealID = revealID
@@ -112,7 +132,7 @@ public final class GlimmerView: UIView {
         }
         if !isStreaming, engine == nil, pendingDocument == nil {
             // A settled answer: compose now, so the host can size it in this layout pass.
-            composeSynchronously()
+            composeSynchronously(revealingFinishedText: revealsFinishedText)
             return
         }
         requestedUpdate += 1
@@ -384,6 +404,27 @@ public final class GlimmerView: UIView {
 
     // MARK: - Reveal
 
+    /// Ends a running reveal now: all the text shows, the whole answer counts as revealed for `revealID` (a view
+    /// re-created for it resumes complete), and the host hears the new height. For an older answer that should stop
+    /// animating once a newer one starts. No reveal starts again until a streamed update or a new `revealID`, so a
+    /// result still being composed shows in full when it lands.
+    public func finishReveal() {
+        revealFinished = true
+        recordFullyRevealed()
+        guard engine != nil else { return }
+        endReveal()
+        reportHeightIfChanged()
+    }
+
+    /// Records the whole shown text as revealed for `revealID`.
+    private func recordFullyRevealed() {
+        guard let revealID else { return }
+        let text = textView.textStorage
+        GlimmerRevealStore.shared.record(
+            text.length, text: text.string as NSString, version: textView.textVersion, owner: textView.serial, for: revealID
+        )
+    }
+
     /// Starts due phrases, settles finished fades, redraws the mask and schedules the next wake-up.
     func advanceReveal() {
         guard var current = engine else { return }
@@ -416,12 +457,16 @@ public final class GlimmerView: UIView {
         return options
     }
 
-    private func startRevealIfNeeded(isStreaming: Bool) {
-        guard engine == nil, isStreaming, let options = revealOptions else { return }
+    /// Starts a reveal for streamed text or, with `finishedText`, for a finished text that has a `revealID` and more
+    /// to show than its stored progress.
+    private func startRevealIfNeeded(isStreaming: Bool, finishedText: Bool = false) {
+        guard engine == nil, !revealFinished, isStreaming || finishedText, let options = revealOptions else { return }
+        let length = textView.textStorage.length
         let resumed = revealID.flatMap {
             GlimmerRevealStore.shared.revealedLength(for: $0, text: textView.textStorage.string as NSString)
         } ?? 0
-        engine = GlimmerRevealEngine(options: options, alreadyRevealed: min(resumed, textView.textStorage.length))
+        if !isStreaming, revealID == nil || resumed >= length { return }
+        engine = GlimmerRevealEngine(options: options, alreadyRevealed: min(resumed, length))
         revealMask.invalidateGeometry()
         revealedHeight = nil
         textView.layer.mask = revealMask.layer
@@ -490,8 +535,9 @@ public final class GlimmerView: UIView {
     }
 
     /// Composes the whole current markdown on the main thread and restarts the worker from that document. A settled
-    /// answer shown before (same source, theme and extensions) comes from `GlimmerDocumentCache` instead.
-    private func composeSynchronously() {
+    /// answer shown before (same source, theme and extensions) comes from `GlimmerDocumentCache` instead. With
+    /// `revealingFinishedText`, a finished text then reveals (see `update(markdown:isStreaming:revealID:revealsFinishedText:)`).
+    private func composeSynchronously(revealingFinishedText: Bool = false) {
         let theme = configuration.theme.scaled(for: traitCollection)
         let source = preprocessed(markdown)
         let key = GlimmerDocumentCache.Key(
@@ -513,7 +559,8 @@ public final class GlimmerView: UIView {
             appliedUpdate = requestedUpdate
             textView.renderScreenFirst()
             textView.replaceText(with: cached)
-            apply(GlimmerDocumentResult(edit: nil, embedUnits: [:], isStreaming: false), replacedText: true)
+            apply(GlimmerDocumentResult(edit: nil, embedUnits: [:], isStreaming: false), replacedText: true,
+                  revealingFinishedText: revealingFinishedText)
             return
         }
         let document = makeDocument()
@@ -525,7 +572,8 @@ public final class GlimmerView: UIView {
         appliedUpdate = requestedUpdate
         textView.renderScreenFirst()
         textView.replaceText(with: document.text)
-        apply(GlimmerDocumentResult(edit: nil, embedUnits: document.embedUnits, isStreaming: isStreaming), replacedText: true)
+        apply(GlimmerDocumentResult(edit: nil, embedUnits: document.embedUnits, isStreaming: isStreaming), replacedText: true,
+              revealingFinishedText: revealingFinishedText)
     }
 
     /// Applies worker results in request order. When one lands, only the latest request is computed next.
@@ -557,7 +605,8 @@ public final class GlimmerView: UIView {
     }
 
     /// Everything after the document changed: embed updates, the text edit, fitting, the reveal and the height.
-    private func apply(_ result: GlimmerDocumentResult, replacedText: Bool) {
+    /// `revealingFinishedText` starts a reveal of settled text, reporting only the revealed height.
+    private func apply(_ result: GlimmerDocumentResult, replacedText: Bool, revealingFinishedText: Bool = false) {
         let started = ContinuousClock.now
         embedUnits = result.embedUnits
         if let edit = result.edit {
@@ -579,7 +628,9 @@ public final class GlimmerView: UIView {
             revealMask.invalidateGeometry()
         }
         if replacedText || result.edit != nil { fitTextViewToContent() }
-        startRevealIfNeeded(isStreaming: result.isStreaming)
+        startRevealIfNeeded(isStreaming: result.isStreaming, finishedText: revealingFinishedText)
+        // Text that lands after `finishReveal()` shows in full, so it counts as revealed too.
+        if revealFinished { recordFullyRevealed() }
         engine?.textChanged(textView.textStorage.string as NSString, isStreaming: result.isStreaming,
                             now: clock.now, embedUnits: embedUnits)
         if engine != nil {
