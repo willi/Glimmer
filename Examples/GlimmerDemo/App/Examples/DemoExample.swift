@@ -8,6 +8,7 @@ enum DemoExample: String, CaseIterable, Identifiable {
     case edgeCases = "edge-cases"
     case inlineImages = "inline-images"
     case tappableImages = "tappable-images"
+    case tappableChips = "tappable-chips"
     case githubEmojis = "github-emojis"
     case livePreview = "live-preview"
     case streamingReveal = "streaming-reveal"
@@ -25,6 +26,7 @@ enum DemoExample: String, CaseIterable, Identifiable {
         case .edgeCases: "Edge Cases"
         case .inlineImages: "Inline Images"
         case .tappableImages: "Tappable Images"
+        case .tappableChips: "Tappable Chips"
         case .githubEmojis: "GitHub Emojis"
         case .livePreview: "Live Preview"
         case .streamingReveal: "Streaming Reveal"
@@ -44,7 +46,7 @@ enum DemoExample: String, CaseIterable, Identifiable {
     var section: Section {
         switch self {
         case .basicFeatures, .advanced: .core
-        case .gfm, .edgeCases, .inlineImages, .tappableImages, .githubEmojis, .livePreview, .streamingReveal: .advanced
+        case .gfm, .edgeCases, .inlineImages, .tappableImages, .tappableChips, .githubEmojis, .livePreview, .streamingReveal: .advanced
         case .performance: .performance
         case .readme, .githubFeatures: .quickExamples
         }
@@ -58,6 +60,7 @@ enum DemoExample: String, CaseIterable, Identifiable {
         case .edgeCases: EdgeCasesDemo()
         case .inlineImages: InlineImageDemo()
         case .tappableImages: TappableImageExample()
+        case .tappableChips: TappableChipExample()
         case .githubEmojis: GitHubEmojiDemo()
         case .livePreview: LivePreviewDemoScreen()
         case .streamingReveal: StreamingRevealDemo()

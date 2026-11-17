@@ -11,6 +11,7 @@ final class ExamplesUITests: XCTestCase {
         ("edge-cases", "Edge Cases", 10),
         ("inline-images", "Inline Images", 1),
         ("tappable-images", "Tappable Images", 1),
+        ("tappable-chips", "Tappable Chips", 1),
         ("github-emojis", "GitHub Emojis", 1),
         ("live-preview", "Live Preview", 1),
         ("streaming-reveal", "Streaming Reveal", 1),
@@ -66,22 +67,21 @@ final class ExamplesUITests: XCTestCase {
         app.buttons["Basic"].tap()
     }
 
-    /// A tappable chip is one VoiceOver link (not also a separate element with the same label), and a real tap reaches
-    /// the host's `onTokenTap`.
+    /// A tappable `.chip` token is one VoiceOver link (no second element reading the same label, whatever its type), and
+    /// a real tap on its view reaches the host's `onTokenTap`.
     @MainActor
     func testTappableChipIsOneLinkAndReportsItsTap() {
-        let app = launch("basic-features", ["--section=1"])
-        XCTAssertTrue(app.navigationBars["Basic Features"].waitForExistence(timeout: 15))
-        let chip = app.links["@tim"].firstMatch
+        let app = launch("tappable-chips")
+        XCTAssertTrue(app.navigationBars["Tappable Chips"].waitForExistence(timeout: 15))
+        let chip = app.links["Source 1"].firstMatch
         XCTAssertTrue(chip.waitForExistence(timeout: 10), "the chip is exposed as a link")
-        let exposed = app.descendants(matching: .any).matching(NSPredicate(
-            format: "label == '@tim' AND elementType != %d", XCUIElement.ElementType.textView.rawValue))
-        XCTAssertEqual(exposed.count, 1, "the chip is announced once")
+        let exposed = app.descendants(matching: .any).matching(NSPredicate(format: "label == '[1]' OR label == 'Source 1'"))
+        XCTAssertEqual(exposed.count, 1, "the chip is announced once, across all element types")
         XCTAssertEqual(exposed.firstMatch.elementType, .link)
         chip.tap()
         let banner = app.staticTexts["demo.lastTap"]
         XCTAssertTrue(banner.waitForExistence(timeout: 5), "a real tap reaches onTokenTap")
-        XCTAssertEqual(banner.label, "Mention @tim")
+        XCTAssertEqual(banner.label, "Citation 1")
     }
 
     /// Linked table cells retain their native tap target and accessible link after wrapping or changing appearance.
