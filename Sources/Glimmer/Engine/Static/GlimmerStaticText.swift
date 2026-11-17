@@ -15,8 +15,9 @@ import SwiftUI
 /// Links are tappable: they go to `onLinkTap`, or without one to the environment's `openURL`. The configuration's
 /// `linkPolicy` decides which links are links, as in `GlimmerView`. Modifiers that apply to `Text` through the
 /// environment, such as `.lineLimit(_:)`, apply to each block's `Text`, so a one-paragraph document truncates as a
-/// `Text` does. VoiceOver reads a list item's marker with its first block, as `GlimmerView` reads the line, and a
-/// heading as a heading of its level.
+/// `Text` does. A block whose role has a line spacing in the theme (`lineSpacing`, `headingLineSpacing`,
+/// `codeLineSpacing`) uses it in place of the environment's `lineSpacing`. VoiceOver reads a list item's marker with
+/// its first block, as `GlimmerView` reads the line, and a heading as a heading of its level.
 ///
 /// Every run of text carries the theme's font and colour, so `.font(_:)` and `.foregroundStyle(_:)` on this view
 /// change nothing: set them in the configuration's theme. A document of paragraphs, headings and tables is as wide as

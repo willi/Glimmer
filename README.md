@@ -141,7 +141,9 @@ beside a bar, a code block is its code on the code block background, a table is 
 cells, and a thematic break is a rule. Images are left out, as in `attributedString`. Links are tappable: the closure
 gets the URL, and without one the environment's `openURL` does (a handler you installed higher up, or the system).
 `.lineLimit` applies to each block's `Text`. The theme's `lineHeightMultiple` isn't applied, since `Text` has no line
-height multiple: add `.lineSpacing(_:)` for more space between lines. Every run carries the theme's font and colour, so
+height multiple, but its line spacing fields are: a paragraph, list item or quote (inline code included) takes
+`lineSpacing`, a heading `headingLineSpacing` and a code block `codeLineSpacing`, and `Text` puts it only between
+lines. A role whose field is `nil` keeps the environment's spacing, so `.lineSpacing(_:)` on the view spaces it. Every run carries the theme's font and colour, so
 `.font(_:)` and `.foregroundStyle(_:)` on the view change nothing: set them in the theme. Paragraphs, headings and
 tables are as wide as their text; a document with a list, quote, code block or rule fills the width it's offered.
 
@@ -159,8 +161,9 @@ heading that follows an empty quote at the start differs.
 ```swift
 var configuration = GlimmerConfiguration()
 configuration.theme.linkColor = .systemPurple
-configuration.theme.headingLineHeightMultiple = 1.1
-configuration.theme.codeLineHeightMultiple = 1.3
+configuration.theme.lineSpacing = 1.4 * 17 - UIFont.systemFont(ofSize: 17).lineHeight
+configuration.theme.headingLineSpacing = 2
+configuration.theme.codeLineSpacing = 2
 configuration.theme.looseListSpacing = 8
 configuration.reveal = .smooth(GlimmerRevealOptions())
 configuration.dataDetectors = [.phoneNumber]
@@ -177,10 +180,14 @@ let view = GlimmerView(configuration: configuration)
   columns and wrapping cell text, and scroll sideways only when every column is at this width and still doesn't fit.
   While an answer streams, a table's columns take their content's width instead (scrolling sideways if that is too
   wide), and the table fits the width once the reveal ends.
-  `headingLineHeightMultiple` and `codeLineHeightMultiple` give headings and code their own line height, and
-  `looseListSpacing` the space after an item in a loose list; each is `nil` by default and then follows
-  `lineHeightMultiple` or `paragraphSpacing`. A chip or tappable text with a URL takes `linkColor` in
-  `attributedString` and `GlimmerStaticText`.
+  `lineSpacing`, `headingLineSpacing` and `codeLineSpacing` space lines additively, by role: `lineSpacing` body text
+  (paragraphs, list items, quotes and footnotes, with inline code following the body), `headingLineSpacing` headings
+  and `codeLineSpacing` code blocks. Each is `nil` by default, and the role then keeps `lineHeightMultiple`. A role
+  with one set has each font's own line height plus the spacing between its lines, and nothing above its first line
+  or below its last, so the gaps between blocks stay as `paragraphSpacing` and `blockSpacing` set them. Tables keep
+  their own layout. All three scale with Dynamic Type. `looseListSpacing` is the space after an item in a loose list,
+  and between the paragraphs inside one loose item; `nil` uses `paragraphSpacing`. A chip or tappable text with a URL
+  takes `linkColor` in `attributedString` and `GlimmerStaticText`.
 - **`extensions`**: custom syntax. See [Extensions](#extensions).
 - **`highlighter`** (`GlimmerHighlighter`): syntax highlighting for code blocks. The default,
   `GlimmerBasicHighlighter`, covers keywords, strings, comments and numbers in common languages.

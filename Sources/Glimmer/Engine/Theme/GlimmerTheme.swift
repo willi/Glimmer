@@ -32,11 +32,17 @@ public struct GlimmerTheme: Sendable {
     public var syntaxCommentColor: UIColor
     public var syntaxNumberColor: UIColor
 
+    /// The line height of text, as a multiple of each font's own. A role whose line spacing is set below uses 1
+    /// instead.
     public var lineHeightMultiple: CGFloat
-    /// The line height multiple of headings. `nil` uses `lineHeightMultiple`.
-    public var headingLineHeightMultiple: CGFloat?
-    /// The line height multiple of code blocks. `nil` uses `lineHeightMultiple`.
-    public var codeLineHeightMultiple: CGFloat?
+    /// Space between the lines of body text: paragraphs, list items, quotes and footnotes, inline code included.
+    /// `nil` spaces them with `lineHeightMultiple`. When set, those lines are each font's own line height apart plus
+    /// this, and the space between blocks stays as `paragraphSpacing` and `blockSpacing` set it. Scales with Dynamic Type.
+    public var lineSpacing: CGFloat?
+    /// Space between the lines of a heading, as `lineSpacing` is for body text. `nil` uses `lineHeightMultiple`.
+    public var headingLineSpacing: CGFloat?
+    /// Space between the lines of a code block, as `lineSpacing` is for body text. `nil` uses `lineHeightMultiple`.
+    public var codeLineSpacing: CGFloat?
     /// Space after a paragraph.
     public var paragraphSpacing: CGFloat
     /// Space after an item in a tight list.
@@ -79,6 +85,9 @@ public struct GlimmerTheme: Sendable {
         copy.paragraphSpacing = scale(paragraphSpacing)
         copy.tightListSpacing = scale(tightListSpacing)
         copy.looseListSpacing = looseListSpacing.map(scale)
+        copy.lineSpacing = lineSpacing.map(scale)
+        copy.headingLineSpacing = headingLineSpacing.map(scale)
+        copy.codeLineSpacing = codeLineSpacing.map(scale)
         copy.blockSpacing = scale(blockSpacing)
         copy.listIndent = scale(listIndent)
         copy.quoteIndent = scale(quoteIndent)

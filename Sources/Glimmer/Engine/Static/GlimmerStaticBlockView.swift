@@ -28,10 +28,12 @@ struct GlimmerStaticBlockView: View {
         if let headingLevel {
             let level: AccessibilityHeadingLevel = Self.accessibilityHeadingLevel(headingLevel)
             Text(text)
+                .glimmerLineSpacing(theme.headingLineSpacing)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(level)
         } else {
             Text(text)
+                .glimmerLineSpacing(theme.lineSpacing)
         }
     }
 

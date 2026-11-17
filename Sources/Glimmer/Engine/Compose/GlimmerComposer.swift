@@ -289,7 +289,7 @@ struct GlimmerComposer {
         let range = NSRange(location: start, length: output.length - start)
         let style = paragraphStyle(context: context, marker: marker)
         style.paragraphSpacingBefore = spacingBefore
-        if headingLevel != nil { style.lineHeightMultiple = theme.headingLineHeightMultiple ?? theme.lineHeightMultiple }
+        applyLineSpacing(headingLevel == nil ? theme.lineSpacing : theme.headingLineSpacing, to: style)
         output.addAttribute(.paragraphStyle, value: style, range: range)
         if context.quoteDepth > 0 { output.addAttribute(.glimmerQuoteDepth, value: context.quoteDepth, range: range) }
         if let headingLevel { output.addAttribute(.accessibilityTextHeadingLevel, value: headingLevel, range: range) }
@@ -350,6 +350,19 @@ struct GlimmerComposer {
         }
         style.paragraphSpacing = context.paragraphSpacing ?? theme.paragraphSpacing
         return style
+    }
+
+    /// A role's additive line spacing, or nothing for `nil`, which keeps `lineHeightMultiple`.
+    ///
+    /// TextKit 2 puts `lineSpacing` above each of the paragraph's lines, its first line too unless that starts the
+    /// text, and none below its last line. Taking the same amount off the space above the paragraph leaves it only
+    /// between the paragraph's own lines, so the gaps between blocks (paragraph spacing, a heading's collapsed space
+    /// above) stay as they are. At the start of the text TextKit adds none, and ignores the negative space above.
+    private func applyLineSpacing(_ spacing: CGFloat?, to style: NSMutableParagraphStyle) {
+        guard let spacing else { return }
+        style.lineHeightMultiple = 1
+        style.lineSpacing = spacing
+        style.paragraphSpacingBefore -= spacing
     }
 
     /// Marks the paragraph that closes a quote with how many enclosing quote levels continue past it, so the
