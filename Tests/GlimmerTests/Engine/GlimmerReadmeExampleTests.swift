@@ -84,6 +84,9 @@ final class GlimmerReadmeExampleTests: XCTestCase {
     func testConfiguration() {
         var configuration = GlimmerConfiguration()
         configuration.theme.linkColor = .systemPurple
+        configuration.theme.headingLineHeightMultiple = 1.1
+        configuration.theme.codeLineHeightMultiple = 1.3
+        configuration.theme.looseListSpacing = 8
         configuration.reveal = .smooth(GlimmerRevealOptions())
         configuration.dataDetectors = [.phoneNumber]
         configuration.allowsFind = true

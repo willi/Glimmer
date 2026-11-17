@@ -20,7 +20,7 @@ Add Glimmer with Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/willi/Glimmer.git", from: "2.3.0"),
+    .package(url: "https://github.com/willi/Glimmer.git", from: "2.4.0"),
 ]
 ```
 
@@ -159,6 +159,9 @@ heading that follows an empty quote at the start differs.
 ```swift
 var configuration = GlimmerConfiguration()
 configuration.theme.linkColor = .systemPurple
+configuration.theme.headingLineHeightMultiple = 1.1
+configuration.theme.codeLineHeightMultiple = 1.3
+configuration.theme.looseListSpacing = 8
 configuration.reveal = .smooth(GlimmerRevealOptions())
 configuration.dataDetectors = [.phoneNumber]
 configuration.allowsFind = true
@@ -321,6 +324,9 @@ The policy receives a `GlimmerLinkCandidate`: the link's `destination` as the pa
 nothing to tap. Bold or italic text inside the link stays bold or italic. A refused link copies as its text alone, and
 that includes `markdownSource()`, so its URL is never handed out.
 
+Extension tokens are still scanned inside a refused link's text, and an image inside a refused link is still an image:
+it takes `onImageTap` and your image policy.
+
 The policy decides on the links the markdown parser finds, so it sees exactly what would otherwise be tapped:
 
 - **Every kind of link is asked about**: inline and reference links (`[text](url)`), autolinks (`<url>`) and bare
@@ -383,8 +389,8 @@ keeps its own selection inside. While an answer reveals, the selection stops at 
 
 Copy writes plain text and markdown (`net.daringfireball.markdown`), so a paste into a markdown-aware app keeps
 lists, code, emphasis and links. `markdownSource(for:)` gives the markdown for any range, or, with no range, the whole
-answer as given; `plainText(for:)` gives the plain text copy writes. With an [image policy](#image-policy) set,
-`markdownSource()` gives the markdown of the shown text instead, so the URL of a refused image is never handed out.
+answer as given; `plainText(for:)` gives the plain text copy writes. With an [image policy](#image-policy) or a [link policy](#link-policy) set,
+`markdownSource()` gives the markdown of the shown text instead, so the URL of a refused image or link is never handed out.
 Hosts can add their own edit-menu and link-menu items:
 
 ```swift
