@@ -227,7 +227,8 @@ final class GlimmerDocumentCacheTests: XCTestCase {
         NotificationCenter.default.post(name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
         let highlighter = try XCTUnwrap(GlimmerCacheIdentity(highlighter: GlimmerBasicHighlighter()))
         let key = GlimmerDocumentCache.Key(source: answer, theme: view.configuration.theme.scaled(for: view.traitCollection),
-                                           extensions: [], highlighter: highlighter, imageLoader: nil)
+                                           extensions: [], highlighter: highlighter, imageLoader: nil,
+                                           imagePolicy: nil, linkPolicy: nil)
         XCTAssertNil(GlimmerDocumentCache.shared.text(for: key))
         _ = window
     }

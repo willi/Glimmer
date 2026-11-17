@@ -47,7 +47,8 @@ public struct GlimmerTheme: Sendable {
     public var paragraphSpacing: CGFloat
     /// Space after an item in a tight list.
     public var tightListSpacing: CGFloat
-    /// Space after an item in a loose list, one whose items are separated by blank lines. `nil` uses `paragraphSpacing`.
+    /// Space after an item in a loose list, one whose items are separated by blank lines, and between the paragraphs
+    /// inside one of its items. `nil` uses `paragraphSpacing`.
     public var looseListSpacing: CGFloat?
     /// Space around headings and embedded blocks.
     public var blockSpacing: CGFloat

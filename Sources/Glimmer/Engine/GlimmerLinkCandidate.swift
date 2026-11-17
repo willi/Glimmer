@@ -6,7 +6,7 @@ public struct GlimmerLinkCandidate: Sendable, Hashable {
     /// full URL: `www.example.com` links to `http://www.example.com`.
     public let destination: String
     /// `destination` as a URL, or `nil` when it does not parse. A link whose destination does not parse is shown as
-    /// text whatever the policy answers.
+    /// text, and the policy is not asked about it.
     public let url: URL?
     /// The title, when the markdown gives one: `[text](url "title")`.
     public let title: String?
