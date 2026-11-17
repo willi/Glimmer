@@ -53,7 +53,8 @@ view.update(markdown: received, isStreaming: false, revealID: messageID)
 ```
 
 While an answer reveals, the view's height ends at the last revealed line and never shrinks. `onHeightChange` fires
-whenever the height may have changed.
+whenever the height may have changed, even once per streamed chunk with the same height: compare against the last
+height before relaying out.
 
 A reveal can be controlled by the host. `finishReveal()` ends a running reveal now, for an older answer that should stop
 animating once a newer one starts; the whole answer then counts as revealed for its `revealID`. `isRevealing` says
@@ -102,14 +103,16 @@ For a short summary in a `Text`, where a text view per row costs too much, compo
 ```swift
 struct Summary: View {
     let markdown: String
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        Text(GlimmerView.attributedString(for: markdown))
+        Text(GlimmerView.attributedString(for: markdown, dynamicTypeSize: dynamicTypeSize))
     }
 }
 ```
 
-The result is static. Images are left out with the space around them, a code block becomes its code in the theme's code
+The result is static, with its fonts at one fixed size: read `dynamicTypeSize` as above so the string is composed again
+when the text size changes. (The `traitCollection` overload is for UIKit hosts.) Images are left out with the space around them, a code block becomes its code in the theme's code
 font, a table becomes one line per row with tabs between cells, and a thematic break is dropped. An extension's chip or
 token becomes its `displayText`, linked to the token's `url` when it has one. Pass a `GlimmerConfiguration` for the theme
 and extensions.
@@ -146,13 +149,14 @@ let view = GlimmerView(configuration: configuration)
 - **`reveal`**: `.smooth(GlimmerRevealOptions())`, with fade duration, pacing and phrase-length options, or `.none`.
   When Reduce Motion is on, text always appears at once.
 - **`dataDetectors`**: phone numbers, addresses and so on. Off by default. While any are on, the text view styles every
-  link in the theme's `linkColor`, so tappable tokens are drawn in it too instead of `mentionColor`.
+  link in the theme's `linkColor`, so tappable tokens are drawn in it too instead of `mentionColor`. Detected links are
+  coloured but not underlined, even with `underlinesLinks`, because the underline would also be drawn under a tappable chip.
 - **`allowsFind`**: turns on the system Find interaction. Present it with
   `view.findInteraction?.presentFindNavigator(showingReplace: false)`.
 
 ## Image caching
 
-Make an extension, highlighter or image loader `Hashable` to let views with equal configurations share composed answers. Two that compare equal must render equally. A custom loader that is not `Hashable` makes each view compose its settled answers itself.
+Make an extension, highlighter or image loader `Hashable` to let views with equal configurations share composed answers. Two that compare equal must render equally. An `NSObject` subclass is `Hashable` by identity, so it opts in too: its answers are cached per instance, and a re-shown answer comes from the cache even if the output depends on state that changed since. Don't use one whose output depends on mutable state. A custom loader that is not `Hashable` makes each view compose its settled answers itself.
 
 `GlimmerURLSessionImageLoader()` uses `GlimmerImageCache.shared` automatically for inline and standalone images.
 Its defaults are 32 MiB for prepared images, 16 MiB for HTTP responses in memory, and 128 MiB for HTTP responses on
@@ -271,7 +275,7 @@ text uses the theme's `mentionColor`, and `onTokenTap` (on `GlimmerView` and `Gl
 VoiceOver reaches it as a link. An extension can skip link text (`appliesInsideLinks`). It can also hold back a token
 still being typed at the end of a stream (`streamingHoldBack(in:)`), so `:rock` never turns into 🚀 after it was shown.
 
-Make an extension, highlighter or image loader `Hashable` to let views with equal configurations share composed answers. Two that compare equal must render equally. Without it, each view composes a settled answer itself.
+Which configurations share composed answers is described under "Image caching", including how `NSObject` subclasses behave.
 
 Two extensions are built in, and both are opt-in:
 
@@ -322,6 +326,9 @@ or rule fills `maximum`. `height(forWidth:notExceeding:)` returns the full heigh
 the last whole line that fits (0 when not even the first does), for a collapsed answer with a "Show more" button.
 A streamed update composes off the main thread: `isLayoutSettled` is `false` until it lands, and `onHeightChange` then
 fires once with it `true`, even if the height did not change. Calls during the update can arrive with it `false`.
+Compare against the last height before relaying out, so a callback that changed nothing costs nothing.
+`fittingWidth(maximum:)` and `height(forWidth:notExceeding:)` measure the text shown now, which while `isLayoutSettled`
+is `false` is the previous update, so ask again after the settle.
 
 ## Accessibility
 

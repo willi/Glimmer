@@ -156,7 +156,7 @@ final class GlimmerTextViewTests: XCTestCase {
         XCTAssertTrue(textView.linkTextAttributes.isEmpty)
         textView.apply(theme: themed, dataDetectors: [.phoneNumber])
         XCTAssertEqual(textView.linkTextAttributes[.foregroundColor] as? UIColor, themed.linkColor)
-        XCTAssertEqual(textView.linkTextAttributes[.underlineStyle] as? Int, NSUnderlineStyle.single.rawValue)
+        XCTAssertNil(textView.linkTextAttributes[.underlineStyle], "an underline would reach a tappable chip's glyph")
     }
 
     /// `top` and `rects` are both in the view's coordinates, inset included.

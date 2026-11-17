@@ -138,4 +138,14 @@ final class GlimmerAttributedStringTests: XCTestCase {
         let mention = try XCTUnwrap(text.range(of: "@grace"))
         XCTAssertNil(text[mention].link)
     }
+
+    func testALargerDynamicTypeSizeGivesALargerBodyFont() {
+        func bodyFontSize(_ size: DynamicTypeSize) -> CGFloat {
+            let text = GlimmerView.attributedString(for: "Body", dynamicTypeSize: size)
+            return text.runs.first?.uiKit.font?.pointSize ?? 0
+        }
+        let small = bodyFontSize(.xSmall)
+        XCTAssertGreaterThan(small, 0)
+        XCTAssertGreaterThan(bodyFontSize(.accessibility3), small)
+    }
 }

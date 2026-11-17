@@ -59,8 +59,9 @@ final class GlimmerReadmeExampleTests: XCTestCase {
     func testPlainAttributedText() {
         struct Summary: View {
             let markdown: String
+            @Environment(\.dynamicTypeSize) private var dynamicTypeSize
             var body: some View {
-                Text(GlimmerView.attributedString(for: markdown))
+                Text(GlimmerView.attributedString(for: markdown, dynamicTypeSize: dynamicTypeSize))
             }
         }
         _ = UIHostingController(rootView: Summary(markdown: "A **short** summary."))

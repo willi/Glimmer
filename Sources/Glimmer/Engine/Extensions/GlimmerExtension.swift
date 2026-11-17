@@ -16,6 +16,9 @@ public struct GlimmerInlineToken: Equatable, Sendable {
     public var presentation: Presentation
     /// Whether a `.chip` token reports its tap through `GlimmerView.onTokenTap` and VoiceOver reaches it as a link.
     /// `.text(tappable:)` keeps its own flag; this one is ignored for it and for `.image`.
+    ///
+    /// A tappable chip's view takes the tap as a whole, so its subviews get no touches: put controls that must respond
+    /// in a chip that is not tappable.
     public var isTappable: Bool
     /// Where the token leads when it is rendered as plain attributed text
     /// (`GlimmerView.attributedString(for:configuration:traitCollection:)`). `GlimmerView` ignores it; a tap reports the token through `onTokenTap`.

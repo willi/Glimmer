@@ -107,6 +107,29 @@ final class GlimmerViewSizingTests: XCTestCase {
         XCTAssertEqual(settledView("a<br>b<br>c<br>d").height(forWidth: 320, notExceeding: cap), twoLines, accuracy: 0.5)
     }
 
+    func testACapOnALongTextKeepsOnlyTheWholeLinesThatFit() {
+        let lines = (1...400).map { "line \($0)" }.joined(separator: "<br>")
+        let view = settledView(lines)
+        let oneLine = settledView("line").sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)).height
+        let capped = view.height(forWidth: 320, notExceeding: 300)
+        // Whole lines only: the bottom inset plus a multiple of the line height.
+        XCTAssertLessThanOrEqual(capped, 300)
+        XCTAssertGreaterThan(capped, 300 - oneLine - 1)
+        XCTAssertEqual(view.height(forWidth: 320, notExceeding: 300), capped)
+    }
+
+    func testTheMeasurerStopsAtTheLimitAndKeepsEveryLineWithoutOne() {
+        let text = NSAttributedString(string: (1...400).map { "line \($0)" }.joined(separator: "\n"))
+        func measure(limit: CGFloat?) -> GlimmerTextMeasurer {
+            GlimmerTextMeasurer(text: text, width: 320, insets: .zero, lineFragmentPadding: 5, limit: limit)
+        }
+        let all = measure(limit: nil)
+        let stopped = measure(limit: 300)
+        XCTAssertLessThan(stopped.lineBottoms.count, all.lineBottoms.count)
+        XCTAssertEqual(stopped.lineBottoms.filter { $0 <= 300 }, all.lineBottoms.filter { $0 <= 300 })
+        XCTAssertEqual(stopped.lineBottoms.last(where: { $0 <= 300 }), all.lineBottoms.last(where: { $0 <= 300 }))
+    }
+
     func testACapBelowTheFirstLineReturnsZero() {
         XCTAssertEqual(settledView("a<br>b").height(forWidth: 320, notExceeding: 2), 0)
     }

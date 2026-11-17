@@ -163,6 +163,9 @@ public final class GlimmerView: UIView {
     /// The width of the longest laid-out line when the view is at most `maximum` wide, so a host can shrink a bubble to
     /// its text. Includes the text container's insets and padding and never exceeds `maximum`. Text with a code block,
     /// table, image or rule returns `maximum`, because those embeds fill the width.
+    ///
+    /// It measures the text shown now. While `isLayoutSettled` is `false` that is the previous update, so ask again
+    /// after the settle.
     public func fittingWidth(maximum: CGFloat) -> CGFloat {
         guard maximum > 0, textView.textStorage.length > 0 else { return 0 }
         if let cached = fittedWidth, cached.version == textView.textVersion, cached.maximum == maximum { return cached.width }
@@ -200,7 +203,7 @@ public final class GlimmerView: UIView {
         let inset = textView.textContainerInset
         let measurer = GlimmerTextMeasurer(
             text: NSAttributedString(attributedString: textView.textStorage), width: width, insets: inset,
-            lineFragmentPadding: textView.textContainer.lineFragmentPadding
+            lineFragmentPadding: textView.textContainer.lineFragmentPadding, limit: maximum - inset.bottom
         )
         let limit = maximum - inset.bottom
         let capped = measurer.lineBottoms.last(where: { $0 <= limit }).map { min(ceil($0 + inset.bottom), maximum) } ?? 0

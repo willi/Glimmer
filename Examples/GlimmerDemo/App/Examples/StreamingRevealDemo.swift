@@ -199,6 +199,8 @@ private struct UIKitRevealDemoContent: UIViewControllerRepresentable {
 /// Pins a `GlimmerView` to its edges and asks SwiftUI to re-measure when the answer's height changes.
 final class RevealViewController: UIViewController {
     let answerView: GlimmerView
+    /// `onHeightChange` fires once per streamed chunk even when the height is the same, so relay out only on a change.
+    private var lastHeight: CGFloat?
 
     init(configuration: GlimmerConfiguration) {
         answerView = GlimmerView(configuration: configuration)
@@ -216,7 +218,13 @@ final class RevealViewController: UIViewController {
             answerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             answerView.topAnchor.constraint(equalTo: view.topAnchor),
         ])
-        answerView.onHeightChange = { [weak self] in self?.view.invalidateIntrinsicContentSize() }
+        answerView.onHeightChange = { [weak self] in
+            guard let self else { return }
+            let height = answerView.sizeThatFits(CGSize(width: view.bounds.width, height: .greatestFiniteMagnitude)).height
+            guard height != lastHeight else { return }
+            lastHeight = height
+            view.invalidateIntrinsicContentSize()
+        }
     }
 }
 

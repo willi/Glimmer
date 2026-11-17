@@ -162,9 +162,9 @@ final class GlimmerTextView: UITextView {
         forgetDrawnSurfaces()
         fragmentProvider.theme = theme
         dataDetectorTypes = dataDetectors
-        var link: [NSAttributedString.Key: Any] = [.foregroundColor: theme.linkColor]
-        if theme.underlinesLinks { link[.underlineStyle] = NSUnderlineStyle.single.rawValue }
-        linkTextAttributes = dataDetectors.isEmpty ? [:] : link
+        // Colour only: these attributes apply to every `.link` run, and a tappable chip's attachment character carries one,
+        // so an underline here would be drawn under the chip. Detected links are coloured, not underlined.
+        linkTextAttributes = dataDetectors.isEmpty ? [:] : [.foregroundColor: theme.linkColor]
     }
 
     /// Measured by `UITextView`: a full layout at `size.width`, so it is cached per text version and width. Use it only

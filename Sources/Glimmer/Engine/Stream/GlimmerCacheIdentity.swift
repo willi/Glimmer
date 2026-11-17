@@ -73,6 +73,8 @@ struct GlimmerCacheIdentity: Hashable, Sendable {
     }
 
     /// `value` is already `Sendable` (every dependency protocol requires it), so only `Hashable` is checked at run time.
+    /// An `NSObject` subclass is `Hashable` by identity, so it opts in too and is cached per instance: a re-shown answer
+    /// comes from the cache even when the object's output depends on state that has changed.
     private init?(hashable value: any Sendable) {
         guard let hashable = value as? any Hashable else { return nil }
         self.init(.value(SendableHashable(value: AnyHashable(hashable))))
