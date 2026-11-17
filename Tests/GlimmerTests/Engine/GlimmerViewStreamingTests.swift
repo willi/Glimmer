@@ -239,7 +239,7 @@ final class GlimmerViewStreamingTests: XCTestCase {
         let initialHeight = view.intrinsicContentSize.height
         XCTAssertGreaterThan(initialRevealed, 0)
         XCTAssertGreaterThan(initialHeight, 0)
-        XCTAssertEqual(heightChanges, 1)
+        XCTAssertEqual(heightChanges, 2, "the first height, then the settle report")
 
         heightChanges = 0
         host.passes = 0
@@ -254,7 +254,7 @@ final class GlimmerViewStreamingTests: XCTestCase {
         XCTAssertEqual(view.engine?.revealedLength, initialRevealed)
         XCTAssertEqual(view.intrinsicContentSize.height, initialHeight)
         XCTAssertGreaterThan(view.textView.contentHeight, initialHeight * 2)
-        XCTAssertEqual(heightChanges, 0, "hidden lookahead must not fire onHeightChange")
+        XCTAssertEqual(heightChanges, 1, "hidden lookahead reports only that the update settled")
         XCTAssertEqual(host.passes, 0, "hidden lookahead must not invalidate intrinsic content size")
 
         let chunk3 = chunk2 + "\n\nAnother hidden paragraph arrives in the same frame.\n\nAnd a third hidden paragraph below that."
@@ -263,7 +263,7 @@ final class GlimmerViewStreamingTests: XCTestCase {
         host.layoutIfNeeded()
         XCTAssertNotNil(view.revealedHeight)
         XCTAssertEqual(view.intrinsicContentSize.height, initialHeight)
-        XCTAssertEqual(heightChanges, 0)
+        XCTAssertEqual(heightChanges, 2)
         XCTAssertEqual(host.passes, 0)
 
         // Advancing the reveal clock onto the next lines now reports the new height and lays out the host.
@@ -277,6 +277,46 @@ final class GlimmerViewStreamingTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(heightChanges, 1)
         XCTAssertGreaterThanOrEqual(host.passes, 1)
         XCTAssertEqual(view.frame.height, view.intrinsicContentSize.height, accuracy: 0.5)
+        _ = window
+    }
+
+    func testASettledUpdateIsSettledAtOnce() {
+        let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil, reveal: .none))
+        view.update(markdown: "Hello")
+        XCTAssertTrue(view.isLayoutSettled)
+    }
+
+    func testAStreamedUpdateSettlesWhenComposedAndReportsIt() async {
+        let (view, _, window) = streamingView(width: 320)
+        var reports = 0
+        view.onHeightChange = { reports += 1 }
+        view.update(markdown: "Hello", isStreaming: true, revealID: nil)
+        XCTAssertFalse(view.isLayoutSettled)
+        await view.pendingDocument?.value
+        XCTAssertTrue(view.isLayoutSettled)
+        XCTAssertGreaterThan(reports, 0)
+        _ = window
+    }
+
+    func testSettlingReportsEvenWhenTheHeightIsUnchanged() async {
+        let (view, clock, window) = streamingView(width: 320)
+        view.update(markdown: "First phrase here. Second phrase", isStreaming: true, revealID: nil)
+        await view.pendingDocument?.value
+        var time = 0.0
+        while view.intrinsicContentSize.height <= 0, time < 5 {
+            time += 0.05
+            clock.advance(to: time)
+        }
+        XCTAssertGreaterThan(view.intrinsicContentSize.height, 0)
+        let before = view.intrinsicContentSize.height
+        var reports = 0
+        view.onHeightChange = { reports += 1 }
+        view.update(markdown: "First phrase here. Second phrase", isStreaming: false, revealID: nil)
+        XCTAssertFalse(view.isLayoutSettled)
+        await view.pendingDocument?.value
+        XCTAssertTrue(view.isLayoutSettled)
+        XCTAssertEqual(reports, 1)
+        XCTAssertEqual(view.intrinsicContentSize.height, before, accuracy: 0.5)
         _ = window
     }
 }

@@ -41,6 +41,9 @@ public final class GlimmerView: UIView {
     }
     /// The worker update in flight, if any. Tests await it.
     private(set) var pendingDocument: Task<Void, Never>?
+    /// Whether the layout is final for the latest `update`. It is `false` while an update waits for or runs on the
+    /// worker, and `true` otherwise. When it turns `true`, `onHeightChange` is called even if the height is unchanged.
+    public var isLayoutSettled: Bool { pendingDocument == nil }
     /// Main-thread time spent applying the last document change: the spec's "applying one network update" metric.
     private(set) var lastApplyDuration: Duration = .zero
 
@@ -549,6 +552,8 @@ public final class GlimmerView: UIView {
             appliedUpdate = request
         }
         pendingDocument = nil
+        // Tell the host the layout is final, even when the height did not change.
+        if !reportHeightIfChanged() { onHeightChange?() }
     }
 
     /// Everything after the document changed: embed updates, the text edit, fitting, the reveal and the height.
@@ -686,12 +691,15 @@ public final class GlimmerView: UIView {
         if let cacheKey, engine == nil { GlimmerDocumentCache.shared.storeHeight(height, for: cacheKey, width: textView.bounds.width) }
     }
 
-    private func reportHeightIfChanged() {
+    /// Reports a changed height to the host. Returns whether it called `onHeightChange`.
+    @discardableResult
+    private func reportHeightIfChanged() -> Bool {
         let height = height(forWidth: bounds.width)
-        guard abs(height - lastReportedHeight) > 0.01 else { return }
+        guard abs(height - lastReportedHeight) > 0.01 else { return false }
         lastReportedHeight = height
         invalidateIntrinsicContentSize()
         onHeightChange?()
+        return true
     }
 }
 
