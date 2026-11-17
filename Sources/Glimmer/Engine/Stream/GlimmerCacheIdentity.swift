@@ -4,7 +4,7 @@ import Foundation
 /// dependencies have equal identities share composed answers, so equal identities must render equally.
 ///
 /// The stateless built-ins are identified by their type name. Anything else must be `Hashable`, and is identified by
-/// its type and value the way `GlimmerImagePolicyKey` identifies a policy: values of different types never compare
+/// its exact type and value the way `GlimmerImagePolicyKey` identifies a policy: values of different types never compare
 /// equal, even with the same stored properties.
 struct GlimmerCacheIdentity: Hashable, Sendable {
     /// A `Hashable` that came from a `Sendable` dependency. Swift cannot cast to `any Hashable & Sendable` (`Sendable`
@@ -28,7 +28,9 @@ struct GlimmerCacheIdentity: Hashable, Sendable {
         switch (lhs.storage, rhs.storage) {
         case (.builtIn(let left), .builtIn(let right)): left == right
         // `AnyHashable` compares the dynamic types first, then the values with `==`.
-        case (.value(let left), .value(let right)): left.value == right.value
+        case (.value(let left), .value(let right)):
+            // `AnyHashable` alone calls a class and its subclass, or `Int` and `Int8`, equal; the exact type must match.
+            type(of: left.value.base) == type(of: right.value.base) && left.value == right.value
         default: false
         }
     }

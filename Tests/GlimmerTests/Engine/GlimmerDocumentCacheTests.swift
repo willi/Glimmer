@@ -56,6 +56,20 @@ private struct TappableChips: GlimmerExtension, Hashable {
     }
 }
 
+private class BaseHighlighter: GlimmerHighlighter, Hashable, @unchecked Sendable {
+    static func == (lhs: BaseHighlighter, rhs: BaseHighlighter) -> Bool { true }
+    func hash(into hasher: inout Hasher) {}
+    func highlight(_ code: String, language: String?) -> [GlimmerHighlightSpan] {
+        [GlimmerHighlightSpan(range: NSRange(location: 0, length: (code as NSString).length), kind: .keyword)]
+    }
+}
+
+private final class SubHighlighter: BaseHighlighter, @unchecked Sendable {
+    override func highlight(_ code: String, language: String?) -> [GlimmerHighlightSpan] {
+        [GlimmerHighlightSpan(range: NSRange(location: 0, length: (code as NSString).length), kind: .string)]
+    }
+}
+
 private struct HashableLoader: GlimmerImageLoader, Hashable {
     func loadImage(from url: URL) async throws -> UIImage { UIImage() }
 }
@@ -90,6 +104,27 @@ final class GlimmerDocumentCacheTests: XCTestCase {
             (.init(extensions: [Tagged(tag: "a")], imageLoader: nil), .init(extensions: [Tagged(tag: "b")], imageLoader: nil))
         }
         XCTAssertEqual(gained, 0)
+    }
+
+    func testASubclassIsNotTheSameConfigurationAsItsBase() throws {
+        let markdown = "```swift\nvalue\n```"
+        let first = GlimmerView(configuration: .init(imageLoader: nil, highlighter: BaseHighlighter()))
+        first.update(markdown: markdown)
+        let hits = GlimmerDocumentCache.shared.hits
+        let second = GlimmerView(configuration: .init(imageLoader: nil, highlighter: SubHighlighter()))
+        second.update(markdown: markdown)
+        XCTAssertEqual(GlimmerDocumentCache.shared.hits, hits)
+        let attachment = try XCTUnwrap(blockAttachments(in: second.textView.textStorage).first)
+        guard case .codeBlock(_, _, let highlighted) = attachment.embed else { return XCTFail("expected code") }
+        XCTAssertEqual(highlighted?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor,
+                       second.configuration.theme.syntaxStringColor)
+    }
+
+    func testIdentitiesOfABaseAndItsSubclassAreNotEqual() throws {
+        let base = try XCTUnwrap(GlimmerCacheIdentity(highlighter: BaseHighlighter()))
+        let sub = try XCTUnwrap(GlimmerCacheIdentity(highlighter: SubHighlighter()))
+        XCTAssertNotEqual(base, sub)
+        XCTAssertEqual(base, try XCTUnwrap(GlimmerCacheIdentity(highlighter: BaseHighlighter())))
     }
 
     func testANonHashableExtensionIsStillNotCached() {
