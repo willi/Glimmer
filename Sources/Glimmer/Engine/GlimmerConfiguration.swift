@@ -22,6 +22,9 @@ public struct GlimmerConfiguration: Sendable {
     /// Whether scrolling and streaming reuse the text TextKit already drew (iOS 27). On by default; turn it off if
     /// text ever shows stale pixels.
     public var reusesDrawnText: Bool
+    /// Decides which links in the markdown are links. `nil`, the default, makes every link a link. Set one when the
+    /// markdown is written by a language model or by other people: see `GlimmerLinkPolicy`.
+    public var linkPolicy: (any GlimmerLinkPolicy)?
 
     public init(
         theme: GlimmerTheme = .default,
@@ -33,7 +36,8 @@ public struct GlimmerConfiguration: Sendable {
         reveal: GlimmerReveal = .smooth(GlimmerRevealOptions()),
         dataDetectors: UIDataDetectorTypes = [],
         allowsFind: Bool = false,
-        reusesDrawnText: Bool = true
+        reusesDrawnText: Bool = true,
+        linkPolicy: (any GlimmerLinkPolicy)? = nil
     ) {
         self.theme = theme
         self.extensions = extensions
@@ -45,6 +49,7 @@ public struct GlimmerConfiguration: Sendable {
         self.dataDetectors = dataDetectors
         self.allowsFind = allowsFind
         self.reusesDrawnText = reusesDrawnText
+        self.linkPolicy = linkPolicy
     }
 
     public static var `default`: GlimmerConfiguration { GlimmerConfiguration() }

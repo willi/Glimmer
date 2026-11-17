@@ -11,6 +11,8 @@ struct GlimmerComposer {
     /// The host's say over which images load. Nil loads every image.
     var imagePolicy: (any GlimmerImagePolicy)? = nil
     var inlineImageShape: GlimmerInlineImageShape = .circle
+    /// The host's say over which links are links. Nil links every one.
+    var linkPolicy: (any GlimmerLinkPolicy)? = nil
     var extensions: [any GlimmerExtension] = []
     /// Whether the host takes image taps: an inline image's spoken alt text then links to the image for VoiceOver.
     var linksImagesForTaps = false
@@ -90,6 +92,15 @@ struct GlimmerComposer {
         guard let imagePolicy else { return .load }
         guard let url else { return .showAltText }
         return imagePolicy.decision(for: GlimmerImageCandidate(url: url, alt: alt, title: title, origin: origin))
+    }
+
+    /// Where a link goes, or nil to compose it as text: its destination does not parse, or the link policy refuses it.
+    /// With no policy every link that parses is a link, as it was before policies existed.
+    func linkURL(destination: String, title: String?) -> URL? {
+        let url = URL(string: destination)
+        guard let linkPolicy, url != nil else { return url }
+        let candidate = GlimmerLinkCandidate(destination: destination, title: title)
+        return linkPolicy.decision(for: candidate) == .link ? url : nil
     }
 
     /// One top-level block, ending in "\n". `compose(_:)` is these joined with the final "\n" removed, which is

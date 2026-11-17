@@ -5,11 +5,12 @@ import UIKit
 /// that stands alone.
 enum GlimmerPlainText {
     /// The composer for text that stands alone: images are hidden, since nothing here can load them, and the hidden
-    /// ones close the space around them.
+    /// ones close the space around them. The configuration's link policy applies, as it does in a `GlimmerView`.
     static func composer(theme: GlimmerTheme, configuration: GlimmerConfiguration) -> GlimmerComposer {
         GlimmerComposer(
             theme: theme, highlighter: configuration.highlighter, imageLoader: nil,
-            imagePolicy: GlimmerHideImagesPolicy(), extensions: configuration.extensions
+            imagePolicy: GlimmerHideImagesPolicy(), linkPolicy: configuration.linkPolicy,
+            extensions: configuration.extensions
         )
     }
 

@@ -16,11 +16,14 @@ final class GlimmerStaticDocumentCache {
         /// The extensions' and the highlighter's identities, as `GlimmerDocumentCache` keys them; nil when one has
         /// none, and then the document is never shared.
         let dependencies: [GlimmerCacheIdentity]?
+        /// A document links only what its link policy allows, so it is never shown under another.
+        let linkPolicy: GlimmerLinkPolicyKey?
 
         init(markdown: String, configuration: GlimmerConfiguration, dynamicTypeSize: DynamicTypeSize) {
             self.markdown = markdown
             self.theme = configuration.theme
             self.dynamicTypeSize = dynamicTypeSize
+            self.linkPolicy = configuration.linkPolicy.map { GlimmerLinkPolicyKey(policy: $0) }
             let extensions = configuration.extensions.compactMap { GlimmerCacheIdentity(extension: $0) }
             let highlighter = GlimmerCacheIdentity(highlighter: configuration.highlighter)
             if extensions.count == configuration.extensions.count, let highlighter {

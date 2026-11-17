@@ -95,6 +95,22 @@ final class GlimmerReadmeExampleTests: XCTestCase {
         _ = view.markdownSource()
     }
 
+    func testLinkPolicy() {
+        struct AppLinks: GlimmerLinkPolicy {
+            func decision(for link: GlimmerLinkCandidate) -> GlimmerLinkDecision {
+                switch link.url?.scheme {
+                case "https", "mailto": .link
+                default: .text
+                }
+            }
+        }
+
+        let configuration = GlimmerConfiguration(linkPolicy: AppLinks())
+        let text = GlimmerView.attributedString(for: "[Pay](myapp://pay) or [read](https://example.com)",
+                                                configuration: configuration)
+        XCTAssertEqual(text.runs.compactMap(\.link), [URL(string: "https://example.com")].compactMap { $0 })
+    }
+
     func testExtension() {
         struct Citations: GlimmerExtension {
             func scan(_ text: String) -> [GlimmerInlineToken] {

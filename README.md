@@ -116,8 +116,8 @@ struct Summary: View {
 The result is static, with its fonts at one fixed size: read `dynamicTypeSize` as above so the string is composed again
 when the text size changes. (The `traitCollection` overload is for UIKit hosts.) Images are left out with the space around them, a code block becomes its code in the theme's code
 font, a table becomes one line per row with tabs between cells, and a thematic break is dropped. An extension's chip or
-token becomes its `displayText`, linked to the token's `url` when it has one. Pass a `GlimmerConfiguration` for the theme
-and extensions.
+token becomes its `displayText`, linked to the token's `url` when it has one. Pass a `GlimmerConfiguration` for the theme,
+extensions and [link policy](#link-policy).
 
 ## Static text in SwiftUI
 
@@ -145,8 +145,8 @@ height multiple: add `.lineSpacing(_:)` for more space between lines. Every run 
 `.font(_:)` and `.foregroundStyle(_:)` on the view change nothing: set them in the theme. Paragraphs, headings and
 tables are as wide as their text; a document with a list, quote, code block or rule fills the width it's offered.
 
-The view reads `dynamicTypeSize` itself. Documents are built once per markdown, theme, text size, extensions and
-highlighter, and shared between views, so a cell and a sizing view showing the same summary build it once. An
+The view reads `dynamicTypeSize` itself. Documents are built once per markdown, theme, text size, extensions,
+highlighter and link policy, and shared between views, so a cell and a sizing view showing the same summary build it once. An
 extension or highlighter that isn't `Hashable` can't be shared: each view then builds its own, and a change to that
 dependency alone needs a new view identity (`.id(extensionVersion)`). Two edge cases differ from `GlimmerView`: a list
 item that starts with a code block, table or rule shows its marker beside it rather than above it, and the space above a
@@ -185,6 +185,8 @@ let view = GlimmerView(configuration: configuration)
   prepares images at their display size. See [Image caching](#image-caching) for budgets and custom sessions.
 - **`imagePolicy`** (`GlimmerImagePolicy`): decides which images load. `nil`, the default, loads every image. Set one
   when the markdown is written by a language model or by other people. See [Image policy](#image-policy).
+- **`linkPolicy`** (`GlimmerLinkPolicy`): decides which links are links. `nil`, the default, makes every link a link.
+  Set one when the markdown is written by a language model or by other people. See [Link policy](#link-policy).
 - **`inlineImageShape`** (`GlimmerInlineImageShape`): `.circle` by default, cropping the image to fill the circle.
   Use `.roundedRectangle(cornerRadius: 3)` for the previous aspect-fitted appearance, or a radius of `0` for square
   corners. Applies to images inside text, including extension images; standalone images use the theme's styling.
@@ -289,6 +291,42 @@ When writing a policy:
   alone carry no policy. Otherwise its redirects are not checked.
 
 With no policy set, nothing changes.
+
+## Link policy
+
+A link in markdown written by a language model can do more than open a web page: a custom URL scheme can pay, post or
+open another app with one tap (`[Read more](myapp://transfer?to=…)`). A link policy lets the app decide, for each link,
+whether it is a link:
+
+```swift
+struct AppLinks: GlimmerLinkPolicy {
+    func decision(for link: GlimmerLinkCandidate) -> GlimmerLinkDecision {
+        switch link.url?.scheme {
+        case "https", "mailto": .link
+        default: .text
+        }
+    }
+}
+
+let configuration = GlimmerConfiguration(linkPolicy: AppLinks())
+```
+
+The policy receives a `GlimmerLinkCandidate`: the link's `destination` as the parser read it, that destination as a
+`url` (`nil` when it does not parse), and its `title`. It answers `.link`, to show a link as without a policy, or
+`.text`, to show the link's text as ordinary text, styled like the text around it: no link colour, no underline,
+nothing to tap. Bold or italic text inside the link stays bold or italic. A refused link copies as its text alone, and
+that includes `markdownSource()`, so its URL is never handed out.
+
+The policy decides on the links the markdown parser finds, so it sees exactly what would otherwise be tapped:
+
+- **Every kind of link is asked about**: inline and reference links (`[text](url)`), autolinks (`<url>`) and bare
+  URLs (`https://…`, and `www.…`, whose destination is `http://www.…`). Markdown that blurs where a link ends, such
+  as `[y <span title="]">](myapp://pay)`, is decided on the links the parser reads, not on how the text looks.
+- **Not everything that can be tapped is a link.** An extension's tappable tokens go to `onTokenTap`, which the app
+  handles itself, and data detectors (`dataDetectors`) find their own links in the text, refused links included.
+- **A policy is a `Hashable` value**, asked from any thread and more than once for the same link. Views with equal
+  policies share composed answers, so two policies that compare equal must decide equally. It applies to
+  `GlimmerView`, `GlimmerText`, `GlimmerStaticText` and `GlimmerView.attributedString(for:configuration:)`.
 
 ## Extensions
 

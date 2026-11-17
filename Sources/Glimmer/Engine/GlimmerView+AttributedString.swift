@@ -20,7 +20,7 @@ extension GlimmerView {
     ///
     /// - Parameters:
     ///   - markdown: The markdown to compose.
-    ///   - configuration: The theme and extensions to use. Its image loader and policy are ignored.
+    ///   - configuration: The theme, extensions and link policy to use. Its image loader and image policy are ignored.
     ///   - traitCollection: The traits that scale the theme's fonts for Dynamic Type.
     @MainActor
     public static func attributedString(
@@ -40,7 +40,7 @@ extension GlimmerView {
     ///
     /// - Parameters:
     ///   - markdown: The markdown to compose.
-    ///   - configuration: The theme and extensions to use. Its image loader and policy are ignored.
+    ///   - configuration: The theme, extensions and link policy to use. Its image loader and image policy are ignored.
     ///   - dynamicTypeSize: The text size to scale the theme's fonts for.
     @MainActor
     public static func attributedString(

@@ -54,9 +54,10 @@ extension GlimmerComposer {
                 var struck = attributes
                 struck[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
                 if appendRun(children, attributes: struck, reuse: reuse, to: output) { keptAnImageFromShowing = true }
-            case .link(let destination, _, let children):
+            case .link(let destination, let title, let children):
                 var linked = attributes
-                if let url = URL(string: destination) {
+                // A refused link is the text around it: no link colour, no underline, nothing for copy to hand out.
+                if let url = linkURL(destination: destination, title: title) {
                     // The text carries the link style: the text view's link attributes would restyle token links too.
                     linked[.link] = url
                     linked[.foregroundColor] = theme.linkColor
