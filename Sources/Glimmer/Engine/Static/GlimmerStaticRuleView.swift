@@ -5,10 +5,11 @@ struct GlimmerStaticRuleView: View {
     let theme: GlimmerTheme
 
     var body: some View {
-        Rectangle()
+        let margin: CGFloat = theme.blockSpacing / 2
+        return Rectangle()
             .fill(Color(uiColor: theme.tableBorderColor))
             .frame(height: 1)
-            .padding(.vertical, theme.blockSpacing / 2)
+            .padding(.vertical, margin)
             .accessibilityHidden(true)
     }
 }

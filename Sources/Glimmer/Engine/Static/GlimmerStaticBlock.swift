@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// One block of a `GlimmerStaticDocument`, with the space above it.
-struct GlimmerStaticBlock {
+/// One block of a `GlimmerStaticDocument`, with the space above it. Equatable, so SwiftUI can skip a block that didn't
+/// change.
+struct GlimmerStaticBlock: Equatable {
     /// What the block shows. The views switch on this.
-    enum Content {
+    enum Content: Equatable {
         /// A paragraph, a heading (with its level) or an HTML block, as one `Text`.
         case text(AttributedString, headingLevel: Int?)
         /// A code block's code, in the theme's code font.
@@ -14,6 +15,7 @@ struct GlimmerStaticBlock {
         case rule
         /// A block quote's blocks, shown in the secondary text colour beside a bar.
         case quote([GlimmerStaticBlock])
+        /// A list, its items beside their markers.
         case list(GlimmerStaticList)
     }
 

@@ -61,7 +61,10 @@ struct GlimmerStaticDocumentBuilder {
         // A paragraph of hidden images composes to nothing, and the engine leaves it out with its spacing.
         guard !text.characters.isEmpty else { return [] }
         // A heading's space above collapses into the space after the text above it (CSS margin collapsing).
-        let gap = headingLevel == nil ? trailing ?? 0 : trailing.map { max($0, theme.blockSpacing) } ?? 0
+        var gap: CGFloat = trailing ?? 0
+        if headingLevel != nil, let trailing {
+            gap = max(trailing, theme.blockSpacing)
+        }
         trailing = context.paragraphSpacing ?? theme.paragraphSpacing
         return [GlimmerStaticBlock(content: .text(text, headingLevel: headingLevel), spacingAbove: gap)]
     }
@@ -148,8 +151,9 @@ struct GlimmerStaticDocumentBuilder {
         items[0].spacingAbove = 0
         if isTight { trailing = context.paragraphSpacing ?? theme.paragraphSpacing }
         let metrics = composer(for: inner)
-        let widest = markers.map(\.width).max() ?? 0
-        let column = max(theme.listIndent, ceil(max(widest, reservedMarkerWidth) + metrics.markerGap))
+        let widest: CGFloat = markers.map(\.width).max() ?? 0
+        let markerWidth: CGFloat = max(widest, reservedMarkerWidth)
+        let column: CGFloat = max(theme.listIndent, ceil(markerWidth + metrics.markerGap))
         let list = GlimmerStaticList(isOrdered: isOrdered, markerColumnWidth: column, markerGap: metrics.markerGap, items: items)
         return [GlimmerStaticBlock(content: .list(list), spacingAbove: listGap)]
     }
@@ -213,9 +217,16 @@ struct GlimmerStaticDocumentBuilder {
         }
     }
 
+    /// Built as an `AttributedString` directly, with the attributes `GlimmerPlainText.attributedString(from:)` gives
+    /// a run.
     private func marker(_ symbol: String, font: UIFont, color: UIColor) -> Marker {
-        let styled = NSAttributedString(string: symbol, attributes: [.font: font, .foregroundColor: color])
+        var text = AttributedString(symbol)
+        text.uiKit.font = font
+        text.uiKit.foregroundColor = color
+        text.swiftUI.font = Font(font)
+        text.swiftUI.foregroundColor = Color(uiColor: color)
+        let width: CGFloat = (symbol as NSString).size(withAttributes: [.font: font]).width
         // Bullets and numbers are read as their text, as `GlimmerView` reads them.
-        return (GlimmerPlainText.attributedString(from: styled), styled.size().width, nil)
+        return (text, width, nil)
     }
 }

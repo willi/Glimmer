@@ -89,6 +89,59 @@ final class GlimmerStaticTextTests: XCTestCase {
         XCTAssertTrue(cache.document(markdown: "a", configuration: .default, dynamicTypeSize: .large) === first)
         XCTAssertFalse(cache.document(markdown: "a", configuration: .default, dynamicTypeSize: .xLarge) === first)
         XCTAssertFalse(cache.document(markdown: "b", configuration: .default, dynamicTypeSize: .xLarge) === first)
+        var purple = GlimmerConfiguration.default
+        purple.theme.linkColor = .systemPurple
+        XCTAssertFalse(cache.document(markdown: "a", configuration: purple, dynamicTypeSize: .large) === first,
+                       "a new theme builds again instead of showing the old one")
+        XCTAssertEqual(cache.builds, 4)
+    }
+
+    func testTheCacheKeepsTheMostRecentDocumentsAndEmptiesOnAMemoryWarning() {
+        let cache = GlimmerStaticDocumentCache(capacity: 2)
+        let a = cache.document(markdown: "a", configuration: .default, dynamicTypeSize: .large)
+        _ = cache.document(markdown: "b", configuration: .default, dynamicTypeSize: .large)
+        XCTAssertTrue(cache.document(markdown: "a", configuration: .default, dynamicTypeSize: .large) === a)
+        _ = cache.document(markdown: "c", configuration: .default, dynamicTypeSize: .large)
+        XCTAssertTrue(cache.document(markdown: "a", configuration: .default, dynamicTypeSize: .large) === a, "used last, kept")
+        XCTAssertEqual(cache.builds, 3)
+        _ = cache.document(markdown: "b", configuration: .default, dynamicTypeSize: .large)
+        XCTAssertEqual(cache.builds, 4, "least recently used, dropped")
+        NotificationCenter.default.post(name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
+        XCTAssertFalse(cache.document(markdown: "a", configuration: .default, dynamicTypeSize: .large) === a)
+    }
+
+    func testAConfigurationWithoutACacheIdentityIsNotShared() {
+        let cache = GlimmerStaticDocumentCache()
+        var configuration = GlimmerConfiguration.default
+        configuration.extensions = [UncachedExtension()]
+        let first = cache.document(markdown: "a", configuration: configuration, dynamicTypeSize: .large)
+        XCTAssertFalse(cache.document(markdown: "a", configuration: configuration, dynamicTypeSize: .large) === first)
+    }
+
+    func testTwoViewsWithTheSameInputsShareOneBuild() {
+        let cache = GlimmerStaticDocumentCache.shared
+        cache.removeAll()
+        let before = cache.builds
+        let markdown = "- shared \(UUID().uuidString)"
+        _ = height(of: VStack { GlimmerStaticText(markdown); GlimmerStaticText(markdown) }, width: width)
+        XCTAssertEqual(cache.builds - before, 1)
+        _ = height(of: GlimmerStaticText(markdown), width: width)
+        XCTAssertEqual(cache.builds - before, 1, "a view made later reuses the document")
+    }
+
+    func testBlocksCompareByValue() {
+        let markdown = "# T\n\n- a\n  - b\n\n> q\n\n```\nx\n```"
+        XCTAssertEqual(document(markdown).blocks, document(markdown).blocks)
+        XCTAssertNotEqual(document(markdown).blocks, document(markdown + "\n\nmore").blocks)
+    }
+
+    func testHeadingsKeepTheirLevelForVoiceOver() {
+        XCTAssertEqual((1...6).map(GlimmerStaticBlockView.accessibilityHeadingLevel(_:)), [.h1, .h2, .h3, .h4, .h5, .h6])
+        XCTAssertEqual(GlimmerStaticBlockView.accessibilityHeadingLevel(7), .unspecified)
+        let levels = document("# a\n\n### b\n\nc").blocks.map { block -> Int? in
+            if case .text(_, let level) = block.content { level } else { nil }
+        }
+        XCTAssertEqual(levels, [1, 3, nil])
     }
 
     func testTaskBoxesReadTheirStateAndOtherMarkersTheirText() throws {
@@ -201,6 +254,11 @@ final class GlimmerStaticTextTests: XCTestCase {
             }
         }
     }
+}
+
+/// An extension that is not `Hashable`, so documents composed with it are never shared.
+private struct UncachedExtension: GlimmerExtension {
+    func scan(_ text: String) -> [GlimmerInlineToken] { [] }
 }
 
 /// Opens a URL with the environment's `openURL` once it appears.

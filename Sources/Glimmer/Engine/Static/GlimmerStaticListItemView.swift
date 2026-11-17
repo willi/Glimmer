@@ -22,17 +22,30 @@ struct GlimmerStaticListItemView: View {
             GlimmerStaticBlocksView(blocks: Array(item.blocks.prefix(1)), theme: theme)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .accessibilityElement(children: item.groupsMarkerWithFirstBlock ? .combine : .contain)
+        .accessibilityElement(children: childBehavior)
+    }
+
+    /// One element for the marker and the first block, unless the first block is a list.
+    private var childBehavior: AccessibilityChildBehavior {
+        item.groupsMarkerWithFirstBlock ? .combine : .contain
     }
 
     /// Numbers end `markerGap` before the text; bullets and boxes start the column.
     private var marker: some View {
-        let gap = list.isOrdered ? list.markerGap : 0
+        let gap: CGFloat = list.isOrdered ? list.markerGap : 0
+        let width: CGFloat = list.markerColumnWidth - gap
+        let alignment: Alignment = list.isOrdered ? .trailing : .leading
         return Text(item.marker)
             .lineLimit(1)
             .fixedSize()
-            .frame(width: list.markerColumnWidth - gap, alignment: list.isOrdered ? .trailing : .leading)
+            .frame(width: width, alignment: alignment)
             .padding(.trailing, gap)
-            .accessibilityLabel(item.markerAccessibilityLabel.map { Text($0) } ?? Text(item.marker))
+            .accessibilityLabel(markerLabel)
+    }
+
+    /// What VoiceOver reads for the marker: a task box's state, or else the marker's text.
+    private var markerLabel: Text {
+        guard let label = item.markerAccessibilityLabel else { return Text(item.marker) }
+        return Text(label)
     }
 }

@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// One item of a `GlimmerStaticList`.
-struct GlimmerStaticListItem {
+struct GlimmerStaticListItem: Equatable {
     /// The bullet, number or task box, styled like the item's text.
     var marker: AttributedString
     /// What VoiceOver reads for the marker, when not its text: a task box's state.

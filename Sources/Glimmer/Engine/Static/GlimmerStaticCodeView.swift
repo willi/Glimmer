@@ -6,12 +6,11 @@ struct GlimmerStaticCodeView: View {
     let theme: GlimmerTheme
 
     var body: some View {
-        Text(code)
+        let background = Color(uiColor: theme.codeBlockBackground)
+        let shape = RoundedRectangle(cornerRadius: theme.embedCornerRadius, style: .continuous)
+        return Text(code)
             .padding(theme.embedPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                Color(uiColor: theme.codeBlockBackground),
-                in: RoundedRectangle(cornerRadius: theme.embedCornerRadius, style: .continuous)
-            )
+            .background(background, in: shape)
     }
 }

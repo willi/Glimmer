@@ -12,10 +12,13 @@ struct GlimmerStaticQuoteView: View {
         GlimmerStaticBlocksView(blocks: blocks, theme: theme)
             .padding(.leading, theme.quoteIndent)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(alignment: .leading) {
-                Rectangle()
-                    .fill(Color(uiColor: theme.quoteBarColor))
-                    .frame(width: Self.barWidth)
-            }
+            .background(alignment: .leading) { bar }
+    }
+
+    private var bar: some View {
+        let color = Color(uiColor: theme.quoteBarColor)
+        return Rectangle()
+            .fill(color)
+            .frame(width: Self.barWidth)
     }
 }

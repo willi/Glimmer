@@ -8,8 +8,9 @@ struct GlimmerStaticBlocksView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(blocks.indices, id: \.self) { index in
-                GlimmerStaticBlockView(block: blocks[index], theme: theme)
-                    .padding(.top, blocks[index].spacingAbove)
+                let block: GlimmerStaticBlock = blocks[index]
+                GlimmerStaticBlockView(block: block, theme: theme)
+                    .padding(.top, block.spacingAbove)
             }
         }
     }
