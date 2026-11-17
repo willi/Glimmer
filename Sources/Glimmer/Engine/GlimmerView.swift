@@ -508,6 +508,25 @@ public final class GlimmerView: UIView {
         revealedHeight = nil
     }
 
+    /// Tables hold their column widths while the answer streams, so rows already shown never re-wrap. When it settles,
+    /// each fits the width afresh, once, and is laid out again.
+    private func syncTableStreaming(_ isStreaming: Bool) {
+        var changedFrom = Int.max
+        for offset in embedUnits.keys {
+            guard let attachment = textView.blockAttachment(atCharacter: offset), case .table = attachment.embed,
+                  attachment.isStreaming != isStreaming else { continue }
+            attachment.isStreaming = isStreaming
+            guard !isStreaming, attachment.existingView != nil else { continue }
+            textView.invalidateEmbedLayout(atCharacter: offset)
+            layoutChangedFrom = min(layoutChangedFrom, offset)
+            changedFrom = min(changedFrom, offset)
+        }
+        guard changedFrom < .max else { return }
+        fitTextViewToContent()
+        revealMask.invalidateGeometry(from: changedFrom)
+        revealedHeight = nil
+    }
+
     private func endReveal() {
         // Read before `engine` clears: while revealing, this view is the element VoiceOver focuses.
         let hadFocus = engine != nil && accessibilityElementIsFocused()
@@ -641,6 +660,7 @@ public final class GlimmerView: UIView {
             revealMask.invalidateGeometry()
         }
         if replacedText || result.edit != nil { fitTextViewToContent() }
+        syncTableStreaming(result.isStreaming)
         startRevealIfNeeded(isStreaming: result.isStreaming, finishedText: revealingFinishedText)
         // Text that lands after `finishReveal()` shows in full, so it counts as revealed too.
         if revealFinished { recordFullyRevealed() }

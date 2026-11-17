@@ -3,7 +3,8 @@ import UIKit
 
 /// A GFM table. Columns size to their content, capped at `maxTableColumnWidth`, and expand to fill the width when
 /// the table is narrower than the text. Wider tables shrink their columns toward `minTableColumnWidth` and wrap
-/// cells; only when that is not enough do they scroll horizontally.
+/// cells; only when that is not enough do they scroll horizontally. While the answer streams, columns never narrow
+/// (see `isStreaming`).
 @MainActor
 final class GlimmerTableView: UIView, GlimmerEmbedView {
     struct Layout: Equatable {
@@ -27,7 +28,10 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
     private var cells: [[NSAttributedString]] = []
     private var alignments: [GlimmerTable.Alignment]
     private let theme: GlimmerTheme
-    private var cachedLayout: (width: CGFloat, layout: Layout)?
+    /// The layout last computed and the width it was computed for.
+    private(set) var cachedLayout: (width: CGFloat, layout: Layout)?
+    /// The layout last computed, kept through changes (unlike `cachedLayout`): what a streaming table grows from.
+    private var heldLayout: (width: CGFloat, layout: Layout)?
     /// Per row, each cell's natural width (padded, capped); kept for rows that did not change.
     private var naturalRowWidths: [[CGFloat]] = []
     /// Row heights and the column widths they were measured at; kept for rows that did not change while the widths
@@ -186,6 +190,18 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
         return MainActor.assumeIsolated { cellElements }
     }
 
+    /// While true (the answer is streaming), a column never narrows: widths only grow from the ones last laid out at
+    /// the same width, into room the fit leaves. Otherwise one streaming cell that becomes its column's widest would
+    /// move every column on each update, re-measure every row and re-wrap rows already shown. Turning it off fits the
+    /// table afresh, once.
+    var isStreaming = false {
+        didSet {
+            guard isStreaming != oldValue, !isStreaming else { return }
+            cachedLayout = nil
+            setNeedsLayout()
+        }
+    }
+
     /// Rows shown while a reveal runs (the header counts as one); nil shows all.
     var visibleUnitCount: Int? {
         didSet { if visibleUnitCount != oldValue { setNeedsLayout() } }
@@ -210,27 +226,46 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
     /// Column widths for `width`: narrower tables stretch to fill it, wider ones shrink the columns above `minimum`
     /// in proportion to how far each is above it, and only columns that are all at `minimum` still scroll.
     private static func fit(_ natural: [CGFloat], to width: CGFloat, minimum: CGFloat) -> [CGFloat] {
-        let total = natural.reduce(0, +)
+        let total: CGFloat = natural.reduce(0, +)
         guard total > 0 else { return natural }
         if total <= width {
             guard total < width else { return natural }
-            return snapped(natural.map { $0 * width / total }, to: width, at: natural.count - 1)
+            let stretched: [CGFloat] = natural.map { column in column * width / total }
+            return snapped(stretched, to: width, at: natural.count - 1)
         }
-        let floors = natural.map { min($0, minimum) }
-        let slack = zip(natural, floors).map { $0 - $1 }
-        let slackTotal = slack.reduce(0, +)
+        let slack: [CGFloat] = natural.map { column in column - min(column, minimum) }
+        let slackTotal: CGFloat = slack.reduce(0, +)
         guard slackTotal > 0 else { return natural }
-        let shrink = min(total - width, slackTotal)
-        let shrunk = zip(natural, slack).map { $0 - shrink * $1 / slackTotal }
+        let shrink: CGFloat = min(total - width, slackTotal)
+        let shrunk: [CGFloat] = zip(natural, slack).map { pair in
+            let share: CGFloat = shrink * pair.1 / slackTotal
+            return pair.0 - share
+        }
         // Rounding drift must not leave a table that fits a hair wider than its box, which would let it scroll.
         guard shrink == total - width, let last = slack.lastIndex(where: { $0 > 0 }) else { return shrunk }
         return snapped(shrunk, to: width, at: last)
     }
 
+    /// `held` widened toward `fitted` and never narrowed. The table grows no wider than the box, or than the fit when
+    /// the fit itself scrolls; columns that want more share the room in proportion to how much more they want.
+    private static func grown(_ held: [CGFloat], toward fitted: [CGFloat], within width: CGFloat) -> [CGFloat] {
+        let heldTotal: CGFloat = held.reduce(0, +)
+        let fittedTotal: CGFloat = fitted.reduce(0, +)
+        let room: CGFloat = max(width, fittedTotal) - heldTotal
+        let wants: [CGFloat] = zip(held, fitted).map { pair in max(0, pair.1 - pair.0) }
+        let wanted: CGFloat = wants.reduce(0, +)
+        guard room > 0, wanted > 0 else { return held }
+        let share: CGFloat = min(1, room / wanted)
+        return zip(held, wants).map { pair in pair.0 + pair.1 * share }
+    }
+
     /// `widths` with the column at `index` taking whatever makes the sum exactly `width`.
     private static func snapped(_ widths: [CGFloat], to width: CGFloat, at index: Int) -> [CGFloat] {
         var result = widths
-        let others = result.enumerated().reduce(CGFloat(0)) { $1.offset == index ? $0 : $0 + $1.element }
+        var others: CGFloat = 0
+        for (column, columnWidth) in result.enumerated() where column != index {
+            others += columnWidth
+        }
         result[index] = width - others
         return result
     }
@@ -241,28 +276,39 @@ final class GlimmerTableView: UIView, GlimmerEmbedView {
         let columns = cells.first?.count ?? 0
         let maxColumn = max(theme.maxTableColumnWidth, Self.minimumColumnWidth)
         while naturalRowWidths.count < cells.count {
-            naturalRowWidths.append(cells[naturalRowWidths.count].map { min(ceil($0.size().width) + padding * 2, maxColumn) })
+            let row: [CGFloat] = cells[naturalRowWidths.count].map { text in
+                let padded: CGFloat = ceil(text.size().width) + padding * 2
+                return min(padded, maxColumn)
+            }
+            naturalRowWidths.append(row)
         }
         var natural = Array(repeating: Self.minimumColumnWidth, count: columns)
         for row in naturalRowWidths {
             for (column, width) in row.enumerated() { natural[column] = max(natural[column], width) }
         }
-        let widths = Self.fit(natural, to: width, minimum: theme.minTableColumnWidth)
+        let fitted = Self.fit(natural, to: width, minimum: max(theme.minTableColumnWidth, Self.minimumColumnWidth))
+        var widths = fitted
+        if isStreaming, let held = heldLayout, held.width == width, held.layout.columnWidths.count == fitted.count {
+            widths = Self.grown(held.layout.columnWidths, toward: fitted, within: width)
+        }
         // Heights measured at these column widths stay valid; any other widths measure every row again.
         var heights = measuredRows?.columnWidths == widths ? measuredRows?.heights ?? [] : []
         while heights.count < cells.count {
-            heights.append(cells[heights.count].enumerated().map { column, text in
-                let bounds = text.boundingRect(
-                    with: CGSize(width: max(1, widths[column] - padding * 2), height: CGFloat.greatestFiniteMagnitude),
+            let cellHeights: [CGFloat] = cells[heights.count].enumerated().map { column, text in
+                let textWidth: CGFloat = max(1, widths[column] - padding * 2)
+                let bounds: CGRect = text.boundingRect(
+                    with: CGSize(width: textWidth, height: CGFloat.greatestFiniteMagnitude),
                     options: [.usesLineFragmentOrigin, .usesFontLeading],
                     context: nil
                 )
                 return ceil(bounds.height) + padding * 2
-            }.max() ?? padding * 2)
+            }
+            heights.append(cellHeights.max() ?? padding * 2)
         }
         measuredRows = (widths, heights)
         let layout = Layout(columnWidths: widths, rowHeights: heights)
         cachedLayout = (width, layout)
+        heldLayout = (width, layout)
         return layout
     }
 

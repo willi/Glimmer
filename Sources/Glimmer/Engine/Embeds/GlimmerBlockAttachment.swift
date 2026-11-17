@@ -62,6 +62,18 @@ final class GlimmerBlockAttachment: NSTextAttachment {
     }
     @MainActor private var visibleUnits: Int?
 
+    /// Whether the answer is still streaming. A table holds its column widths until it settles (see
+    /// `GlimmerTableView.isStreaming`). Kept here, so a view made later starts right.
+    @MainActor
+    var isStreaming: Bool {
+        get { streaming }
+        set {
+            streaming = newValue
+            (cachedView as? GlimmerTableView)?.isStreaming = newValue
+        }
+    }
+    @MainActor private var streaming = false
+
     /// The view, if one was made.
     @MainActor
     var existingView: (any GlimmerEmbedView)? { cachedView }
@@ -72,6 +84,7 @@ final class GlimmerBlockAttachment: NSTextAttachment {
         if let cachedView { return cachedView }
         var view = GlimmerEmbedViewFactory.makeView(for: self)
         view.visibleUnitCount = visibleUnits
+        (view as? GlimmerTableView)?.isStreaming = streaming
         cachedView = view
         return view
     }

@@ -280,6 +280,50 @@ final class GlimmerViewStreamingTests: XCTestCase {
         _ = window
     }
 
+    func testAStreamedWideTableKeepsShownRowsAndFitsOnceItSettles() async throws {
+        let (view, _, window) = streamingView(width: 320)
+        let prefix = "| Item | Detail | Note |\n|---|---|---|\n| one | short | a |\n| two | brief | "
+        var growing = ""
+        var table: GlimmerTableView?
+        var previous: GlimmerTableView.Layout?
+        for word in Array(repeating: ["alpha", "beta", "gamma", "delta", "epsilon"], count: 8).joined() {
+            growing += (growing.isEmpty ? "" : " ") + word
+            view.update(markdown: prefix + growing, isStreaming: true)
+            await view.pendingDocument?.value
+            view.layoutIfNeeded()
+            let current = try XCTUnwrap(blockAttachments(in: view.textView.textStorage).first?.existingView as? GlimmerTableView)
+            if let table { XCTAssertTrue(current === table, "the table keeps its view while it streams") }
+            table = current
+            let layout = try XCTUnwrap(current.cachedLayout?.layout)
+            if let previous, previous.rowHeights.count == layout.rowHeights.count {
+                for (column, width) in previous.columnWidths.enumerated() {
+                    XCTAssertGreaterThanOrEqual(layout.columnWidths[column], width, "column \(column) narrowed at “\(growing)”")
+                }
+                for row in 0..<(previous.rowHeights.count - 1) {
+                    XCTAssertGreaterThanOrEqual(layout.rowHeights[row], previous.rowHeights[row], "row \(row) shrank at “\(growing)”")
+                }
+            }
+            previous = layout
+        }
+        let final = prefix + growing + " |"
+        view.update(markdown: final, isStreaming: false)
+        await view.pendingDocument?.value
+        view.finishReveal()
+        view.layoutIfNeeded()
+        let settled = try XCTUnwrap(table)
+        XCTAssertTrue(blockAttachments(in: view.textView.textStorage).first?.existingView === settled)
+
+        let fresh = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
+        let freshWindow = hostInWindow(fresh, width: 320, height: 800)
+        fresh.update(markdown: final)
+        fresh.layoutIfNeeded()
+        let freshTable = try XCTUnwrap(blockAttachments(in: fresh.textView.textStorage).first?.existingView as? GlimmerTableView)
+        XCTAssertNotNil(freshTable.cachedLayout)
+        XCTAssertEqual(settled.cachedLayout?.layout, freshTable.cachedLayout?.layout, "settling fits the table once, as a fresh one")
+        XCTAssertEqual(view.intrinsicContentSize.height, fresh.intrinsicContentSize.height, accuracy: 0.5)
+        _ = (window, freshWindow)
+    }
+
     func testASettledUpdateIsSettledAtOnce() {
         let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil, reveal: .none))
         view.update(markdown: "Hello")
