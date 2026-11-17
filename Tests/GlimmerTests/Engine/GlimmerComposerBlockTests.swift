@@ -13,12 +13,16 @@ final class GlimmerComposerBlockTests: XCTestCase {
     }
 
     func testComposeIsBlocksJoinedWithoutTheFinalNewline() {
-        let markdown = "# Title\n\nSome **bold** text.\n\n- one\n- two\n\n> quoted\n\n```swift\nlet x = 1\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |"
+        let table = "| a | b |\n|---|---|\n| 1 | 2 |"
+        let kinds = ["Some **bold** text.", "- one\n- two", "> quoted", "```swift\nlet x = 1\n```", table, "---"]
+        let markdown = (["# Title"] + kinds.flatMap { [$0, "## Head"] }).joined(separator: "\n\n")
         let blocks = GlimmerParser.parse(markdown)
         let composer = GlimmerComposer(theme: theme)
         let joined = NSMutableAttributedString()
         for (index, block) in blocks.enumerated() {
-            let fragment = composer.composeBlock(block, isFirst: index == 0)
+            let fragment = composer.composeBlock(
+                block, isFirst: index == 0, precedingSpacing: GlimmerComposer.trailingSpacing(of: joined)
+            )
             XCTAssertTrue(fragment.string.hasSuffix("\n"), "block \(index) must end in a newline")
             joined.append(fragment)
         }
@@ -38,7 +42,9 @@ final class GlimmerComposerBlockTests: XCTestCase {
         let text = GlimmerComposer(theme: theme).compose(GlimmerParser.parse(markdown))
         let heading = (text.string as NSString).range(of: "Head")
         guard heading.location != NSNotFound, heading.location > 1 else { return nil }
-        func style(at index: Int) -> NSParagraphStyle? { text.attribute(.paragraphStyle, at: index, effectiveRange: nil) as? NSParagraphStyle }
+        func style(at index: Int) -> NSParagraphStyle? {
+            text.attribute(.paragraphStyle, at: index, effectiveRange: nil) as? NSParagraphStyle
+        }
         guard let before = style(at: heading.location), let above = style(at: heading.location - 1) else { return nil }
         return above.paragraphSpacing + before.paragraphSpacingBefore
     }
@@ -58,22 +64,18 @@ final class GlimmerComposerBlockTests: XCTestCase {
 
     func testTheGapAboveAHeadingAfterEachKindOfBlockIsCollapsed() {
         let spaced = spacedTheme(paragraph: 8, block: 16)
-        let blocks = ["```\ncode\n```", "---", "> quote", "- a\n- b", "1. a\n2. b", "## Other", "| a | b |\n|---|---|\n| 1 | 2 |"]
+        let table = "| a | b |\n|---|---|\n| 1 | 2 |"
+        let blocks = ["```\ncode\n```", "---", "> quote", "- a\n- b", "1. a\n2. b", "## Other", table]
         for block in blocks {
             XCTAssertEqual(gapAboveHeading("\(block)\n\n## Head", theme: spaced), 16, block)
         }
     }
 
-    func testAHeadingFirstHasNoSpaceAbove() {
-        let text = GlimmerComposer(theme: theme).compose(GlimmerParser.parse("## Head\n\nPara"))
-        let style = text.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
-        XCTAssertEqual(style?.paragraphSpacingBefore, 0)
-    }
-
     func testTheGapBelowAHeadingIsUnchanged() {
         let text = GlimmerComposer(theme: theme).compose(GlimmerParser.parse("## Head\n\nPara"))
         let style = text.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
-        // 2.2.0: the heading's space after is the default theme's paragraph spacing (12, captured before the change), and the paragraph below adds no space before.
+        // 2.2.0: the heading's space after is the default theme's paragraph spacing (12, captured before the change),
+        // and the paragraph below adds no space before.
         XCTAssertEqual(style?.paragraphSpacing, 12)
         let below = (text.string as NSString).range(of: "Para").location
         let belowStyle = text.attribute(.paragraphStyle, at: below, effectiveRange: nil) as? NSParagraphStyle

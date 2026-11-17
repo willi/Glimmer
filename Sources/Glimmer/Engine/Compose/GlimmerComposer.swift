@@ -92,9 +92,11 @@ struct GlimmerComposer {
         return imagePolicy.decision(for: GlimmerImageCandidate(url: url, alt: alt, title: title, origin: origin))
     }
 
-    /// One top-level block, ending in "\n". `compose(_:)` is exactly these joined with the final "\n" removed, which
-    /// is what lets `GlimmerStreamingDocument` re-compose only the blocks that changed.
-    func composeBlock(_ block: GlimmerBlock, isFirst: Bool, precedingSpacing: CGFloat? = nil) -> NSAttributedString {
+    /// One top-level block, ending in "\n". `compose(_:)` is these joined with the final "\n" removed, which is
+    /// what lets `GlimmerStreamingDocument` re-compose only the blocks that changed. That holds only if each caller
+    /// passes `trailingSpacing(of:)` for the text composed before the block (nil for none): a heading's space above
+    /// depends on it.
+    func composeBlock(_ block: GlimmerBlock, isFirst: Bool, precedingSpacing: CGFloat?) -> NSAttributedString {
         composeBlock(block, isFirst: isFirst, precedingSpacing: precedingSpacing, reusing: nil)
     }
 
@@ -106,9 +108,9 @@ struct GlimmerComposer {
         return style?.paragraphSpacing
     }
 
-    /// Like `composeBlock(_:isFirst:)`, and offers `reuse`'s attachments back for embeds that continue them.
+    /// Like `composeBlock(_:isFirst:precedingSpacing:)`, and offers `reuse`'s attachments back for embeds that continue them.
     func composeBlock(
-        _ block: GlimmerBlock, isFirst: Bool, precedingSpacing: CGFloat? = nil, reusing reuse: GlimmerAttachmentReuse?
+        _ block: GlimmerBlock, isFirst: Bool, precedingSpacing: CGFloat?, reusing reuse: GlimmerAttachmentReuse?
     ) -> NSAttributedString {
         let output = NSMutableAttributedString()
         var context = Context()

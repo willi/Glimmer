@@ -188,12 +188,15 @@ final class GlimmerSurfaceReuseTests: XCTestCase {
         }, "a code block on screen")
         let attachment = try XCTUnwrap(textView.blockAttachment(atCharacter: location))
         XCTAssertGreaterThan(fragmentViews(in: textView).count, 10)
+        let sizes = Dictionary(uniqueKeysWithValues: fragmentViews(in: textView).map { (ObjectIdentifier($0), $0.bounds.size) })
         attachment.visibleUnitCount = 1
         textView.invalidateEmbedLayout(atCharacter: location)
         pass(view)
-        // The block's own fragment, plus the odd fragment below it that the shorter block moved to a fractional offset:
-        // a handful of the ~30 on screen, where redrawing the band marks more than half (see the escape-hatch test).
-        XCTAssertLessThanOrEqual(pendingRedraws(in: textView), 6, "a revealed code line redraws its own fragment, not the band")
+        // Content below the block moves, and a fragment whose size changes redraws whatever this does. Of the rest,
+        // only the block's own fragment may redraw: the band is not redrawn.
+        let unchanged = fragmentViews(in: textView).filter { sizes[ObjectIdentifier($0)] == $0.bounds.size }
+        let redrawn = unchanged.filter { $0.layer.needsDisplay() }
+        XCTAssertLessThanOrEqual(redrawn.count, 1, "a revealed code line redraws its own fragment, not the band")
         _ = window
     }
 
