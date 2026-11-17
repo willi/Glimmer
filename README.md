@@ -52,9 +52,10 @@ for chunk in ["Glimmer reveals ", "an answer ", "phrase by phrase."] {
 view.update(markdown: received, isStreaming: false, revealID: messageID)
 ```
 
-While an answer reveals, the view's height ends at the last revealed line and never shrinks. `onHeightChange` fires
-whenever the height may have changed, even once per streamed chunk with the same height: compare against the last
-height before relaying out.
+While an answer reveals, the view's height ends at the last revealed line and never shrinks: if an edit moves revealed
+text up, the view keeps its height (with space below the text) until the reveal ends, then reports the true height.
+`onHeightChange` fires whenever the height may have changed, even once per streamed chunk with the same height: compare
+against the last height before relaying out.
 
 A reveal can be controlled by the host. `finishReveal()` ends a running reveal now, for an older answer that should stop
 animating once a newer one starts; the whole answer then counts as revealed for its `revealID`. `isRevealing` says
@@ -170,6 +171,8 @@ let view = GlimmerView(configuration: configuration)
   has 16 pt above it, not 28. A heading at the start has none. `minTableColumnWidth` (72 pt by default, scaling with
   Dynamic Type) is the narrowest a table column gets: tables fit the available width by narrowing their widest
   columns and wrapping cell text, and scroll sideways only when every column is at this width and still doesn't fit.
+  While an answer streams, a table's columns take their content's width instead (scrolling sideways if that is too
+  wide), and the table fits the width once the reveal ends.
 - **`extensions`**: custom syntax. See [Extensions](#extensions).
 - **`highlighter`** (`GlimmerHighlighter`): syntax highlighting for code blocks. The default,
   `GlimmerBasicHighlighter`, covers keywords, strings, comments and numbers in common languages.
@@ -408,8 +411,9 @@ How it stays fast:
 - **Core Animation fades.** The reveal is a mask of phrase layers that Core Animation animates, so the main thread
   only starts phrases.
 - **Streaming embeds update in place.** A code block applies only its changed lines, and a table keeps the rows it
-  already measured. While an answer streams, a table's columns never narrow, so rows already shown never re-wrap; the
-  table fits its columns to the width once when the answer settles.
+  already measured. While an answer streams, each table column takes its content's width, up to
+  `maxTableColumnWidth` (the table scrolls sideways if they don't fit), so a column widens only when its own content
+  grows and rows already shown never re-wrap. The table fits its columns to the width once the reveal ends.
 
 ## Demo app
 

@@ -72,6 +72,34 @@ final class GlimmerViewStreamingTests: XCTestCase {
         _ = window
     }
 
+    func testTheHeightHoldsMidRevealWhenRevealedTextShrinks() async {
+        let (view, clock, window) = streamingView(width: 240)
+        view.update(markdown: answer, isStreaming: true)
+        await view.pendingDocument?.value
+        var time = 0.0
+        while view.intrinsicContentSize.height < 60, time < 10 {
+            time += 0.05
+            clock.advance(to: time)
+        }
+        let revealed = view.intrinsicContentSize.height
+        XCTAssertGreaterThanOrEqual(revealed, 60, "a few lines are revealed")
+        view.update(markdown: "Short.", isStreaming: true)
+        await view.pendingDocument?.value
+        XCTAssertTrue(view.isRevealing)
+        XCTAssertGreaterThanOrEqual(view.intrinsicContentSize.height, revealed, "the height holds while the reveal runs")
+        XCTAssertGreaterThanOrEqual(view.sizeThatFits(CGSize(width: 240, height: 1000)).height, revealed)
+        view.update(markdown: "Short.", isStreaming: false)
+        await view.pendingDocument?.value
+        while view.isRevealing, time < 20 {
+            time += 0.05
+            clock.advance(to: time)
+        }
+        XCTAssertFalse(view.isRevealing)
+        XCTAssertEqual(view.intrinsicContentSize.height, fullHeight(view), accuracy: 0.5, "the true height once it ends")
+        XCTAssertLessThan(view.intrinsicContentSize.height, revealed)
+        _ = window
+    }
+
     func testNoRevealShowsTextImmediately() async {
         var configuration = GlimmerConfiguration(imageLoader: nil)
         configuration.reveal = .none
@@ -280,48 +308,85 @@ final class GlimmerViewStreamingTests: XCTestCase {
         _ = window
     }
 
-    func testAStreamedWideTableKeepsShownRowsAndFitsOnceItSettles() async throws {
-        let (view, _, window) = streamingView(width: 320)
-        let prefix = "| Item | Detail | Note |\n|---|---|---|\n| one | short | a |\n| two | brief | "
-        var growing = ""
-        var table: GlimmerTableView?
-        var previous: GlimmerTableView.Layout?
-        for word in Array(repeating: ["alpha", "beta", "gamma", "delta", "epsilon"], count: 8).joined() {
-            growing += (growing.isEmpty ? "" : " ") + word
-            view.update(markdown: prefix + growing, isStreaming: true)
-            await view.pendingDocument?.value
-            view.layoutIfNeeded()
-            let current = try XCTUnwrap(blockAttachments(in: view.textView.textStorage).first?.existingView as? GlimmerTableView)
-            if let table { XCTAssertTrue(current === table, "the table keeps its view while it streams") }
-            table = current
-            let layout = try XCTUnwrap(current.cachedLayout?.layout)
-            if let previous, previous.rowHeights.count == layout.rowHeights.count {
-                for (column, width) in previous.columnWidths.enumerated() {
-                    XCTAssertGreaterThanOrEqual(layout.columnWidths[column], width, "column \(column) narrowed at “\(growing)”")
-                }
-                for row in 0..<(previous.rowHeights.count - 1) {
-                    XCTAssertGreaterThanOrEqual(layout.rowHeights[row], previous.rowHeights[row], "row \(row) shrank at “\(growing)”")
-                }
-            }
-            previous = layout
+    func testAStreamedTableNeverShrinksTheHeightMidRevealAndFitsOnceTheRevealEnds() async throws {
+        let (view, clock, window) = streamingView(width: 320)
+        var heights: [CGFloat] = []
+        func record() {
+            guard view.isRevealing else { return }
+            heights.append(view.intrinsicContentSize.height)
+            heights.append(view.sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)).height)
         }
-        let final = prefix + growing + " |"
-        view.update(markdown: final, isStreaming: false)
+        view.onHeightChange = { record() }
+        let note = "a longer note that wraps when its column is narrow and fits on one line when it is wide"
+        let rows = (1...6).map { "| row \($0) | item | \(note) |" }.joined(separator: "\n")
+        let markdown = "Here is the comparison.\n\n| Name | Kind | Note |\n|---|---|---|\n" + rows
+            + "\n\nThat covers every row. " + String(repeating: "A closing sentence follows the table here. ", count: 12)
+        let words = markdown.split(separator: " ", omittingEmptySubsequences: false)
+        var time = 0.0
+        var shown = ""
+        for (index, word) in words.enumerated() {
+            shown += (index == 0 ? "" : " ") + word
+            view.update(markdown: shown, isStreaming: true)
+            await view.pendingDocument?.value
+            time += 0.02
+            clock.advance(to: time)
+            record()
+        }
+        XCTAssertTrue(view.isRevealing, "the reveal is still running when the answer settles")
+        let table = try XCTUnwrap(blockAttachments(in: view.textView.textStorage).first?.existingView as? GlimmerTableView)
+        XCTAssertGreaterThan(view.engine?.revealedLength ?? 0, view.textView.textStorage.string.count / 3,
+                             "the reveal has passed into the table")
+        view.update(markdown: markdown, isStreaming: false)
         await view.pendingDocument?.value
-        view.finishReveal()
-        view.layoutIfNeeded()
-        let settled = try XCTUnwrap(table)
-        XCTAssertTrue(blockAttachments(in: view.textView.textStorage).first?.existingView === settled)
+        record()
+        XCTAssertTrue(view.isRevealing, "the settled result landed mid-reveal")
+        XCTAssertTrue(table.isStreaming, "the table keeps its streaming layout until the reveal ends")
+        while view.isRevealing, time < 30 {
+            time += 0.05
+            clock.advance(to: time)
+            record()
+        }
+        XCTAssertFalse(view.isRevealing)
+        XCTAssertGreaterThan(heights.count, 10)
+        for (index, height) in heights.enumerated().dropFirst() {
+            XCTAssertGreaterThanOrEqual(height, heights[index - 1] - 0.01, "the height shrank mid-reveal at report \(index)")
+        }
 
+        view.layoutIfNeeded()
+        XCTAssertFalse(table.isStreaming, "the table fits once the reveal ends")
+        XCTAssertTrue(blockAttachments(in: view.textView.textStorage).first?.existingView === table, "the table keeps its view")
+        let layout = try XCTUnwrap(table.cachedLayout)
+        XCTAssertEqual(layout.layout.contentWidth, layout.width, accuracy: 0.001, "the fitted table fills its box")
         let fresh = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
         let freshWindow = hostInWindow(fresh, width: 320, height: 800)
-        fresh.update(markdown: final)
+        fresh.update(markdown: markdown)
         fresh.layoutIfNeeded()
         let freshTable = try XCTUnwrap(blockAttachments(in: fresh.textView.textStorage).first?.existingView as? GlimmerTableView)
-        XCTAssertNotNil(freshTable.cachedLayout)
-        XCTAssertEqual(settled.cachedLayout?.layout, freshTable.cachedLayout?.layout, "settling fits the table once, as a fresh one")
+        XCTAssertEqual(table.cachedLayout?.layout, freshTable.cachedLayout?.layout, "the table fits as a fresh one does")
         XCTAssertEqual(view.intrinsicContentSize.height, fresh.intrinsicContentSize.height, accuracy: 0.5)
         _ = (window, freshWindow)
+    }
+
+    func testANotRevealedStreamingTableFitsWhenTheAnswerSettles() async throws {
+        var configuration = GlimmerConfiguration(imageLoader: nil)
+        configuration.reveal = .none
+        let view = GlimmerView(configuration: configuration)
+        let window = hostInWindow(view, width: 320, height: 800)
+        let markdown = "| A | B |\n|---|---|\n| one | two |"
+        view.update(markdown: markdown, isStreaming: true)
+        await view.pendingDocument?.value
+        view.layoutIfNeeded()
+        let table = try XCTUnwrap(blockAttachments(in: view.textView.textStorage).first?.existingView as? GlimmerTableView)
+        XCTAssertTrue(table.isStreaming)
+        XCTAssertLessThan(try XCTUnwrap(table.cachedLayout).layout.contentWidth, 320, "natural widths while streaming")
+        view.update(markdown: markdown, isStreaming: false)
+        await view.pendingDocument?.value
+        view.layoutIfNeeded()
+        let settled = try XCTUnwrap(blockAttachments(in: view.textView.textStorage).first?.existingView as? GlimmerTableView)
+        XCTAssertFalse(settled.isStreaming, "with no reveal, the table fits when the settled result applies")
+        let layout = try XCTUnwrap(settled.cachedLayout)
+        XCTAssertEqual(layout.layout.contentWidth, layout.width, accuracy: 0.001)
+        _ = window
     }
 
     func testASettledUpdateIsSettledAtOnce() {

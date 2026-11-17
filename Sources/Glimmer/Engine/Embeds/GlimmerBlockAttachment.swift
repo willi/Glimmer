@@ -62,8 +62,8 @@ final class GlimmerBlockAttachment: NSTextAttachment {
     }
     @MainActor private var visibleUnits: Int?
 
-    /// Whether the answer is still streaming. A table holds its column widths until it settles (see
-    /// `GlimmerTableView.isStreaming`). Kept here, so a view made later starts right.
+    /// Whether the answer is still streaming or revealing. A table lays its columns out at their content's width until
+    /// then (see `GlimmerTableView.isStreaming`). Kept here, so a view made later starts right.
     @MainActor
     var isStreaming: Bool {
         get { streaming }

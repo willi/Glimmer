@@ -317,48 +317,93 @@ final class GlimmerTableViewTests: XCTestCase {
         for width in layout.columnWidths { XCTAssertGreaterThanOrEqual(width, 44, "no column below the 44 pt floor") }
     }
 
-    func testAStreamingTableNeverNarrowsAColumnAndFitsOnceItSettles() {
+    /// Each column's width while streaming: its widest cell's natural width, capped and floored as the table does.
+    private func naturalWidths(_ rows: [[NSAttributedString]]) -> [CGFloat] {
+        let padding = GlimmerTableView.cellPadding
+        let cap = max(theme.maxTableColumnWidth, 44)
+        let floor = max(theme.minTableColumnWidth, 44)
+        var widths = Array(repeating: floor, count: rows.first?.count ?? 0)
+        for row in rows {
+            for (column, text) in row.enumerated() {
+                let natural: CGFloat = min(ceil(text.size().width) + padding * 2, cap)
+                widths[column] = max(widths[column], natural)
+            }
+        }
+        return widths
+    }
+
+    func testAStreamingTableTakesItsColumnsNaturalWidthsAndFitsOnceItSettles() {
         let header = [cell("Item", header: true), cell("Detail", header: true), cell("Note", header: true)]
         let alignments: [GlimmerTable.Alignment] = [.none, .none, .none]
         var rows = [[cell("one"), cell("short"), cell("a")], [cell("two"), cell("brief"), cell("")]]
         let table = GlimmerTableView(header: header, rows: rows, alignments: alignments, theme: theme)
         table.isStreaming = true
-        var previous = table.layout(forWidth: 320)
+        XCTAssertEqual(table.layout(forWidth: 320).columnWidths, naturalWidths([header] + rows),
+                       "a header-only start does not stretch the columns to the box")
         var growing = ""
         for word in Array(repeating: ["alpha", "beta", "gamma", "delta", "epsilon"], count: 8).joined() {
             growing += (growing.isEmpty ? "" : " ") + word
             rows[rows.count - 1][2] = cell(growing)
             table.update(to: .table(header: header, rows: rows, alignments: alignments))
             let layout = table.layout(forWidth: 320)
-            for (column, width) in previous.columnWidths.enumerated() {
-                XCTAssertGreaterThanOrEqual(layout.columnWidths[column], width, "column \(column) narrowed at “\(growing)”")
-            }
-            for row in 0..<(previous.rowHeights.count - 1) {
-                XCTAssertGreaterThanOrEqual(layout.rowHeights[row], previous.rowHeights[row], "row \(row) shrank at “\(growing)”")
-            }
-            XCTAssertLessThanOrEqual(layout.contentWidth, 320, "the table never scrolls while it streams")
-            previous = layout
+            XCTAssertEqual(layout.columnWidths, naturalWidths([header] + rows), "natural widths at “\(growing)”")
         }
+        XCTAssertEqual(table.layout(forWidth: 320).columnWidths[2], max(theme.maxTableColumnWidth, 44),
+                       "the growing column stops at the cap")
         table.isStreaming = false
         let fresh = GlimmerTableView(header: header, rows: rows, alignments: alignments, theme: theme)
         XCTAssertEqual(table.layout(forWidth: 320), fresh.layout(forWidth: 320), "settling fits the table afresh")
+        XCTAssertEqual(table.layout(forWidth: 320).contentWidth, 320, accuracy: 0.001, "the fitted table fills the box")
     }
 
-    func testAStreamingTableStillWidensAColumnThatScrolls() {
-        // Every column at its natural width under the minimum and wider than the box together: the table scrolls, and a
-        // growing cell may widen its column, as the fit would.
-        let header = (0..<6).map { cell("c\($0)", header: true) }
-        let alignments = Array(repeating: GlimmerTable.Alignment.none, count: 6)
-        var rows = [(0..<6).map { cell("v\($0)") }]
+    func testAGrowingStreamingCellNeverReWrapsAShownRow() {
+        let header = [cell("Name", header: true), cell("Kind", header: true), cell("Note", header: true)]
+        let alignments: [GlimmerTable.Alignment] = [.none, .none, .none]
+        let long = String(repeating: "wrapping words ", count: 12)
+        var rows = [
+            [cell("one"), cell("plain"), cell("x")],
+            [cell(long), cell("capped"), cell("y")],
+            [cell("three"), cell("tail"), cell("a")],
+        ]
         let table = GlimmerTableView(header: header, rows: rows, alignments: alignments, theme: theme)
         table.isStreaming = true
-        let before = table.layout(forWidth: 200)
-        XCTAssertGreaterThan(before.contentWidth, 200)
-        rows[0][0] = cell("wider")
-        table.update(to: .table(header: header, rows: rows, alignments: alignments))
-        let after = table.layout(forWidth: 200)
-        let fresh = GlimmerTableView(header: header, rows: rows, alignments: alignments, theme: theme)
-        XCTAssertEqual(after, fresh.layout(forWidth: 200))
+        var previous = table.layout(forWidth: 320)
+        let singleLine = previous.rowHeights[1]
+        XCTAssertGreaterThan(previous.rowHeights[2], singleLine, "the capped cell wraps")
+        var growing = "a"
+        for word in Array(repeating: ["alpha", "beta", "gamma", "delta", "epsilon"], count: 8).joined() {
+            growing += " " + word
+            rows[rows.count - 1][2] = cell(growing)
+            let measured = table.measuredRowCount
+            table.update(to: .table(header: header, rows: rows, alignments: alignments))
+            let layout = table.layout(forWidth: 320)
+            for row in 0..<(layout.rowHeights.count - 1) {
+                XCTAssertEqual(layout.rowHeights[row], previous.rowHeights[row], "row \(row) changed at “\(growing)”")
+            }
+            XCTAssertEqual(table.measuredRowCount - measured, 1, "only the changed row is measured again at “\(growing)”")
+            let natural: CGFloat = ceil(cell(growing).size().width) + GlimmerTableView.cellPadding * 2
+            if natural < theme.maxTableColumnWidth {
+                XCTAssertEqual(layout.rowHeights.last, singleLine, "a growing cell below the cap stays on one line")
+            }
+            previous = layout
+        }
+        XCTAssertGreaterThan(previous.rowHeights.last ?? 0, singleLine, "past the cap, the cell wraps")
+    }
+
+    func testAStreamingTableTooWideForTheBoxScrollsAndFitsOnceItSettles() {
+        let header = (0..<3).map { cell("Column \($0)", header: true) }
+        let rows = [(0..<3).map { cell("a fairly long cell value \($0)") }]
+        let alignments = Array(repeating: GlimmerTable.Alignment.none, count: 3)
+        let table = GlimmerTableView(header: header, rows: rows, alignments: alignments, theme: theme)
+        table.isStreaming = true
+        let width: CGFloat = 260
+        let window = hostInWindow(table, width: width, height: table.embedHeight(forWidth: width))
+        table.layoutIfNeeded()
+        XCTAssertGreaterThan(table.scrollView.contentSize.width, table.bounds.width, "the streaming table scrolls")
+        table.isStreaming = false
+        table.layoutIfNeeded()
+        XCTAssertEqual(table.scrollView.contentSize.width, width, accuracy: 0.001, "the settled table fits the box")
+        _ = window
     }
 
     func testALastRowThatGrowsInPlaceUpdates() {
