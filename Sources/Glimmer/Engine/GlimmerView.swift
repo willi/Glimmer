@@ -159,6 +159,22 @@ public final class GlimmerView: UIView {
         return width
     }
 
+    /// The height at `width` when it fits under `maximum`; otherwise the bottom of the last whole line that fits, plus
+    /// the bottom inset, so a collapsed answer never shows a cut line. An embed counts as one line. Returns 0 when not
+    /// even the first line fits.
+    public func height(forWidth width: CGFloat, notExceeding maximum: CGFloat) -> CGFloat {
+        let full = height(forWidth: width)
+        guard full > maximum, textView.textStorage.length > 0 else { return full }
+        let inset = textView.textContainerInset
+        let measurer = GlimmerTextMeasurer(
+            text: NSAttributedString(attributedString: textView.textStorage), width: width, insets: inset,
+            lineFragmentPadding: textView.textContainer.lineFragmentPadding
+        )
+        let limit = maximum - inset.bottom
+        guard let bottom = measurer.lineBottoms.last(where: { $0 <= limit }) else { return 0 }
+        return ceil(bottom + inset.bottom)
+    }
+
     public override var intrinsicContentSize: CGSize {
         CGSize(width: UIView.noIntrinsicMetric, height: height(forWidth: bounds.width))
     }

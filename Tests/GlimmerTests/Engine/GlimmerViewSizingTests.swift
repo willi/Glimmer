@@ -93,4 +93,21 @@ final class GlimmerViewSizingTests: XCTestCase {
         settle(view)
         XCTAssertGreaterThan(view.fittingWidth(maximum: 320), before)
     }
+
+    func testACapAboveTheFullHeightReturnsTheFullHeight() {
+        let view = settledView("a<br>b")
+        let full = view.sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)).height
+        XCTAssertEqual(view.height(forWidth: 320, notExceeding: full + 50), full)
+    }
+
+    func testACapKeepsOnlyWholeLines() {
+        let twoLines = settledView("a<br>b").sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)).height
+        let threeLines = settledView("a<br>b<br>c").sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)).height
+        let cap = (twoLines + threeLines) / 2
+        XCTAssertEqual(settledView("a<br>b<br>c<br>d").height(forWidth: 320, notExceeding: cap), twoLines, accuracy: 0.5)
+    }
+
+    func testACapBelowTheFirstLineReturnsZero() {
+        XCTAssertEqual(settledView("a<br>b").height(forWidth: 320, notExceeding: 2), 0)
+    }
 }
