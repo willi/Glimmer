@@ -38,6 +38,17 @@ final class GlimmerReadmeExampleTests: XCTestCase {
         _ = UIHostingController(rootView: Answer(text: "Hi", isStreaming: false))
     }
 
+    func testPlainAttributedText() {
+        struct Summary: View {
+            let markdown: String
+            var body: some View {
+                Text(GlimmerView.attributedString(for: markdown))
+            }
+        }
+        _ = UIHostingController(rootView: Summary(markdown: "A **short** summary."))
+        XCTAssertEqual(String(GlimmerView.attributedString(for: "A **short** summary.").characters), "A short summary.")
+    }
+
     func testConfiguration() {
         var configuration = GlimmerConfiguration()
         configuration.theme.linkColor = .systemPurple

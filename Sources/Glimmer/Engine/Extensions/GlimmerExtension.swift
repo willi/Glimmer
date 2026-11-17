@@ -17,8 +17,8 @@ public struct GlimmerInlineToken: Equatable, Sendable {
     /// Whether a `.chip` token reports its tap through `GlimmerView.onTokenTap` and VoiceOver reaches it as a link.
     /// `.text(tappable:)` keeps its own flag; this one is ignored for it and for `.image`.
     public var isTappable: Bool
-    /// Where the token leads when it is rendered as plain attributed text (`GlimmerAttributedString`). `GlimmerView`
-    /// ignores it; a tap reports the token through `onTokenTap`.
+    /// Where the token leads when it is rendered as plain attributed text
+    /// (`GlimmerView.attributedString(for:configuration:traitCollection:)`). `GlimmerView` ignores it; a tap reports the token through `onTokenTap`.
     public var url: URL?
 
     public enum Presentation: Sendable, Equatable {

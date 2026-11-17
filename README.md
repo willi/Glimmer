@@ -81,6 +81,26 @@ struct Answer: View {
 The configuration is read when the view is created. To apply a different one, give the view a new identity, for
 example with `.id(themeVersion)`.
 
+## Plain attributed text
+
+For a short summary in a `Text`, where a text view per row costs too much, compose the markdown into an
+`AttributedString`:
+
+```swift
+struct Summary: View {
+    let markdown: String
+
+    var body: some View {
+        Text(GlimmerView.attributedString(for: markdown))
+    }
+}
+```
+
+The result is static. Images are left out with the space around them, a code block becomes its code in the theme's code
+font, a table becomes one line per row with tabs between cells, and a thematic break is dropped. An extension's chip or
+token becomes its `displayText`, linked to the token's `url` when it has one. Pass a `GlimmerConfiguration` for the theme
+and extensions.
+
 ## Configuration
 
 `GlimmerConfiguration` holds everything besides the markdown:
