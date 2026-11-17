@@ -69,9 +69,9 @@ final class GlimmerTextView: UITextView {
     }
 
     init() {
-        Self.installViewportHooks
         // On iOS 16+, a nil text container gives a TextKit 2 text view.
         _ = Self.overridesInstalled
+        _ = Self.installViewportHooks
         super.init(frame: .zero, textContainer: nil)
         backgroundColor = .clear
         isEditable = false
@@ -368,9 +368,10 @@ final class GlimmerTextView: UITextView {
     }
 
     // The iOS 27 SDK's rendering-surface cache hooks (WWDC26: key rendering surfaces by NSTextLayoutFragment) and its
-    // viewport hooks (will/did layout, viewport bounds) are declared by selector so they compile with the iOS 26 SDK;
+    // viewport hooks (will/did layout, viewport bounds) are reached by selector so they compile with the iOS 26 SDK: the
+    // cache hooks are declared by selector here, the viewport hooks are installed at runtime (`installViewportHooks`).
     // iOS 26 never calls the cache hooks. UITextView implements all of them, and its implementations are always
-    // called: UIKit asserts if the surface it made isn't stored.
+    // called. For the cache hooks that is required: UIKit asserts if the surface it made isn't stored.
     @objc(textViewportLayoutController:retrieveCachedRenderingSurfaceForKey:)
     func retrieveDrawnSurface(_ controller: NSTextViewportLayoutController, key: AnyObject) -> AnyObject? {
         if reusesDrawnText, let fragment = key as? NSTextLayoutFragment, let view = drawnSurfaces.object(forKey: fragment),
@@ -611,46 +612,40 @@ final class GlimmerTextView: UITextView {
         return band
     }
 
-    /// Overrides the iOS 27 SDK's viewport hooks by selector. They are public methods of `UITextView` in the iOS 27 SDK
-    /// and absent from the iOS 26 SDK, so a Swift `override` would build with only one of them. Each replacement calls
-    /// UITextView's implementation, as `retrieveDrawnSurface` does. UIKit calls these on iOS 26 too, where `will`/`did`
-    /// are harmless and `bounds` defers to UIKit.
+    /// Overrides the iOS 27 SDK's viewport hooks at runtime, by selector. They are public methods of `UITextView` in the
+    /// iOS 27 SDK and absent from the iOS 26 SDK, so a Swift `override` would build with only one of them. A hook is
+    /// installed only if `UITextView` has the method. Each replacement looks up and calls UITextView's implementation
+    /// per call, as `retrieveDrawnSurface` does.
     private static let installViewportHooks: Void = {
-        func replace<Block>(_ selectorName: String, types: String, block: Block) {
-            let selector = NSSelectorFromString(selectorName)
-            guard class_getInstanceMethod(UITextView.self, selector) != nil else { return }
-            class_replaceMethod(GlimmerTextView.self, selector, imp_implementationWithBlock(block), types)
-        }
-        func superImplementation(_ selectorName: String) -> IMP? {
-            class_getMethodImplementation(UITextView.self, NSSelectorFromString(selectorName))
-        }
-        let willName = "textViewportLayoutControllerWillLayout:"
-        let didName = "textViewportLayoutControllerDidLayout:"
-        let boundsName = "viewportBoundsForTextViewportLayoutController:"
         typealias Layout = @convention(c) (AnyObject, Selector, AnyObject) -> Void
         typealias Bounds = @convention(c) (AnyObject, Selector, AnyObject) -> CGRect
-        if let implementation = superImplementation(willName) {
-            let superCall = unsafeBitCast(implementation, to: Layout.self)
-            let block: @convention(block) (GlimmerTextView, AnyObject) -> Void = { view, controller in
-                view.glimmerViewportLayoutWillLayout()
-                superCall(view, NSSelectorFromString(willName), controller)
-            }
-            replace(willName, types: "v@:@", block: block)
+        func install<Block>(_ selector: Selector, block: Block) {
+            guard let method = class_getInstanceMethod(UITextView.self, selector),
+                  let types = method_getTypeEncoding(method) else { return }
+            class_replaceMethod(GlimmerTextView.self, selector, imp_implementationWithBlock(block), types)
         }
-        if let implementation = superImplementation(didName) {
-            let superCall = unsafeBitCast(implementation, to: Layout.self)
-            let block: @convention(block) (GlimmerTextView, AnyObject) -> Void = { view, controller in
-                superCall(view, NSSelectorFromString(didName), controller)
-                view.glimmerViewportLayoutDidLayout()
-            }
-            replace(didName, types: "v@:@", block: block)
+        func superImplementation(_ selector: Selector) -> IMP? {
+            class_getMethodImplementation(UITextView.self, selector)
         }
-        if let implementation = superImplementation(boundsName) {
-            let superCall = unsafeBitCast(implementation, to: Bounds.self)
-            let block: @convention(block) (GlimmerTextView, AnyObject) -> CGRect = { view, controller in
-                view.glimmerViewportBounds() ?? superCall(view, NSSelectorFromString(boundsName), controller)
+        let will = NSSelectorFromString("textViewportLayoutControllerWillLayout:")
+        let did = NSSelectorFromString("textViewportLayoutControllerDidLayout:")
+        let bounds = NSSelectorFromString("viewportBoundsForTextViewportLayoutController:")
+        install(will, block: { (view: GlimmerTextView, controller: AnyObject) in
+            view.glimmerViewportLayoutWillLayout()
+            if let implementation = superImplementation(will) {
+                unsafeBitCast(implementation, to: Layout.self)(view, will, controller)
             }
-            replace(boundsName, types: "{CGRect={CGPoint=dd}{CGSize=dd}}@:@", block: block)
-        }
+        } as @convention(block) (GlimmerTextView, AnyObject) -> Void)
+        install(did, block: { (view: GlimmerTextView, controller: AnyObject) in
+            if let implementation = superImplementation(did) {
+                unsafeBitCast(implementation, to: Layout.self)(view, did, controller)
+            }
+            view.glimmerViewportLayoutDidLayout()
+        } as @convention(block) (GlimmerTextView, AnyObject) -> Void)
+        install(bounds, block: { (view: GlimmerTextView, controller: AnyObject) -> CGRect in
+            if let band = view.glimmerViewportBounds() { return band }
+            guard let implementation = superImplementation(bounds) else { return controller.viewportBounds }
+            return unsafeBitCast(implementation, to: Bounds.self)(view, bounds, controller)
+        } as @convention(block) (GlimmerTextView, AnyObject) -> CGRect)
     }()
 }
