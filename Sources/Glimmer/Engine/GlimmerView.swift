@@ -72,6 +72,12 @@ public final class GlimmerView: UIView {
     /// The bottom of the last revealed line, for a revealed length and width. Appends after the revealed text do not
     /// move it; edits that reach into the revealed text clear it.
     private(set) var revealedHeight: (revealed: Int, width: CGFloat, height: CGFloat)?
+    /// Per width, the most `height(forWidth:)` returned during the running reveal: no later answer at that width goes
+    /// below it until the reveal ends.
+    private var revealHeightFloors: [CGFloat: CGFloat] = [:]
+    /// Whether the last result applied was a streamed one. Tables keep their streaming layout while it is, and while
+    /// a reveal runs (see `syncTableStreaming`).
+    private var showsStreamedResult = false
     /// The first character whose layout may have changed since the text view was last measured.
     private var layoutChangedFrom = 0
     /// Embeds that reveal in units (code lines, table rows): document offset → each unit's length.
@@ -482,6 +488,7 @@ public final class GlimmerView: UIView {
         engine = GlimmerRevealEngine(options: options, alreadyRevealed: min(resumed, length))
         revealMask.invalidateGeometry()
         revealedHeight = nil
+        revealHeightFloors = [:]
         textView.layer.mask = revealMask.layer
         // VoiceOver reads this view's label (the revealed text) instead: the text view's unrevealed text is laid out.
         textView.accessibilityElementsHidden = true
@@ -508,11 +515,34 @@ public final class GlimmerView: UIView {
         revealedHeight = nil
     }
 
+    /// Tables take their content's widths while the answer streams and while its reveal runs, so rows already shown
+    /// never re-wrap (see `GlimmerTableView.isStreaming`). Once the answer has settled and the reveal has ended, each
+    /// fits the width, once, and is laid out again: never mid-reveal, where a re-fit could shrink rows already shown.
+    private func syncTableStreaming(_ isStreaming: Bool) {
+        var changedFrom = Int.max
+        for offset in embedUnits.keys {
+            guard let attachment = textView.blockAttachment(atCharacter: offset), case .table = attachment.embed,
+                  attachment.isStreaming != isStreaming else { continue }
+            attachment.isStreaming = isStreaming
+            guard !isStreaming, attachment.existingView != nil else { continue }
+            textView.invalidateEmbedLayout(atCharacter: offset)
+            layoutChangedFrom = min(layoutChangedFrom, offset)
+            changedFrom = min(changedFrom, offset)
+        }
+        guard changedFrom < .max else { return }
+        fitTextViewToContent()
+        revealMask.invalidateGeometry(from: changedFrom)
+        revealedHeight = nil
+    }
+
     private func endReveal() {
         // Read before `engine` clears: while revealing, this view is the element VoiceOver focuses.
         let hadFocus = engine != nil && accessibilityElementIsFocused()
         engine = nil
+        revealHeightFloors = [:]
         syncEmbedUnits()
+        // The reveal is over: tables of a settled answer fit now.
+        syncTableStreaming(showsStreamedResult)
         clock.cancel()
         textView.layer.mask = nil
         textView.accessibilityElementsHidden = false
@@ -532,6 +562,8 @@ public final class GlimmerView: UIView {
         textView.apply(theme: configuration.theme.scaled(for: traitCollection), dataDetectors: configuration.dataDetectors)
         textView.isFindInteractionEnabled = configuration.allowsFind
         if revealOptions == nil { endReveal() }
+        // A new theme or text size lays everything out afresh: heights from before it are no floor.
+        revealHeightFloors = [:]
         composeSynchronously()
     }
 
@@ -641,6 +673,9 @@ public final class GlimmerView: UIView {
             revealMask.invalidateGeometry()
         }
         if replacedText || result.edit != nil { fitTextViewToContent() }
+        showsStreamedResult = result.isStreaming
+        // A settled result that lands mid-reveal leaves tables as they are; `endReveal` fits them.
+        syncTableStreaming(result.isStreaming || engine != nil)
         startRevealIfNeeded(isStreaming: result.isStreaming, finishedText: revealingFinishedText)
         // Text that lands after `finishReveal()` shows in full, so it counts as revealed too.
         if revealFinished { recordFullyRevealed() }
@@ -682,8 +717,21 @@ public final class GlimmerView: UIView {
     // MARK: - Height
 
     /// The full document's height at `width` or, while revealing, the bottom of the last revealed line.
+    ///
+    /// While a reveal runs the height never decreases. Tables keep their streaming layout until it ends, so the
+    /// revealed text rarely moves up; when it does (revealed text re-flowed by an edit), the answer is clamped to the
+    /// most this method returned at the same width during the reveal. The view is then briefly taller than its
+    /// revealed text; the true height is reported once the reveal ends.
     private func height(forWidth width: CGFloat) -> CGFloat {
         guard width > 0 else { return 0 }
+        guard engine != nil else { return unclampedHeight(forWidth: width) }
+        let height = max(unclampedHeight(forWidth: width), revealHeightFloors[width] ?? 0)
+        revealHeightFloors[width] = height
+        return height
+    }
+
+    /// `height(forWidth:)` without the reveal's floor.
+    private func unclampedHeight(forWidth width: CGFloat) -> CGFloat {
         if let engine, engine.revealedLength < textView.textStorage.length {
             // An embed at the frontier with units started: its box, as tall as those units, ends the height.
             let frontierEmbed = (engine.unitsRevealed[engine.revealedLength] ?? 0) > 0

@@ -1,6 +1,6 @@
 import UIKit
 
-/// An inline chip for an extension token. It is laid out at the line height, on the baseline.
+/// An inline chip for an extension token. It is laid out at the line height, on the baseline; a taller view grows the line.
 final class GlimmerInlineAttachment: NSTextAttachment {
     let token: GlimmerInlineToken
     let glimmerExtension: any GlimmerExtension
@@ -84,10 +84,19 @@ final class GlimmerInlineViewProvider: NSTextAttachmentViewProvider {
         proposedLineFragment: CGRect, position: CGPoint
     ) -> CGRect {
         let font = attributes[.font] as? UIFont ?? UIFont.preferredFont(forTextStyle: .body)
-        let height = ceil(font.lineHeight)
+        let lineHeight = ceil(font.lineHeight)
         let available = proposedLineFragment.width
         let chip = view
-        let fitted = MainActor.assumeIsolated { chip?.sizeThatFits(CGSize(width: available, height: height)).width ?? 0 }
-        return CGRect(x: 0, y: font.descender, width: min(ceil(fitted), available), height: height)
+        let fitted = MainActor.assumeIsolated {
+            chip?.sizeThatFits(CGSize(width: available, height: lineHeight)) ?? .zero
+        }
+        let width = min(ceil(fitted.width), available)
+        // A chip no taller than the line keeps the line's height and sits on the descender.
+        guard ceil(fitted.height) > lineHeight else {
+            return CGRect(x: 0, y: font.descender, width: width, height: lineHeight)
+        }
+        // A taller chip grows the line, centred on the cap height.
+        let height = ceil(fitted.height)
+        return CGRect(x: 0, y: (font.capHeight - height) / 2, width: width, height: height)
     }
 }

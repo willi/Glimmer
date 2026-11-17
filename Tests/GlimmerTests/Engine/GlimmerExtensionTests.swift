@@ -23,6 +23,36 @@ private struct CitationExtension: GlimmerExtension {
     }
 }
 
+/// A chip whose view is a fixed 30 x 40 pt box, taller than the body line.
+private struct TallChip: GlimmerExtension {
+    func scan(_ text: String) -> [GlimmerInlineToken] {
+        CitationExtension().scan(text)
+    }
+
+    @MainActor func makeInlineView(for token: GlimmerInlineToken, theme: GlimmerTheme) -> UIView? {
+        FixedSizeView(size: CGSize(width: 30, height: 40))
+    }
+}
+
+/// A view that reports a fixed size.
+private final class FixedSizeView: UIView {
+    private let fixedSize: CGSize
+
+    init(size: CGSize) {
+        fixedSize = size
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func sizeThatFits(_ size: CGSize) -> CGSize { fixedSize }
+}
+
+/// A text location that is never inspected.
+private final class StubLocation: NSObject, NSTextLocation {
+    func compare(_ location: any NSTextLocation) -> ComparisonResult { .orderedSame }
+}
+
 /// A citation chip that reports taps.
 private struct TappableCitations: GlimmerExtension {
     private let base = CitationExtension()
@@ -77,6 +107,79 @@ final class GlimmerExtensionTests: XCTestCase {
         let chip = try XCTUnwrap(textView.allSubviews.compactMap { $0 as? UILabel }.first { $0.accessibilityIdentifier == "citation" })
         XCTAssertEqual(chip.frame.height, ceil(theme.bodyFont.lineHeight), accuracy: 1)
         _ = window
+    }
+
+    /// The bounds the chip's view provider reports for `chipExtension`'s first token in the body font.
+    private func chipBounds(_ chipExtension: any GlimmerExtension) throws -> CGRect {
+        let token = try XCTUnwrap(chipExtension.scan("[3]").first)
+        let attachment = GlimmerInlineAttachment(token: token, glimmerExtension: chipExtension, theme: theme)
+        let provider = GlimmerInlineViewProvider(
+            textAttachment: attachment, parentView: nil, textLayoutManager: nil, location: StubLocation()
+        )
+        provider.loadView()
+        return provider.attachmentBounds(
+            for: [.font: theme.bodyFont], location: StubLocation(), textContainer: nil,
+            proposedLineFragment: CGRect(x: 0, y: 0, width: 320, height: 20), position: .zero
+        )
+    }
+
+    func testAChipTallerThanTheLineGrowsTheLine() throws {
+        let view = GlimmerView(configuration: GlimmerConfiguration(extensions: [TallChip()], imageLoader: nil))
+        view.update(markdown: "a [1] b")
+        let height = view.sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)).height
+        let window = hostInWindow(view, width: 320, height: height)
+        let chip = try XCTUnwrap(findSubview(FixedSizeView.self, in: view))
+        XCTAssertEqual(chip.frame.height, 40, accuracy: 0.5)
+        XCTAssertGreaterThanOrEqual(height, 40)
+        let bounds = try chipBounds(TallChip())
+        XCTAssertEqual(bounds.height, 40)
+        XCTAssertEqual(bounds.midY, theme.bodyFont.capHeight / 2, accuracy: 1)
+        _ = window
+    }
+
+    func testTheMeasurerSeesATallChipLikeTheHostedView() throws {
+        let configuration = GlimmerConfiguration(extensions: [TallChip()], imageLoader: nil, reveal: .none)
+        let view = GlimmerView(configuration: configuration)
+        view.update(markdown: "a [1] b")
+        let hosted = view.sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)).height
+        let window = hostInWindow(view, width: 320, height: hosted)
+        let inset = view.textView.textContainerInset
+        let measurer = GlimmerTextMeasurer(
+            text: compose("a [1] b", extensions: [TallChip()]), width: 320, insets: inset,
+            lineFragmentPadding: view.textView.textContainer.lineFragmentPadding
+        )
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(measurer.lineBottoms.first), 40 + inset.top)
+        XCTAssertEqual(view.height(forWidth: 320, notExceeding: 10_000), hosted, accuracy: 0.5)
+        _ = window
+    }
+
+    func testTheRevealMaskCoversATallChip() async throws {
+        let view = GlimmerView(configuration: GlimmerConfiguration(extensions: [TallChip()], imageLoader: nil))
+        let clock = ManualRevealClock()
+        view.clock = clock
+        let window = hostInWindow(view, width: 320, height: 200)
+        view.update(markdown: "Alpha beta [1] gamma delta epsilon zeta eta", isStreaming: true)
+        await view.pendingDocument?.value
+        var time = 0.0
+        while (view.engine?.revealedLength ?? 0) < 14, time < 1 {
+            time += 0.02
+            clock.advance(to: time)
+        }
+        settle(view)
+        let chip = try XCTUnwrap(findSubview(FixedSizeView.self, in: view))
+        let frame = chip.convert(chip.bounds, to: view.textView)
+        let phrases = try XCTUnwrap(view.engine).phrases
+        XCTAssertFalse(phrases.isEmpty, "a phrase is fading")
+        let layers = phrases.compactMap { view.revealMask.phraseLayer(startingAt: $0.range.location)?.path?.boundingBox }
+        let covered = layers.reduce(view.revealMask.settledRect) { $0.union($1) }
+        XCTAssertTrue(covered.insetBy(dx: -1.5, dy: -1.5).contains(frame), "\(covered) covers \(frame)")
+        _ = window
+    }
+
+    func testAChipNoTallerThanTheLineKeepsItsBounds() throws {
+        let bounds = try chipBounds(CitationExtension())
+        XCTAssertEqual(bounds.height, ceil(theme.bodyFont.lineHeight))
+        XCTAssertEqual(bounds.minY, theme.bodyFont.descender)
     }
 
     func testChipAfterEmojiKeepsItsRange() {

@@ -45,6 +45,9 @@ public struct GlimmerTheme: Sendable {
     public var embedPadding: CGFloat
     public var embedCornerRadius: CGFloat
     public var maxTableColumnWidth: CGFloat
+    /// The narrowest a table column shrinks to, in points, when the columns don't fit the width. Cells wrap as the
+    /// columns narrow; the table scrolls sideways only when every column is at this width and still doesn't fit.
+    public var minTableColumnWidth: CGFloat
     /// Width ÷ height of the box reserved for an image before it loads.
     public var imagePlaceholderAspect: CGFloat
     public var maxImageHeight: CGFloat
@@ -73,6 +76,7 @@ public struct GlimmerTheme: Sendable {
         copy.listIndent = scale(listIndent)
         copy.quoteIndent = scale(quoteIndent)
         copy.embedPadding = scale(embedPadding)
+        copy.minTableColumnWidth = scale(minTableColumnWidth)
         copy.bodyFont = scale(bodyFont, .body)
         copy.codeFont = scale(codeFont, .body)
         copy.headingFonts = headingFonts.enumerated().map { level, font in
@@ -126,6 +130,7 @@ extension GlimmerTheme {
             embedPadding: 12,
             embedCornerRadius: 12,
             maxTableColumnWidth: 260,
+            minTableColumnWidth: 72,
             imagePlaceholderAspect: 16.0 / 9.0,
             maxImageHeight: 320,
             underlinesLinks: false,

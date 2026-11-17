@@ -20,7 +20,7 @@ Add Glimmer with Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/willi/Glimmer.git", from: "2.2.0"),
+    .package(url: "https://github.com/willi/Glimmer.git", from: "2.3.0"),
 ]
 ```
 
@@ -52,9 +52,11 @@ for chunk in ["Glimmer reveals ", "an answer ", "phrase by phrase."] {
 view.update(markdown: received, isStreaming: false, revealID: messageID)
 ```
 
-While an answer reveals, the view's height ends at the last revealed line and never shrinks. `onHeightChange` fires
-whenever the height may have changed, even once per streamed chunk with the same height: compare against the last
-height before relaying out.
+While an answer reveals, the view's height ends at the last revealed line and never shrinks: if an edit moves revealed
+text up, the view keeps its height (with space below the text) until the answer finishes revealing, then reports the
+true height. A new width, theme or text size starts afresh, with no height to hold.
+`onHeightChange` fires whenever the height may have changed, even once per streamed chunk with the same height: compare
+against the last height before relaying out.
 
 A reveal can be controlled by the host. `finishReveal()` ends a running reveal now, for an older answer that should stop
 animating once a newer one starts; the whole answer then counts as revealed for its `revealID`. `isRevealing` says
@@ -117,6 +119,39 @@ font, a table becomes one line per row with tabs between cells, and a thematic b
 token becomes its `displayText`, linked to the token's `url` when it has one. Pass a `GlimmerConfiguration` for the theme
 and extensions.
 
+## Static text in SwiftUI
+
+`Text` ignores paragraph indents and tab stops, so a list in an attributed string loses its hanging indent. For short,
+finished markdown with lists, use `GlimmerStaticText`, which lays the blocks out in SwiftUI without a text view:
+
+```swift
+struct Summary: View {
+    let markdown: String
+
+    var body: some View {
+        GlimmerStaticText(markdown) { url in print(url) }
+            .lineLimit(6)
+    }
+}
+```
+
+Paragraphs and headings are `Text`s, spaced like `GlimmerView`. A list's items sit beside their markers with every line
+indented by the theme's `listIndent`; nested lists indent again and task items show ☑︎ or ☐. A quote's text is dimmed
+beside a bar, a code block is its code on the code block background, a table is one line per row with tabs between
+cells, and a thematic break is a rule. Images are left out, as in `attributedString`. Links are tappable: the closure
+gets the URL, and without one the environment's `openURL` does (a handler you installed higher up, or the system).
+`.lineLimit` applies to each block's `Text`. The theme's `lineHeightMultiple` isn't applied, since `Text` has no line
+height multiple: add `.lineSpacing(_:)` for more space between lines. Every run carries the theme's font and colour, so
+`.font(_:)` and `.foregroundStyle(_:)` on the view change nothing: set them in the theme. Paragraphs, headings and
+tables are as wide as their text; a document with a list, quote, code block or rule fills the width it's offered.
+
+The view reads `dynamicTypeSize` itself. Documents are built once per markdown, theme, text size, extensions and
+highlighter, and shared between views, so a cell and a sizing view showing the same summary build it once. An
+extension or highlighter that isn't `Hashable` can't be shared: each view then builds its own, and a change to that
+dependency alone needs a new view identity (`.id(extensionVersion)`). Two edge cases differ from `GlimmerView`: a list
+item that starts with a code block, table or rule shows its marker beside it rather than above it, and the space above a
+heading that follows an empty quote at the start differs.
+
 ## Configuration
 
 `GlimmerConfiguration` holds everything besides the markdown:
@@ -132,6 +167,13 @@ let view = GlimmerView(configuration: configuration)
 
 - **`theme`** (`GlimmerTheme`): fonts per role (body, H1–H6, code, table, table header, caption), dynamic colors,
   spacing, and options such as link underlines and the code-block header. Fonts scale with Dynamic Type.
+  `blockSpacing` is the gap between blocks. A heading's space above is the larger of that gap and the space the
+  block before it already leaves, like CSS margin collapsing, so with the default theme a heading after a paragraph
+  has 16 pt above it, not 28. A heading at the start has none. `minTableColumnWidth` (72 pt by default, scaling with
+  Dynamic Type) is the narrowest a table column gets: tables fit the available width by narrowing their widest
+  columns and wrapping cell text, and scroll sideways only when every column is at this width and still doesn't fit.
+  While an answer streams, a table's columns take their content's width instead (scrolling sideways if that is too
+  wide), and the table fits the width once the reveal ends.
 - **`extensions`**: custom syntax. See [Extensions](#extensions).
 - **`highlighter`** (`GlimmerHighlighter`): syntax highlighting for code blocks. The default,
   `GlimmerBasicHighlighter`, covers keywords, strings, comments and numbers in common languages.
@@ -270,6 +312,9 @@ configuration.extensions = [Citations()]
 GlimmerView(configuration: configuration).update(markdown: "As shown [1].")
 ```
 
+A chip view taller than its line makes the line taller, with its bounds centred on the cap height. A shorter chip
+keeps its place on the line and doesn't change the line's height.
+
 A token can also show as text or as an image: set its `presentation` to `.text(tappable:)` or `.image(url)`. Tappable
 text uses the theme's `mentionColor`, and `onTokenTap` (on `GlimmerView` and `GlimmerText`) reports the token;
 VoiceOver reaches it as a link. An extension can skip link text (`appliesInsideLinks`). It can also hold back a token
@@ -367,7 +412,9 @@ How it stays fast:
 - **Core Animation fades.** The reveal is a mask of phrase layers that Core Animation animates, so the main thread
   only starts phrases.
 - **Streaming embeds update in place.** A code block applies only its changed lines, and a table keeps the rows it
-  already measured.
+  already measured. While an answer streams, each table column takes its content's width, up to
+  `maxTableColumnWidth` (the table scrolls sideways if they don't fit), so a column widens only when its own content
+  grows and rows already shown never re-wrap. The table fits its columns to the width once the reveal ends.
 
 ## Demo app
 

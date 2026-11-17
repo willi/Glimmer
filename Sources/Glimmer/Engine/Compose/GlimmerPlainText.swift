@@ -4,6 +4,22 @@ import UIKit
 /// Turns composed text, which leans on attachments and internal links that only a `GlimmerView` understands, into text
 /// that stands alone.
 enum GlimmerPlainText {
+    /// The composer for text that stands alone: images are hidden, since nothing here can load them, and the hidden
+    /// ones close the space around them.
+    static func composer(theme: GlimmerTheme, configuration: GlimmerConfiguration) -> GlimmerComposer {
+        GlimmerComposer(
+            theme: theme, highlighter: configuration.highlighter, imageLoader: nil,
+            imagePolicy: GlimmerHideImagesPolicy(), extensions: configuration.extensions
+        )
+    }
+
+    /// Composed text flattened (see `flatten`) and converted (see `attributedString(from:)`), leaving `composed` as it was.
+    static func standalone(_ composed: NSAttributedString, theme: GlimmerTheme) -> AttributedString {
+        let text = NSMutableAttributedString(attributedString: composed)
+        flatten(text, theme: theme)
+        return attributedString(from: text)
+    }
+
     /// Replaces attachments with text, drops spoken-only text, and rewrites links: internal ones go, and a token with a
     /// URL links to it.
     static func flatten(_ text: NSMutableAttributedString, theme: GlimmerTheme) {
@@ -80,7 +96,7 @@ enum GlimmerPlainText {
                 let isChecked = next < text.length
                     && text.attribute(.glimmerSpokenOnly, at: next, effectiveRange: &spoken) != nil
                     && (text.string as NSString).substring(with: spoken).hasPrefix(GlimmerStrings.checked)
-                text.replaceCharacters(in: range, with: NSAttributedString(string: isChecked ? "\u{2611}\u{FE0E}" : "\u{2610}", attributes: attributes))
+                text.replaceCharacters(in: range, with: NSAttributedString(string: GlimmerTaskBox.character(isChecked: isChecked), attributes: attributes))
             } else {
                 text.deleteCharacters(in: range)
             }

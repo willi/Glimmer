@@ -29,6 +29,8 @@ struct GlimmerComposer {
         var paragraphSpacing: CGFloat?
         /// True while composing the document's first top-level block (no heading space above it).
         var isDocumentStart = false
+        /// The space after the text composed before this top-level block, if any. A heading's space above collapses into it.
+        var precedingSpacing: CGFloat?
         /// Width of the innermost list's marker column: its text starts this far right of the marker.
         var listStep: CGFloat = 0
         /// Markers end a fixed gap before the text (numbers) instead of starting the marker column (bullets).
@@ -49,7 +51,7 @@ struct GlimmerComposer {
         let output = NSMutableAttributedString()
         for (index, block) in blocks.enumerated() {
             let isFirst = startsDocument(index: index, in: blocks, precedingLength: output.length)
-            output.append(composeBlock(block, isFirst: isFirst))
+            output.append(composeBlock(block, isFirst: isFirst, precedingSpacing: Self.trailingSpacing(of: output)))
         }
         if output.length > 0 { output.deleteCharacters(in: NSRange(location: output.length - 1, length: 1)) }
         return output
@@ -90,17 +92,30 @@ struct GlimmerComposer {
         return imagePolicy.decision(for: GlimmerImageCandidate(url: url, alt: alt, title: title, origin: origin))
     }
 
-    /// One top-level block, ending in "\n". `compose(_:)` is exactly these joined with the final "\n" removed, which
-    /// is what lets `GlimmerStreamingDocument` re-compose only the blocks that changed.
-    func composeBlock(_ block: GlimmerBlock, isFirst: Bool) -> NSAttributedString {
-        composeBlock(block, isFirst: isFirst, reusing: nil)
+    /// One top-level block, ending in "\n". `compose(_:)` is these joined with the final "\n" removed, which is
+    /// what lets `GlimmerStreamingDocument` re-compose only the blocks that changed. That holds only if each caller
+    /// passes `trailingSpacing(of:)` for the text composed before the block (nil for none): a heading's space above
+    /// depends on it.
+    func composeBlock(_ block: GlimmerBlock, isFirst: Bool, precedingSpacing: CGFloat?) -> NSAttributedString {
+        composeBlock(block, isFirst: isFirst, precedingSpacing: precedingSpacing, reusing: nil)
     }
 
-    /// Like `composeBlock(_:isFirst:)`, and offers `reuse`'s attachments back for embeds that continue them.
-    func composeBlock(_ block: GlimmerBlock, isFirst: Bool, reusing reuse: GlimmerAttachmentReuse?) -> NSAttributedString {
+    /// The space after the last paragraph of composed text, or nil for none. A heading composed next collapses its
+    /// space above into it, so a streaming document passes the last block it kept.
+    static func trailingSpacing(of text: NSAttributedString) -> CGFloat? {
+        guard text.length > 0 else { return nil }
+        let style = text.attribute(.paragraphStyle, at: text.length - 1, effectiveRange: nil) as? NSParagraphStyle
+        return style?.paragraphSpacing
+    }
+
+    /// Like `composeBlock(_:isFirst:precedingSpacing:)`, and offers `reuse`'s attachments back for embeds that continue them.
+    func composeBlock(
+        _ block: GlimmerBlock, isFirst: Bool, precedingSpacing: CGFloat?, reusing reuse: GlimmerAttachmentReuse?
+    ) -> NSAttributedString {
         let output = NSMutableAttributedString()
         var context = Context()
         context.isDocumentStart = isFirst
+        context.precedingSpacing = precedingSpacing
         context.reuse = reuse
         append(block, context: context, marker: nil, to: output)
         return output
@@ -132,7 +147,7 @@ struct GlimmerComposer {
             }
         case .heading(let level, let inlines):
             appendTextParagraph(inlines, font: theme.headingFont(level: level), context: context, marker: marker,
-                                headingLevel: level, spacingBefore: output.length > 0 || !context.isDocumentStart ? theme.blockSpacing : 0, to: output)
+                                headingLevel: level, spacingBefore: headingSpacingBefore(output: output, context: context), to: output)
         case .blockQuote(let blocks):
             var inner = context
             inner.indent += theme.quoteIndent
@@ -168,6 +183,14 @@ struct GlimmerComposer {
         case .footnoteDefinitions(let notes):
             appendFootnotes(notes, context: context, to: output)
         }
+    }
+
+    /// The space above a heading: `blockSpacing` less the space the text above it already leaves, so the gap is the
+    /// larger of the two, as in CSS margin collapsing. None at the start of the document.
+    private func headingSpacingBefore(output: NSAttributedString, context: Context) -> CGFloat {
+        guard output.length > 0 || !context.isDocumentStart else { return 0 }
+        let above = Self.trailingSpacing(of: output) ?? context.precedingSpacing ?? 0
+        return max(0, theme.blockSpacing - above)
     }
 
     /// The notes after the answer's last block: a thin rule, then an ordered list in marker order, in the footnote
@@ -297,7 +320,7 @@ struct GlimmerComposer {
     }
 
     /// The space between a list marker and its item's text.
-    private var markerGap: CGFloat { ceil(theme.bodyFont.pointSize * 0.4) }
+    var markerGap: CGFloat { ceil(theme.bodyFont.pointSize * 0.4) }
 
     private func paragraphStyle(context: Context, marker: NSAttributedString?) -> NSMutableParagraphStyle {
         let style = NSMutableParagraphStyle()
@@ -346,11 +369,14 @@ struct GlimmerComposer {
     }
 
     /// The width of the widest `digits`-digit number marker in the body font, such as "88.".
-    private func reservedNumberWidth(digits: Int) -> CGFloat {
+    func reservedNumberWidth(digits: Int) -> CGFloat {
         let attributes: [NSAttributedString.Key: Any] = [.font: theme.bodyFont]
         let widestDigit = (0...9).map { NSAttributedString(string: "\($0)", attributes: attributes).size().width }.max() ?? 0
         return widestDigit * CGFloat(digits) + NSAttributedString(string: ".", attributes: attributes).size().width
     }
+
+    /// Bullet markers by list depth, repeating after the last.
+    static let bullets = ["•", "◦", "▪︎"]
 
     private func listMarker(kind: GlimmerList.Kind, index: Int, checkbox: Bool?, context: Context) -> NSAttributedString {
         let color = context.quoteDepth > 0 ? theme.secondaryTextColor : theme.textColor
@@ -372,7 +398,7 @@ struct GlimmerComposer {
         } else {
             switch kind {
             case .bullet:
-                let bullets = ["•", "◦", "▪︎"]
+                let bullets = Self.bullets
                 // One color for every marker, like a browser's ::marker: the text's, dimmed inside quotes.
                 marker.append(NSAttributedString(string: bullets[(context.listDepth - 1) % bullets.count], attributes: [
                     .font: theme.bodyFont, .foregroundColor: color,
