@@ -24,6 +24,24 @@ final class GlimmerReadmeExampleTests: XCTestCase {
         view.update(markdown: received, isStreaming: false, revealID: messageID)
     }
 
+    func testStreamingControl() {
+        let view = GlimmerView()
+        view.update(markdown: "A finished answer.", isStreaming: false, revealID: "message-2", revealsFinishedText: true)
+        view.finishReveal() // a newer answer started: stop animating this one
+        XCTAssertFalse(view.isRevealing)
+    }
+
+    func testSizing() {
+        let view = GlimmerView()
+        view.update(markdown: "A short reply.")
+        let width = view.fittingWidth(maximum: 280)
+        let height = view.height(forWidth: width, notExceeding: 120)
+        XCTAssertGreaterThan(width, 0)
+        XCTAssertLessThanOrEqual(width, 280)
+        XCTAssertGreaterThan(height, 0)
+        XCTAssertTrue(view.isLayoutSettled)
+    }
+
     func testSwiftUI() {
         struct Answer: View {
             let text: String

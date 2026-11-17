@@ -66,6 +66,24 @@ final class ExamplesUITests: XCTestCase {
         app.buttons["Basic"].tap()
     }
 
+    /// A tappable chip is one VoiceOver link (not also a separate element with the same label), and a real tap reaches
+    /// the host's `onTokenTap`.
+    @MainActor
+    func testTappableChipIsOneLinkAndReportsItsTap() {
+        let app = launch("basic-features", ["--section=1"])
+        XCTAssertTrue(app.navigationBars["Basic Features"].waitForExistence(timeout: 15))
+        let chip = app.links["@tim"].firstMatch
+        XCTAssertTrue(chip.waitForExistence(timeout: 10), "the chip is exposed as a link")
+        let exposed = app.descendants(matching: .any).matching(NSPredicate(
+            format: "label == '@tim' AND elementType != %d", XCUIElement.ElementType.textView.rawValue))
+        XCTAssertEqual(exposed.count, 1, "the chip is announced once")
+        XCTAssertEqual(exposed.firstMatch.elementType, .link)
+        chip.tap()
+        let banner = app.staticTexts["demo.lastTap"]
+        XCTAssertTrue(banner.waitForExistence(timeout: 5), "a real tap reaches onTokenTap")
+        XCTAssertEqual(banner.label, "Mention @tim")
+    }
+
     /// Linked table cells retain their native tap target and accessible link after wrapping or changing appearance.
     @MainActor
     func testTableLinksReachTheHostInEachAppearance() {

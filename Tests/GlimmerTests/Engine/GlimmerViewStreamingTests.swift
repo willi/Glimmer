@@ -245,7 +245,7 @@ final class GlimmerViewStreamingTests: XCTestCase {
         host.passes = 0
 
         // Appending lookahead text to the same paragraph and following paragraphs while the reveal has not advanced
-        // must keep the cached revealed height and never trigger `onHeightChange` or host Auto Layout passes.
+        // must keep the cached revealed height and never report a height change or trigger host Auto Layout passes.
         let chunk2 = opening + " continues with many more unrevealed words that wrap across a second and third line of the paragraph."
         view.update(markdown: chunk2, isStreaming: true)
         await view.pendingDocument?.value

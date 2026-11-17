@@ -10,8 +10,8 @@ Glimmer 2.0 is a rewrite. See [Migrating from 1.x](#migrating-from-1x).
 ## Requirements
 
 - iOS 26 or later to run
-- Xcode 26.5 or later to build. On iOS 27 the visible-band rendering needs nothing extra, because Glimmer installs the iOS 27
-  viewport methods at runtime, by selector
+- Xcode 26.5 or later to build, with the iOS 26 SDK or later. On iOS 27 the visible-band rendering needs nothing extra,
+  because Glimmer installs the iOS 27 viewport methods at runtime, by selector
 - Swift 6
 
 ## Installation
@@ -20,7 +20,7 @@ Add Glimmer with Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/willi/Glimmer.git", from: "2.1.0"),
+    .package(url: "https://github.com/willi/Glimmer.git", from: "2.2.0"),
 ]
 ```
 
@@ -54,6 +54,19 @@ view.update(markdown: received, isStreaming: false, revealID: messageID)
 
 While an answer reveals, the view's height ends at the last revealed line and never shrinks. `onHeightChange` fires
 whenever the height may have changed.
+
+A reveal can be controlled by the host. `finishReveal()` ends a running reveal now, for an older answer that should stop
+animating once a newer one starts; the whole answer then counts as revealed for its `revealID`. `isRevealing` says
+whether one is running. An answer that arrives complete, or whose stream ended before the view showed it, shows at once
+by default. To reveal it anyway, pass `revealsFinishedText: true` on the view's first update:
+
+```swift
+let view = GlimmerView()
+view.update(markdown: "A finished answer.", isStreaming: false, revealID: "message-2", revealsFinishedText: true)
+view.finishReveal() // a newer answer started: stop animating this one
+```
+
+The flag is ignored when an earlier update is still composing, so pass it on a view's first configure.
 
 Footnotes render as the web renders them: superscript numbers in order of first reference, and the notes as a list
 after the last block. A marker shows as a number as soon as it arrives. The notes appear only once the answer
@@ -292,13 +305,32 @@ view.linkMenuActions = { url in [UIAction(title: "Copy Link") { _ in UIPasteboar
 
 `GlimmerText` takes the same two hooks.
 
+## Sizing
+
+`sizeThatFits(_:)` gives the height at a width. For a chat bubble, ask for the width the text needs and a height that
+never shows a cut line:
+
+```swift
+let view = GlimmerView()
+view.update(markdown: "A short reply.")
+let width = view.fittingWidth(maximum: 280)
+let height = view.height(forWidth: width, notExceeding: 120)
+```
+
+`fittingWidth(maximum:)` is the width of the longest line, never above `maximum`; text with a code block, table, image
+or rule fills `maximum`. `height(forWidth:notExceeding:)` returns the full height when it fits, otherwise the bottom of
+the last whole line that fits (0 when not even the first does), for a collapsed answer with a "Show more" button.
+A streamed update composes off the main thread: `isLayoutSettled` is `false` until it lands, and `onHeightChange` then
+fires once with it `true`, even if the height did not change. Calls during the update can arrive with it `false`.
+
 ## Accessibility
 
 - While an answer reveals, VoiceOver reads it as one element whose label is the text revealed so far. When the
   reveal settles, the text view takes over, with line and word navigation and the links rotor.
 - Code blocks read "Code, swift", then the code, then a Copy button.
 - Tables are data tables with column headers.
-- Chips read their extension's `accessibilityLabel`.
+- Chips read their extension's `accessibilityLabel`. A chip whose token has `isTappable` set (or a `.text(tappable: true)`
+  token) is a link for VoiceOver, and activating it reports the token through `onTokenTap`.
 - Task-list items say whether they are checked.
 - Headings carry their level. A host can group a settled answer into one element by setting
   `isAccessibilityElement`.

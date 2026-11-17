@@ -27,7 +27,6 @@ struct GlimmerCacheIdentity: Hashable, Sendable {
     static func == (lhs: GlimmerCacheIdentity, rhs: GlimmerCacheIdentity) -> Bool {
         switch (lhs.storage, rhs.storage) {
         case (.builtIn(let left), .builtIn(let right)): left == right
-        // `AnyHashable` compares the dynamic types first, then the values with `==`.
         case (.value(let left), .value(let right)):
             // `AnyHashable` alone calls a class and its subclass, or `Int` and `Int8`, equal; the exact type must match.
             type(of: left.value.base) == type(of: right.value.base) && left.value == right.value

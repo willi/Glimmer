@@ -5,7 +5,7 @@ import UIKit
 ///
 /// Size it with Auto Layout (a width constraint gives an intrinsic height) or call `sizeThatFits(_:)` with a finite
 /// width. While a reveal runs, the height ends at the last revealed line. `onHeightChange` fires whenever the height
-/// may have changed.
+/// may have changed, and also when a streamed update's layout settles, even if the height did not change.
 @MainActor
 public final class GlimmerView: UIView {
     public var configuration: GlimmerConfiguration {
@@ -49,6 +49,8 @@ public final class GlimmerView: UIView {
     private(set) var pendingDocument: Task<Void, Never>?
     /// Whether the layout is final for the latest `update`. It is `false` while an update waits for or runs on the
     /// worker, and `true` otherwise. When it turns `true`, `onHeightChange` is called even if the height is unchanged.
+    /// A call to `onHeightChange` while an update is still composing can arrive with this `false`; exactly one call
+    /// arrives with it `true` for each settle.
     public var isLayoutSettled: Bool { pendingDocument == nil }
     /// Main-thread time spent applying the last document change: the spec's "applying one network update" metric.
     private(set) var lastApplyDuration: Duration = .zero
@@ -114,7 +116,9 @@ public final class GlimmerView: UIView {
     /// then revealed from the progress stored for `revealID`, or from the start, within `drainDuration`: an answer
     /// whose stream ended before this view showed it, or one that arrived complete, still reveals. Nothing reveals
     /// when the stored progress covers the whole text, when `revealID` is nil, or when the reveal is off (`.none` or
-    /// Reduce Motion).
+    /// Reduce Motion). The flag is ignored when an earlier update is still composing (`isLayoutSettled` is false after
+    /// the call), and it does not count as a change for the early return above, so a host must pass it on a view's first
+    /// configure.
     public func update(markdown: String, isStreaming: Bool, revealID: String?, revealsFinishedText: Bool) {
         guard markdown != self.markdown || isStreaming != self.isStreaming || revealID != self.revealID else { return }
         if revealID != self.revealID {
