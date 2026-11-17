@@ -119,6 +119,8 @@ let view = GlimmerView(configuration: configuration)
 
 ## Image caching
 
+Make an extension, highlighter or image loader `Hashable` to let views with equal configurations share composed answers. Two that compare equal must render equally. A custom loader that is not `Hashable` makes each view compose its settled answers itself.
+
 `GlimmerURLSessionImageLoader()` uses `GlimmerImageCache.shared` automatically for inline and standalone images.
 Its defaults are 32 MiB for prepared images, 16 MiB for HTTP responses in memory, and 128 MiB for HTTP responses on
 disk. Prepared images are charged by decoded byte size, dropped on memory warnings, and never retained if one image
@@ -235,6 +237,8 @@ A token can also show as text or as an image: set its `presentation` to `.text(t
 text uses the theme's `mentionColor`, and `onTokenTap` (on `GlimmerView` and `GlimmerText`) reports the token;
 VoiceOver reaches it as a link. An extension can skip link text (`appliesInsideLinks`). It can also hold back a token
 still being typed at the end of a stream (`streamingHoldBack(in:)`), so `:rock` never turns into 🚀 after it was shown.
+
+Make an extension, highlighter or image loader `Hashable` to let views with equal configurations share composed answers. Two that compare equal must render equally. Without it, each view composes a settled answer itself.
 
 Two extensions are built in, and both are opt-in:
 

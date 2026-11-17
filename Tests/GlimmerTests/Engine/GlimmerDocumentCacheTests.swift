@@ -29,12 +29,99 @@ private struct ConfiguredCacheHighlighter: GlimmerHighlighter {
     }
 }
 
+private struct Tagged: GlimmerExtension, Hashable {
+    let tag: String
+    func scan(_ text: String) -> [GlimmerInlineToken] {
+        guard let range = text.range(of: "@person") else { return [] }
+        return [GlimmerInlineToken(range: range, kind: "person", displayText: tag,
+                                  source: "@person", presentation: .text(tappable: false))]
+    }
+}
+
+private struct Untagged: GlimmerExtension {}
+
+/// A tappable chip with a view, so each hosted view needs its own chip view.
+private struct TappableChips: GlimmerExtension, Hashable {
+    func scan(_ text: String) -> [GlimmerInlineToken] {
+        text.ranges(of: #/\[\d+\]/#).map { range in
+            var token = GlimmerInlineToken(range: range, kind: "citation", displayText: String(text[range]),
+                                           source: String(text[range]))
+            token.isTappable = true
+            return token
+        }
+    }
+
+    @MainActor func makeInlineView(for token: GlimmerInlineToken, theme: GlimmerTheme) -> UIView? {
+        UILabel()
+    }
+}
+
+private struct HashableLoader: GlimmerImageLoader, Hashable {
+    func loadImage(from url: URL) async throws -> UIImage { UIImage() }
+}
+
 @MainActor
 final class GlimmerDocumentCacheTests: XCTestCase {
     private let answer = "# Title\n\nSome **text**.\n\n```swift\nlet x = 1\n```"
 
     override func setUp() async throws {
         GlimmerDocumentCache.shared.removeAll()
+    }
+
+    private func hitsAfterTwoViews(_ configure: () -> (GlimmerConfiguration, GlimmerConfiguration), markdown: String = "Hello @person [1]") -> Int {
+        let (a, b) = configure()
+        let first = GlimmerView(configuration: a)
+        first.update(markdown: markdown)
+        let hits = GlimmerDocumentCache.shared.hits
+        let second = GlimmerView(configuration: b)
+        second.update(markdown: markdown)
+        return GlimmerDocumentCache.shared.hits - hits
+    }
+
+    func testEqualHashableExtensionsShareComposedAnswers() {
+        let gained = hitsAfterTwoViews {
+            (.init(extensions: [Tagged(tag: "a")], imageLoader: nil), .init(extensions: [Tagged(tag: "a")], imageLoader: nil))
+        }
+        XCTAssertEqual(gained, 1)
+    }
+
+    func testDifferentHashableValuesDoNotShare() {
+        let gained = hitsAfterTwoViews {
+            (.init(extensions: [Tagged(tag: "a")], imageLoader: nil), .init(extensions: [Tagged(tag: "b")], imageLoader: nil))
+        }
+        XCTAssertEqual(gained, 0)
+    }
+
+    func testANonHashableExtensionIsStillNotCached() {
+        let gained = hitsAfterTwoViews {
+            (.init(extensions: [Untagged()], imageLoader: nil), .init(extensions: [Untagged()], imageLoader: nil))
+        }
+        XCTAssertEqual(gained, 0)
+    }
+
+    func testAHashableLoaderIsCached() {
+        let gained = hitsAfterTwoViews({
+            (.init(imageLoader: HashableLoader()), .init(imageLoader: HashableLoader()))
+        }, markdown: "Plain **text**.")
+        XCTAssertEqual(gained, 1)
+    }
+
+    func testViewsSharingACachedAnswerGetTheirOwnChipViews() throws {
+        let first = GlimmerView(configuration: .init(extensions: [TappableChips()], imageLoader: nil, reveal: .none))
+        first.update(markdown: "See [1].")
+        let firstWindow = hostInWindow(first, width: 320, height: 200)
+        let hits = GlimmerDocumentCache.shared.hits
+        let second = GlimmerView(configuration: .init(extensions: [TappableChips()], imageLoader: nil, reveal: .none))
+        second.update(markdown: "See [1].")
+        let secondWindow = hostInWindow(second, width: 320, height: 200)
+        XCTAssertEqual(GlimmerDocumentCache.shared.hits, hits + 1)
+        let firstChip = try XCTUnwrap(findSubview(GlimmerChipTapView.self, in: first))
+        let secondChip = try XCTUnwrap(findSubview(GlimmerChipTapView.self, in: second))
+        XCTAssertFalse(firstChip === secondChip)
+        XCTAssertTrue(firstChip.isDescendant(of: first))
+        XCTAssertTrue(secondChip.isDescendant(of: second))
+        XCTAssertFalse(firstChip.isDescendant(of: second))
+        _ = (firstWindow, secondWindow)
     }
 
     func testConfiguredExtensionsDoNotShareCachedOutput() {
@@ -98,13 +185,14 @@ final class GlimmerDocumentCacheTests: XCTestCase {
         _ = (firstWindow, secondWindow)
     }
 
-    func testMemoryWarningEmptiesTheCache() {
+    func testMemoryWarningEmptiesTheCache() throws {
         let view = GlimmerView(configuration: GlimmerConfiguration(imageLoader: nil))
         let window = hostInWindow(view, width: 390, height: 800)
         view.update(markdown: answer)
         NotificationCenter.default.post(name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
+        let highlighter = try XCTUnwrap(GlimmerCacheIdentity(highlighter: GlimmerBasicHighlighter()))
         let key = GlimmerDocumentCache.Key(source: answer, theme: view.configuration.theme.scaled(for: view.traitCollection),
-                                           extensions: [], highlighter: String(reflecting: GlimmerBasicHighlighter.self), imageLoader: nil)
+                                           extensions: [], highlighter: highlighter, imageLoader: nil)
         XCTAssertNil(GlimmerDocumentCache.shared.text(for: key))
         _ = window
     }

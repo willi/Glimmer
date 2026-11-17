@@ -540,18 +540,18 @@ public final class GlimmerView: UIView {
     private func composeSynchronously(revealingFinishedText: Bool = false) {
         let theme = configuration.theme.scaled(for: traitCollection)
         let source = preprocessed(markdown)
-        let key = GlimmerDocumentCache.Key(
-            source: source, theme: theme,
-            extensions: configuration.extensions.map { String(reflecting: type(of: $0)) },
-            highlighter: String(reflecting: type(of: configuration.highlighter)),
-            imageLoader: configuration.imageLoader.map { String(reflecting: type(of: $0)) },
-            imagePolicy: configuration.imagePolicy.map { GlimmerImagePolicyKey(policy: $0) },
-            inlineImageShape: configuration.inlineImageShape,
-            linksImagesForTaps: onImageTap != nil
-        )
         // An empty answer (every new view starts with one) costs nothing to compose; keep it out of the cache.
-        let cacheable = !isStreaming && !source.isEmpty && GlimmerDocumentCache.supports(configuration)
-        if cacheable, let cached = GlimmerDocumentCache.shared.text(for: key) {
+        let identities = isStreaming || source.isEmpty ? nil : GlimmerDocumentCache.identities(of: configuration)
+        let key = identities.map {
+            GlimmerDocumentCache.Key(
+                source: source, theme: theme,
+                extensions: $0.extensions, highlighter: $0.highlighter, imageLoader: $0.imageLoader,
+                imagePolicy: configuration.imagePolicy.map { GlimmerImagePolicyKey(policy: $0) },
+                inlineImageShape: configuration.inlineImageShape,
+                linksImagesForTaps: onImageTap != nil
+            )
+        }
+        if let key, let cached = GlimmerDocumentCache.shared.text(for: key) {
             // The worker starts empty; its first result replaces the whole text (see `drainDocumentUpdates`).
             worker = GlimmerDocumentWorker(document: makeDocument(), extensions: configuration.extensions)
             viewHoldsWorkerText = false
@@ -565,8 +565,8 @@ public final class GlimmerView: UIView {
         }
         let document = makeDocument()
         _ = document.update(markdown: source, isStreaming: isStreaming)
-        if cacheable { GlimmerDocumentCache.shared.store(document.text, for: key) }
-        cacheKey = cacheable ? key : nil
+        if let key { GlimmerDocumentCache.shared.store(document.text, for: key) }
+        cacheKey = key
         worker = GlimmerDocumentWorker(document: document, extensions: configuration.extensions)
         viewHoldsWorkerText = true
         appliedUpdate = requestedUpdate
