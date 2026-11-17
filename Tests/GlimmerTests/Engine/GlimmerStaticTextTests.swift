@@ -110,6 +110,16 @@ final class GlimmerStaticTextTests: XCTestCase {
         XCTAssertFalse(cache.document(markdown: "a", configuration: .default, dynamicTypeSize: .large) === a)
     }
 
+    func testAReleasedCacheStopsObservingMemoryWarnings() {
+        weak var observer: AnyObject?
+        autoreleasepool {
+            let cache = GlimmerStaticDocumentCache()
+            observer = cache.memoryWarning
+            XCTAssertNotNil(observer)
+        }
+        XCTAssertNil(observer, "the cache removes its memory-warning observer when it is released")
+    }
+
     func testAConfigurationWithoutACacheIdentityIsNotShared() {
         let cache = GlimmerStaticDocumentCache()
         var configuration = GlimmerConfiguration.default

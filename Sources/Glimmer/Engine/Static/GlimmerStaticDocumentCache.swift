@@ -34,7 +34,8 @@ final class GlimmerStaticDocumentCache {
     private let capacity: Int
     private var entries: [Key: GlimmerStaticDocument] = [:]
     private var recent: [Key] = []
-    private var memoryWarning: NSObjectProtocol?
+    /// The memory-warning observer, removed when the cache is released.
+    private(set) var memoryWarning: NSObjectProtocol?
     /// How many documents this cache has built: for tests.
     private(set) var builds = 0
 
@@ -45,6 +46,10 @@ final class GlimmerStaticDocumentCache {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.removeAll() }
         }
+    }
+
+    isolated deinit {
+        if let memoryWarning { NotificationCenter.default.removeObserver(memoryWarning) }
     }
 
     func document(
