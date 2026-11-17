@@ -33,10 +33,16 @@ public struct GlimmerTheme: Sendable {
     public var syntaxNumberColor: UIColor
 
     public var lineHeightMultiple: CGFloat
+    /// The line height multiple of headings. `nil` uses `lineHeightMultiple`.
+    public var headingLineHeightMultiple: CGFloat?
+    /// The line height multiple of code blocks. `nil` uses `lineHeightMultiple`.
+    public var codeLineHeightMultiple: CGFloat?
     /// Space after a paragraph.
     public var paragraphSpacing: CGFloat
     /// Space after an item in a tight list.
     public var tightListSpacing: CGFloat
+    /// Space after an item in a loose list, one whose items are separated by blank lines. `nil` uses `paragraphSpacing`.
+    public var looseListSpacing: CGFloat?
     /// Space around headings and embedded blocks.
     public var blockSpacing: CGFloat
     public var listIndent: CGFloat
@@ -72,6 +78,7 @@ public struct GlimmerTheme: Sendable {
         var copy = self
         copy.paragraphSpacing = scale(paragraphSpacing)
         copy.tightListSpacing = scale(tightListSpacing)
+        copy.looseListSpacing = looseListSpacing.map(scale)
         copy.blockSpacing = scale(blockSpacing)
         copy.listIndent = scale(listIndent)
         copy.quoteIndent = scale(quoteIndent)

@@ -247,7 +247,7 @@ struct GlimmerComposer {
         inner.listStep = max(theme.listIndent, ceil(widestMarker + markerGap))
         inner.indent += inner.listStep
         if case .ordered = list.kind { inner.alignsMarkersToText = true } else { inner.alignsMarkersToText = false }
-        inner.paragraphSpacing = list.isTight ? theme.tightListSpacing : nil
+        inner.paragraphSpacing = list.isTight ? theme.tightListSpacing : theme.looseListSpacing
         for (offset, item) in list.items.enumerated() {
             let marker = markers[offset]
             // The item's later lines are indented to its content column, which is what continuation lines need.
@@ -264,7 +264,7 @@ struct GlimmerComposer {
                 append(block, context: itemContext, marker: index == 0 ? marker : nil, to: output)
             }
         }
-        if list.isTight { setSpacingOfLastParagraph(context.paragraphSpacing ?? theme.paragraphSpacing, in: output) }
+        if list.isTight || theme.looseListSpacing != nil { setSpacingOfLastParagraph(context.paragraphSpacing ?? theme.paragraphSpacing, in: output) }
     }
 
     private func appendTextParagraph(
@@ -289,6 +289,7 @@ struct GlimmerComposer {
         let range = NSRange(location: start, length: output.length - start)
         let style = paragraphStyle(context: context, marker: marker)
         style.paragraphSpacingBefore = spacingBefore
+        if headingLevel != nil { style.lineHeightMultiple = theme.headingLineHeightMultiple ?? theme.lineHeightMultiple }
         output.addAttribute(.paragraphStyle, value: style, range: range)
         if context.quoteDepth > 0 { output.addAttribute(.glimmerQuoteDepth, value: context.quoteDepth, range: range) }
         if let headingLevel { output.addAttribute(.accessibilityTextHeadingLevel, value: headingLevel, range: range) }

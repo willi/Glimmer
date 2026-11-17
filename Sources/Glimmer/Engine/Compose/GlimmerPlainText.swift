@@ -27,7 +27,7 @@ enum GlimmerPlainText {
         // Attachments first: a task checkbox's state is the spoken-only text after it.
         replaceAttachments(in: text, theme: theme)
         removeSpokenOnly(from: text)
-        fixLinks(in: text)
+        fixLinks(in: text, theme: theme)
         fillMissingFontAndColor(in: text, theme: theme)
     }
 
@@ -88,7 +88,10 @@ enum GlimmerPlainText {
             } else if let chip = attachment as? GlimmerInlineAttachment {
                 // A tappable chip's run carries its token, and `fixLinks` links its URL; this covers a chip that isn't
                 // tappable, whose run carries the token only as the attachment.
-                if let url = chip.token.url { attributes[.link] = url }
+                if let url = chip.token.url {
+                    attributes[.link] = url
+                    attributes[.foregroundColor] = theme.linkColor
+                }
                 text.replaceCharacters(in: range, with: NSAttributedString(string: chip.token.displayText, attributes: attributes))
             } else if attachment.image != nil {
                 // A task-list checkbox. Its state is in the spoken-only text that follows.
@@ -150,7 +153,7 @@ enum GlimmerPlainText {
         }
     }
 
-    private static func fixLinks(in text: NSMutableAttributedString) {
+    private static func fixLinks(in text: NSMutableAttributedString, theme: GlimmerTheme) {
         let whole = NSRange(location: 0, length: text.length)
         var internalLinks: [NSRange] = []
         text.enumerateAttribute(.link, in: whole) { value, range, _ in
@@ -159,7 +162,9 @@ enum GlimmerPlainText {
         }
         for range in internalLinks { text.removeAttribute(.link, range: range) }
         text.enumerateAttribute(.glimmerToken, in: whole) { value, range, _ in
-            if let url = (value as? GlimmerTokenBox)?.token.url { text.addAttribute(.link, value: url, range: range) }
+            guard let url = (value as? GlimmerTokenBox)?.token.url else { return }
+            text.addAttribute(.link, value: url, range: range)
+            text.addAttribute(.foregroundColor, value: theme.linkColor, range: range)
         }
     }
 }

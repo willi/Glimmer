@@ -174,6 +174,10 @@ let view = GlimmerView(configuration: configuration)
   columns and wrapping cell text, and scroll sideways only when every column is at this width and still doesn't fit.
   While an answer streams, a table's columns take their content's width instead (scrolling sideways if that is too
   wide), and the table fits the width once the reveal ends.
+  `headingLineHeightMultiple` and `codeLineHeightMultiple` give headings and code their own line height, and
+  `looseListSpacing` the space after an item in a loose list; each is `nil` by default and then follows
+  `lineHeightMultiple` or `paragraphSpacing`. A chip or tappable text with a URL takes `linkColor` in
+  `attributedString` and `GlimmerStaticText`.
 - **`extensions`**: custom syntax. See [Extensions](#extensions).
 - **`highlighter`** (`GlimmerHighlighter`): syntax highlighting for code blocks. The default,
   `GlimmerBasicHighlighter`, covers keywords, strings, comments and numbers in common languages.

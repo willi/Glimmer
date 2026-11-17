@@ -7,7 +7,7 @@ enum GlimmerCodeHighlighting {
         _ code: String, language: String?, theme: GlimmerTheme, highlighter: any GlimmerHighlighter
     ) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
-        paragraph.lineHeightMultiple = theme.lineHeightMultiple
+        paragraph.lineHeightMultiple = theme.codeLineHeightMultiple ?? theme.lineHeightMultiple
         let result = NSMutableAttributedString(string: code, attributes: [
             .font: theme.codeFont,
             .foregroundColor: theme.textColor,

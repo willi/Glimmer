@@ -129,7 +129,7 @@ struct GlimmerStaticDocumentBuilder {
     ) -> [GlimmerStaticBlock] {
         var inner = context
         inner.listDepth += 1
-        inner.paragraphSpacing = isTight ? theme.tightListSpacing : nil
+        inner.paragraphSpacing = isTight ? theme.tightListSpacing : theme.looseListSpacing
         var items: [GlimmerStaticListItem] = []
         for (blocks, marker) in zip(contents, markers) {
             var children = build(blocks, context: inner)
@@ -149,7 +149,7 @@ struct GlimmerStaticDocumentBuilder {
         guard !items.isEmpty else { return [] }
         let listGap = items[0].spacingAbove
         items[0].spacingAbove = 0
-        if isTight { trailing = context.paragraphSpacing ?? theme.paragraphSpacing }
+        if isTight || theme.looseListSpacing != nil { trailing = context.paragraphSpacing ?? theme.paragraphSpacing }
         let metrics = composer(for: inner)
         let widest: CGFloat = markers.map(\.width).max() ?? 0
         let markerWidth: CGFloat = max(widest, reservedMarkerWidth)
