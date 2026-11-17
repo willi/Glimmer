@@ -69,7 +69,8 @@ enum GlimmerPlainText {
             if let block = attachment as? GlimmerBlockAttachment {
                 replace(block, at: range, in: text, attributes: attributes, theme: theme)
             } else if let chip = attachment as? GlimmerInlineAttachment {
-                // The chip's run carries the token only as the attachment, so its URL is linked here.
+                // A tappable chip's run carries its token, and `fixLinks` links its URL; this covers a chip that isn't
+                // tappable, whose run carries the token only as the attachment.
                 if let url = chip.token.url { attributes[.link] = url }
                 text.replaceCharacters(in: range, with: NSAttributedString(string: chip.token.displayText, attributes: attributes))
             } else if attachment.image != nil {

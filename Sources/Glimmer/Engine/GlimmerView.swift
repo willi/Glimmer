@@ -392,12 +392,18 @@ public final class GlimmerView: UIView {
 
     /// What a tap on the token at `index` does, or nil when the host doesn't handle token taps.
     func tokenAction(atCharacter index: Int) -> UIAction? {
-        guard onTokenTap != nil, token(atCharacter: index) != nil else { return nil }
+        guard onTokenTap != nil, isRevealed(atCharacter: index), token(atCharacter: index) != nil else { return nil }
         return UIAction { [weak self] _ in self?.tapToken(atCharacter: index) }
     }
 
+    /// Whether the character is revealed: text still hidden mid-reveal can't be tapped.
+    private func isRevealed(atCharacter index: Int) -> Bool {
+        guard let engine else { return true }
+        return index < engine.revealedLength
+    }
+
     func tapToken(atCharacter index: Int) {
-        guard let token = token(atCharacter: index) else { return }
+        guard isRevealed(atCharacter: index), let token = token(atCharacter: index) else { return }
         onTokenTap?(token)
     }
 

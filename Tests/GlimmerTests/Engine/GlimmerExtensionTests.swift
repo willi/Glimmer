@@ -161,6 +161,37 @@ final class GlimmerExtensionTests: XCTestCase {
         XCTAssertTrue(host.acceptsTaps)
         _ = window
     }
+
+    /// The text under a hidden chip or mention carries a token link too: a tap through the text view must not reach the
+    /// host before the token is revealed.
+    func testTokenTapsThroughTheTextViewWaitForTheReveal() async throws {
+        for extensions: [any GlimmerExtension] in [[TappableCitations()], [GlimmerMentions()]] {
+            let view = GlimmerView(configuration: GlimmerConfiguration(extensions: extensions, imageLoader: nil, reveal: .smooth(GlimmerRevealOptions())))
+            let clock = ManualRevealClock()
+            view.clock = clock
+            let window = hostInWindow(view, width: 320, height: 200)
+            view.onTokenTap = { _ in }
+            let token = extensions.first is GlimmerMentions ? "@grace" : "[1]"
+            let markdown = "A fairly long opening sentence so the reveal takes a while to reach the end. See \(token) now."
+            view.update(markdown: markdown, isStreaming: true)
+            await view.pendingDocument?.value
+            settle(view)
+            let index = (view.textView.textStorage.string as NSString).range(of: token == "[1]" ? "\u{FFFC}" : token).location
+            XCTAssertNotEqual(index, NSNotFound)
+            XCTAssertNil(view.tokenAction(atCharacter: index), "hidden \(token) can't be tapped")
+            var taps = 0
+            view.onTokenTap = { _ in taps += 1 }
+            view.tapToken(atCharacter: index)
+            XCTAssertEqual(taps, 0)
+            view.update(markdown: markdown, isStreaming: false)
+            await view.pendingDocument?.value
+            clock.advance(to: 60)
+            XCTAssertNotNil(view.tokenAction(atCharacter: index), "revealed \(token) can be tapped")
+            view.tapToken(atCharacter: index)
+            XCTAssertEqual(taps, 1)
+            _ = window
+        }
+    }
 }
 
 private extension UIView {

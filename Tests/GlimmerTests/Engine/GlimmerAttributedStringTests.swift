@@ -17,6 +17,19 @@ private struct LinkedCitations: GlimmerExtension {
     @MainActor func makeInlineView(for token: GlimmerInlineToken, theme: GlimmerTheme) -> UIView? { UILabel() }
 }
 
+private struct TappableLinkedCitations: GlimmerExtension {
+    private let base = LinkedCitations()
+    func scan(_ text: String) -> [GlimmerInlineToken] {
+        base.scan(text).map { token in
+            var tappable = token
+            tappable.isTappable = true
+            return tappable
+        }
+    }
+
+    @MainActor func makeInlineView(for token: GlimmerInlineToken, theme: GlimmerTheme) -> UIView? { UILabel() }
+}
+
 @MainActor
 final class GlimmerAttributedStringTests: XCTestCase {
     func testTextKeepsEmphasisAndLinks() throws {
@@ -104,6 +117,17 @@ final class GlimmerAttributedStringTests: XCTestCase {
         let chip = try XCTUnwrap(text.range(of: "[3]"))
         XCTAssertEqual(text[chip].link, URL(string: "https://a.example/cite"))
         XCTAssertNotNil(text[chip].swiftUI.font)
+    }
+
+    func testATappableChipBecomesLinkedTextWithoutAnAttachmentCharacter() throws {
+        var configuration = GlimmerConfiguration()
+        configuration.extensions = [TappableLinkedCitations()]
+        let text = GlimmerView.attributedString(for: "Source [3] here", configuration: configuration)
+        XCTAssertEqual(String(text.characters), "Source [3] here")
+        XCTAssertFalse(String(text.characters).contains("\u{FFFC}"))
+        let chip = try XCTUnwrap(text.range(of: "[3]"))
+        XCTAssertEqual(text[chip].link, URL(string: "https://a.example/cite"))
+        for run in text.runs { XCTAssertNotEqual(run.link?.scheme, "glimmer-token") }
     }
 
     func testATappableTextTokenLosesItsInternalLink() throws {
