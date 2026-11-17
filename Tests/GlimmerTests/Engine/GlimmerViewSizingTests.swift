@@ -110,4 +110,34 @@ final class GlimmerViewSizingTests: XCTestCase {
     func testACapBelowTheFirstLineReturnsZero() {
         XCTAssertEqual(settledView("a<br>b").height(forWidth: 320, notExceeding: 2), 0)
     }
+
+    private func fullHeight(_ markdown: String) -> CGFloat {
+        settledView(markdown).sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)).height
+    }
+
+    func testACapNeverLandsInsideAnEmbed() {
+        let markdown = "a<br>b\n\n```\nlet x = 1\nlet y = 2\nlet z = 3\n```\n\nc<br>d"
+        let before = fullHeight("a<br>b")
+        let withEmbed = fullHeight("a<br>b\n\n```\nlet x = 1\nlet y = 2\nlet z = 3\n```")
+        XCTAssertGreaterThan(withEmbed, before + 20)
+        let view = settledView(markdown)
+        // A cap in the middle of the embed keeps the lines above it; a cap at its bottom keeps the embed whole.
+        let inside = view.height(forWidth: 320, notExceeding: (before + withEmbed) / 2)
+        XCTAssertEqual(inside, before, accuracy: 1.5)
+        let after = view.height(forWidth: 320, notExceeding: withEmbed + 1)
+        XCTAssertEqual(after, withEmbed, accuracy: 1.5)
+    }
+
+    func testAnEmbedTallerThanTheCapAtTheTopGivesZero() {
+        let view = settledView("```\nlet x = 1\nlet y = 2\nlet z = 3\n```\n\nafter")
+        XCTAssertEqual(view.height(forWidth: 320, notExceeding: 20), 0)
+    }
+
+    func testACapNeverExceedsTheMaximum() {
+        let view = settledView("a<br>b<br>c<br>d")
+        let full = view.sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)).height
+        for cap in stride(from: 10.3, to: full, by: 3.7) {
+            XCTAssertLessThanOrEqual(view.height(forWidth: 320, notExceeding: cap), cap)
+        }
+    }
 }

@@ -24,6 +24,8 @@ public final class GlimmerView: UIView {
     let textView = GlimmerTextView()
     /// The last `fittingWidth(maximum:)` answer, valid while the text is unchanged.
     private var fittedWidth: (version: Int, maximum: CGFloat, width: CGFloat)?
+    /// The last capped-height answer, valid while the text, width and cap are unchanged.
+    private var cappedHeight: (version: Int, width: CGFloat, maximum: CGFloat, height: CGFloat)?
     let revealMask = GlimmerRevealMask()
     private let viewportTracker = GlimmerViewportTracker()
     /// The reveal's time source; tests substitute a manual clock.
@@ -165,14 +167,18 @@ public final class GlimmerView: UIView {
     public func height(forWidth width: CGFloat, notExceeding maximum: CGFloat) -> CGFloat {
         let full = height(forWidth: width)
         guard full > maximum, textView.textStorage.length > 0 else { return full }
+        if let cached = cappedHeight, cached.version == textView.textVersion, cached.width == width, cached.maximum == maximum {
+            return cached.height
+        }
         let inset = textView.textContainerInset
         let measurer = GlimmerTextMeasurer(
             text: NSAttributedString(attributedString: textView.textStorage), width: width, insets: inset,
             lineFragmentPadding: textView.textContainer.lineFragmentPadding
         )
         let limit = maximum - inset.bottom
-        guard let bottom = measurer.lineBottoms.last(where: { $0 <= limit }) else { return 0 }
-        return ceil(bottom + inset.bottom)
+        let capped = measurer.lineBottoms.last(where: { $0 <= limit }).map { min(ceil($0 + inset.bottom), maximum) } ?? 0
+        cappedHeight = (textView.textVersion, width, maximum, capped)
+        return capped
     }
 
     public override var intrinsicContentSize: CGSize {
