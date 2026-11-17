@@ -55,8 +55,15 @@ final class GlimmerInlineAttachment: NSTextAttachment {
             view.accessibilityLabel = token.displayText
         }
         view.isAccessibilityElement = true
-        cachedView = view
-        return view
+        guard token.isTappable else {
+            cachedView = view
+            return view
+        }
+        // The spoken-only link after the chip carries VoiceOver and the tap, so the chip stays out of its way.
+        view.accessibilityElementsHidden = true
+        let host = GlimmerChipTapView(content: view, token: token, attachment: self)
+        cachedView = host
+        return host
     }
 }
 

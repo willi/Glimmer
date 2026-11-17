@@ -297,6 +297,20 @@ public final class GlimmerView: UIView {
         return (textView.textStorage.attribute(.glimmerToken, at: index, effectiveRange: nil) as? GlimmerTokenBox)?.token
     }
 
+    /// Whether the chip with this attachment is revealed. A chip the text doesn't hold counts as revealed.
+    func hasRevealed(_ attachment: NSTextAttachment) -> Bool {
+        guard let engine else { return true }
+        let storage = textView.textStorage
+        var location: Int?
+        storage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: storage.length)) { value, range, stop in
+            if (value as? NSTextAttachment) === attachment {
+                location = range.location
+                stop.pointee = true
+            }
+        }
+        return location.map { $0 < engine.revealedLength } ?? true
+    }
+
     /// What a tap on the token at `index` does, or nil when the host doesn't handle token taps.
     func tokenAction(atCharacter index: Int) -> UIAction? {
         guard onTokenTap != nil, token(atCharacter: index) != nil else { return nil }
